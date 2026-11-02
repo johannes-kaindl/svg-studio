@@ -1,0 +1,8 @@
+node_modules/
+main.js
+.claude/
+.remember/
+.superpowers/
+data.json
+*.log
+.gui-smoke.mjs
