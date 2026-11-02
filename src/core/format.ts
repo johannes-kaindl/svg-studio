@@ -1,15 +1,18 @@
 // Formatierer: Werte, die nur beim ersten Erzeugen oder beim Öffnen gesetzt werden. Pure.
 // Wie `changes.ts` rührt jede Funktion nur die betroffenen Spannen an; alles andere bleibt byte-gleich.
 import { applySpans, attrAppendSpan, type TextSpan } from "./changes";
-import { scanElements } from "./elements";
+import { scanElements, type ScanIssue } from "./elements";
 
 /**
  * Vergibt `<tag>-<n>` an Elemente ohne `id` (n zählt je Tag, belegte ids und Schlüssel werden übersprungen).
  * NUR für das erste Erzeugen: danach sind ids stabil und werden nie umnummeriert.
  * Wurzel, `style`, `title` und `desc` (feste Schlüssel) bekommen keine.
+ * Hat der Text Scan-Befunde (etwa ein unquotiertes `id=x`, das nicht in `attrs` steht), bleibt er unverändert und die
+ * Befunde stehen in `issues`: sonst würde ein zweites `id` danebengesetzt.
  */
-export function assignMissingIds(text: string): { text: string; assigned: string[] } {
-  const { elements } = scanElements(text);
+export function assignMissingIds(text: string): { text: string; assigned: string[]; issues?: ScanIssue[] } {
+  const { elements, issues } = scanElements(text);
+  if (issues.length > 0) return { text, assigned: [], issues };
   const taken = new Set<string>();
   for (const e of elements) {
     taken.add(e.key);

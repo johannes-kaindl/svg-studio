@@ -23,6 +23,14 @@ describe("assignMissingIds", () => {
     expect(r.text).toBe(`<svg><rect id="rect-1"/></svg>`);
   });
 
+  it("lässt Text mit Scan-Befunden unverändert und meldet sie", () => {
+    const t = `<svg><rect id=x/><circle/></svg>`;
+    const r = assignMissingIds(t);
+    expect(r.text).toBe(t);
+    expect(r.assigned).toEqual([]);
+    expect(r.issues?.length).toBeGreaterThan(0);
+  });
+
   it("lässt vollständigen Text byte-gleich", () => {
     const t = `<svg>\r\n  <rect id="a"/>\r\n</svg>`;
     expect(assignMissingIds(t)).toEqual({ text: t, assigned: [] });

@@ -52,10 +52,14 @@ describe("applyChanges: Attribute", () => {
   });
 
   it("hängt ein Attribut an ein Element ohne Attribute", () => {
+    const t = `<svg><style></style></svg>`;
+    expect(ok(t, [{ op: "change", id: "#style-1", attrs: { type: "text/css" } }])).toBe(`<svg><style type="text/css"></style></svg>`);
+  });
+
+  it("lehnt Positionsschlüssel (@N) ab, weil sie nicht stabil sind", () => {
     const t = `<svg><g></g></svg>`;
-    const g = scanElements(t).elements.find((e) => e.tag === "g")!;
-    expect(g.key).toBe("@1");
-    expect(ok(t, [{ op: "change", id: "@1", attrs: { id: "x" } }])).toBe(`<svg><g id="x"></g></svg>`);
+    expect(fail(t, [{ op: "change", id: "@1", attrs: { id: "x" } }]).join(" ")).toContain("@1");
+    expect(fail(PLAN, [{ op: "add", parent: "w", after: "@2", markup: `<rect id="t"/>` }]).join(" ")).toContain("@2");
   });
 
   it("escaped Werte, bei einfachen Anführungszeichen mit &apos;", () => {
@@ -88,8 +92,8 @@ describe("applyChanges: Zeilenenden", () => {
     const out = ok(crlf, [{ op: "add", parent: "w", after: "r", markup: `<rect id="t"\n  x="1"/>` }]);
     expect(out.startsWith("﻿<?xml")).toBe(true);
     expect(out.replace(/\r\n/g, "")).not.toContain("\n");
-    expect(out).toContain(`<rect id="t"\r\n  x="1"/>`);
-    expect(out.length).toBe(crlf.length + `\r\n    <rect id="t"\r\n  x="1"/>`.length);
+    expect(out).toContain(`<rect id="t"\r\n      x="1"/>`);
+    expect(out.length).toBe(crlf.length + `\r\n    <rect id="t"\r\n      x="1"/>`.length);
   });
 });
 
@@ -169,7 +173,8 @@ describe("applyChanges: remove und move", () => {
   });
 
   it("verweigert move in das Element selbst", () => {
-    expect(fail(PLAN, [{ op: "move", id: "w", parent: "r", after: null }]).length).toBeGreaterThan(0);
+    expect(fail(PLAN, [{ op: "move", id: "w", parent: "r", after: null }]).join(" ")).toContain("Ziel liegt im verschobenen Element");
+    expect(fail(PLAN, [{ op: "move", id: "w", parent: "w", after: null }]).join(" ")).toContain("Ziel liegt im verschobenen Element");
     expect(fail(PLAN, [{ op: "move", id: "mond", parent: "w", after: "mond" }]).join(" ")).toContain("mond");
   });
 });
@@ -202,12 +207,102 @@ describe("applyChanges: Schutz", () => {
       { op: "remove", id: "mond" },
       { op: "change", id: "mond", attrs: { r: "1" } },
     ]);
-    expect(problems.join(" ")).toMatch(/überlapp/i);
+    expect(problems.join(" ")).toContain("Änderung 1 und 2 überlappen");
   });
 
   it("lehnt Eingabetext mit Scan-Befunden ab (unquotiertes Attribut)", () => {
     const t = `<svg><rect id="r" fill=red/></svg>`;
     const problems = fail(t, [{ op: "change", id: "r", attrs: { fill: "blue" } }]);
     expect(problems.join(" ")).toContain("fill");
+  });
+});
+
+describe("applyChanges: change zusammen mit move, verschachtelte Entfernungen, Anker", () => {
+  const TREE = [`<svg viewBox="0 0 9 9">`, `  <g id="G">`, `    <rect id="a" x="1"/>`, `    <rect id="b" x="1"/>`, `  </g>`, `  <rect id="c" x="1"/>`, `</svg>`, ``].join("\n");
+
+  it("change und move auf dieselbe id: die Attribute gelten am neuen Ort", () => {
+    const out = ok(TREE, [
+      { op: "change", id: "c", attrs: { x: "2", "data-n": "k" } },
+      { op: "move", id: "c", parent: "G", after: "b" },
+    ]);
+    expect(out).toContain(`    <rect id="b" x="1"/>\n    <rect id="c" x="2" data-n="k"/>\n  </g>`);
+    expect(out.split(`id="c"`).length - 1).toBe(1);
+    expect(out.endsWith(`</g>\n</svg>\n`)).toBe(true);
+    expect(scanElements(out).issues).toEqual([]);
+  });
+
+  it("change und move: auch in umgekehrter Reihenfolge der Liste", () => {
+    const out = ok(TREE, [
+      { op: "move", id: "c", parent: "G", after: null },
+      { op: "change", id: "c", attrs: { x: "2" } },
+    ]);
+    expect(out).toContain(`<g id="G">\n    <rect id="c" x="2"/>\n    <rect id="a"`);
+  });
+
+  it("change auf einen Nachkommen eines verschobenen Elements bleibt abgelehnt", () => {
+    expect(fail(TREE, [
+      { op: "change", id: "a", attrs: { x: "2" } },
+      { op: "move", id: "G", parent: null, after: "c" },
+    ]).join(" ")).toContain("überlappen");
+  });
+
+  it("remove G und remove a (Kind von G) zählt einmal", () => {
+    const out = ok(TREE, [
+      { op: "remove", id: "G" },
+      { op: "remove", id: "a" },
+    ]);
+    expect(out).toBe(TREE.replace(/  <g id="G">[\s\S]*?<\/g>\n/, ""));
+    expect(ok(TREE, [{ op: "remove", id: "a" }, { op: "remove", id: "G" }])).toBe(out);
+  });
+
+  it("dasselbe Element zweimal entfernen ist harmlos", () => {
+    expect(ok(TREE, [{ op: "remove", id: "c" }, { op: "remove", id: "c" }])).toBe(TREE.replace(`  <rect id="c" x="1"/>\n`, ""));
+  });
+
+  it("remove G und move a aus G heraus: eigene Meldung mit beiden Änderungen", () => {
+    const p = fail(TREE, [
+      { op: "remove", id: "G" },
+      { op: "move", id: "a", parent: null, after: "c" },
+    ]).join(" ");
+    expect(p).toContain("Änderung 1");
+    expect(p).toContain("Änderung 2");
+    expect(p).toContain("entfernt");
+    expect(p).not.toContain("überlappen");
+  });
+
+  it("remove X und add hinter X scheitert, ob X allein auf der Zeile steht oder inline", () => {
+    expect(fail(TREE, [
+      { op: "remove", id: "c" },
+      { op: "add", parent: null, after: "c", markup: `<rect id="n"/>` },
+    ]).join(" ")).toContain("Änderung 1 und 2");
+    const inline = `<svg><rect id="a"/><rect id="b"/></svg>`;
+    expect(fail(inline, [
+      { op: "remove", id: "a" },
+      { op: "add", parent: null, after: "a", markup: `<rect id="n"/>` },
+    ]).join(" ")).toContain("Änderung 1 und 2");
+  });
+
+  it("ein verschobenes Element taugt nicht als Anker", () => {
+    expect(fail(TREE, [
+      { op: "move", id: "b", parent: null, after: "c" },
+      { op: "add", parent: "G", after: "b", markup: `<rect id="n"/>` },
+    ]).join(" ")).toContain("Änderung 1 und 2");
+  });
+
+  it("move hinter einen Anker wiederholt: Listenreihenfolge bleibt", () => {
+    const out = ok(TREE, [
+      { op: "move", id: "a", parent: null, after: "c" },
+      { op: "move", id: "b", parent: null, after: "c" },
+    ]);
+    expect(out.indexOf(`id="a"`)).toBeGreaterThan(out.indexOf(`id="c"`));
+    expect(out.indexOf(`id="b"`)).toBeGreaterThan(out.indexOf(`id="a"`));
+  });
+
+  it("rückt mehrzeiliges Markup an der Einrückung des Ankers ein", () => {
+    const markup = `<g id="n">\n  <rect id="n1"/>\n</g>`;
+    const out = ok(TREE, [{ op: "add", parent: "G", after: "a", markup }]);
+    expect(out).toContain(`    <rect id="a" x="1"/>\n    <g id="n">\n      <rect id="n1"/>\n    </g>\n    <rect id="b"`);
+    const crlf = TREE.replace(/\n/g, "\r\n");
+    expect(ok(crlf, [{ op: "add", parent: "G", after: "a", markup }])).toContain(`    <g id="n">\r\n      <rect id="n1"/>\r\n    </g>\r\n`);
   });
 });
