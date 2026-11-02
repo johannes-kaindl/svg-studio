@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { applyChanges, type SvgChange } from "../../src/core/changes";
+import { applyChanges, applySpans, roundTripProblems, type SvgChange } from "../../src/core/changes";
 import { scanElements } from "../../src/core/elements";
 
 // Ein Grundriss mit Kommentar, Leerzeile und Einrückung: alles, was nicht angefasst wird, muss byte-gleich bleiben.
@@ -304,5 +305,83 @@ describe("applyChanges: change zusammen mit move, verschachtelte Entfernungen, A
     expect(out).toContain(`    <rect id="a" x="1"/>\n    <g id="n">\n      <rect id="n1"/>\n    </g>\n    <rect id="b"`);
     const crlf = TREE.replace(/\n/g, "\r\n");
     expect(ok(crlf, [{ op: "add", parent: "G", after: "a", markup }])).toContain(`    <g id="n">\r\n      <rect id="n1"/>\r\n    </g>\r\n`);
+  });
+});
+
+describe("applyChanges: Wohlgeformtheit und Eltern (Abschlussreview)", () => {
+  const BASE = `<svg xmlns="http://www.w3.org/2000/svg">\n  <g id="w">\n    <rect id="r" x="1"/>\n    <rect id="s"/>\n  </g>\n</svg>`;
+  const add = (markup: string): SvgChange[] => [{ op: "add", parent: "w", after: "r", markup }];
+
+  it("add-Markup mit doppeltem Attribut, fehlendem Leerraum, rohem <, Tag 1rect oder &nbsp; scheitert", () => {
+    for (const m of [`<rect id="a" id="b"/>`, `<rect id="a"x="1"/>`, `<rect id="a" x="<"/>`, `<1rect id="a"/>`, `<text id="a">&nbsp;</text>`]) {
+      expect(fail(BASE, add(m)).length, m).toBeGreaterThan(0);
+    }
+  });
+
+  it("add-Markup mit Steuerzeichen scheitert", () => {
+    expect(fail(BASE, add(`<rect id="a" data-x="a\u0001b"/>`)).join(" ")).toContain("Steuerzeichen");
+  });
+
+  it("add-Markup muss genau EIN Element sein, das den ganzen Text füllt", () => {
+    expect(fail(BASE, add(`<rect id="p"/><rect id="q"/>`)).join(" ")).toContain("genau ein");
+    expect(fail(BASE, add(`text<rect id="p"/>`)).join(" ")).toContain("genau ein");
+    expect(fail(BASE, add(`<rect id="p"/>text`)).join(" ")).toContain("genau ein");
+    expect(fail(BASE, add(`<g id="p">`)).length).toBeGreaterThan(0);
+    expect(ok(BASE, add(`  <g id="p"><rect id="q"/></g>\n`))).toContain(`<g id="p"><rect id="q"/></g>`);
+  });
+
+  it("Markup, das den Elternknoten schließt und ein Geschwister umhängt, scheitert", () => {
+    expect(fail(BASE, add(`<g id="x"/></g><g id="y">`)).length).toBeGreaterThan(0);
+  });
+
+  // Der Markup-Check fängt diesen Weg schon vor dem Wächter; der Wächter wird deshalb direkt mit einer erfundenen
+  // Spanne gefahren (Mutationsprobe 1(b)): `s` wandert ohne `move` unter ein neues Element.
+  it("Wächter: ein unbewegtes Original-Geschwister behält seinen Elternknoten", () => {
+    const els = scanElements(BASE).elements;
+    const r = els.find((e) => e.key === "r")!;
+    const spans = [{ from: r.end, to: r.end, insert: `<g id="x"/></g><g id="y">`, op: 1 }];
+    const out = applySpans(BASE, spans);
+    expect(scanElements(out).issues).toEqual([]);
+    const problems = roundTripProblems(out, spans, new Map(), els.length + 2, { elements: els, removed: new Set(), moved: new Set() });
+    expect(problems.join(" ")).toContain("Elternknoten");
+    expect(problems.join(" ")).toContain('"s"');
+  });
+
+  it("change-Wert mit Steuerzeichen scheitert, Tab/LF/CR werden als Zeichenreferenz geschrieben und kommen zurück", () => {
+    expect(fail(BASE, [{ op: "change", id: "r", attrs: { "data-x": "a\u0001b" } }]).join(" ")).toContain("Steuerzeichen");
+    expect(fail(BASE, [{ op: "change", id: "r", attrs: { "data-x": "a\u0000b" } }]).length).toBeGreaterThan(0);
+    const out = ok(BASE, [{ op: "change", id: "r", attrs: { "aria-label": "a\tb\nc\rd" } }]);
+    expect(out).toContain(`aria-label="a&#9;b&#10;c&#13;d"`);
+    const el = scanElements(out).elements.find((e) => e.key === "r")!;
+    expect(el.attrs.find((a) => a.name === "aria-label")!.value).toBe("a\tb\nc\rd");
+  });
+
+  it("Schreibweg-Vertrag steht im Kopfkommentar", () => {
+    const src = readFileSync(new URL("../../src/core/changes.ts", import.meta.url), "utf8");
+    expect(src).toContain("Der Schreibweg (Plan 2) prüft das Ergebnis vor dem Schreiben per DOMParser auf Wohlgeformtheit (nicht den ganzen svg-guard).");
+  });
+});
+
+describe("applyChanges: doppelte ids (Spec § 6.2)", () => {
+  const DUP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">\n  <rect id="a"/>\n  <rect id="a"/>\n  <circle id="c" r="1"/>\n</svg>`;
+
+  it("ändert ein unbeteiligtes Element, obwohl anderswo eine id doppelt vorkommt", () => {
+    expect(ok(DUP, [{ op: "change", id: "c", attrs: { r: "2" } }])).toContain(`<circle id="c" r="2"/>`);
+    expect(ok(DUP, [{ op: "add", parent: null, after: "c", markup: `<g id="n"/>` }])).toContain(`<g id="n"/>`);
+  });
+
+  it("ein Ziel auf die doppelte id bleibt mehrdeutig", () => {
+    expect(fail(DUP, [{ op: "change", id: "a", attrs: { x: "1" } }]).join(" ")).toContain("mehrdeutig");
+  });
+
+  it("Wächter: nur NEUE doppelte ids scheitern", () => {
+    expect(fail(DUP, [{ op: "add", parent: null, after: "c", markup: `<g id="c"/>` }]).join(" ")).toContain("doppelt");
+    expect(fail(DUP, [{ op: "change", id: "c", attrs: { id: "a" } }]).join(" ")).toContain("doppelt");
+    // eine dritte Kopie einer schon doppelten id ist neu
+    expect(fail(DUP, [{ op: "add", parent: null, after: "c", markup: `<g id="a"/>` }]).join(" ")).toContain("doppelt");
+  });
+
+  it("Syntaxfehler im Eingabetext werden weiter abgelehnt", () => {
+    expect(fail(`<svg><rect id="r" fill=red/></svg>`, [{ op: "change", id: "r", attrs: { x: "1" } }]).join(" ")).toContain("nicht sauber lesbar");
   });
 });

@@ -3,11 +3,15 @@
 //   alle Schlüssel (`id`, `parent`, `after`) beziehen sich auf diesen Text, nie auf Zwischenstände.
 //   Überlappende Spannen scheitern, sonst wird von hinten nach vorn angewendet: alles Übrige bleibt BYTE-GLEICH
 //   (Einrückung, Kommentare, Leerzeilen, BOM, Zeilenenden).
-// - Round-Trip-Wächter: das Ergebnis wird neu gescannt; keine Befunde, passende Elementzahl, jeder gesetzte
-//   Attributwert kommt dekodiert genau so an, jedes eingefügte Element hängt am gemeinten Elternknoten.
+// - Round-Trip-Wächter: das Ergebnis wird neu gescannt; keine Syntaxbefunde, passende Elementzahl, jeder gesetzte
+//   Attributwert kommt dekodiert genau so an, jedes eingefügte Element hängt am gemeinten Elternknoten, und jedes
+//   weder entfernte noch verschobene Originalelement behält seinen Elternknoten. Neue doppelte ids scheitern.
 // - Alles oder nichts: ein Problem → nichts geändert, Liste der Probleme zurück.
-// - Ein Eingabetext mit Scan-Befunden wird abgelehnt: ein unquotiertes Attribut steht nicht in `attrs`, ein
-//   `change` könnte es sonst doppeln.
+// - Ein Eingabetext mit SYNTAX-Befunden wird abgelehnt: ein unquotiertes Attribut steht nicht in `attrs`, ein
+//   `change` könnte es sonst doppeln. Eine doppelte id im Eingabetext blockiert nichts (Spec § 6.2): wer sie
+//   anspricht, bekommt "mehrdeutig"; unbeteiligte Elemente bleiben änderbar.
+// - `add`-Markup muss ohne jeden Befund scannen und aus genau EINEM Element bestehen, das den ganzen getrimmten
+//   Text füllt; sonst ließe sich der Elternknoten schließen und ein Geschwister umhängen.
 // - Zeilenende-Stil wie `block-writer` im Kit: `\r\n` irgendwo im Text → eingefügte Zeilen mit `\r\n`.
 //
 // VERTRAG (gilt für jeden Aufrufer, auch für das Modell):
@@ -20,6 +24,9 @@
 // - `change` und `move` auf dasselbe Element sind erlaubt (die Attribute gelten am neuen Ort); `change` auf
 //   einen Nachkommen eines verschobenen Elements, `remove` eines Elternknotens mit `move` eines Kindes sind es nicht.
 // - Entfernt die Liste ein Element samt Nachkommen, darf sie dessen Nachkommen zusätzlich entfernen (zählt einmal).
+// - Attributwerte dürfen keine Steuerzeichen außer Tab/LF/CR enthalten; diese drei werden als `&#9;`/`&#10;`/`&#13;`
+//   geschrieben (ein wörtlicher Zeilenumbruch würde vom XML-Parser zu einem Leerzeichen normalisiert).
+// - Der Schreibweg (Plan 2) prüft das Ergebnis vor dem Schreiben per DOMParser auf Wohlgeformtheit (nicht den ganzen svg-guard).
 import { attr, scanElements, type SvgElement } from "./elements";
 
 export type SvgChange =
@@ -43,11 +50,28 @@ const ROOT_KEY = "#wurzel";
 const ATTR_NAME = /^[A-Za-z_][A-Za-z0-9_.:-]*$/;
 const isWs = (c: number): boolean => c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09;
 
-/** Wert für ein Attribut mit dem gegebenen Anführungszeichen schreiben (`&`, `<` und das Quote-Zeichen werden Entities). */
+/** C0-Steuerzeichen außer Tab/LF/CR (und U+007F): in XML 1.0 nicht erlaubt. */
+function hasBadControl(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if ((c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) || c === 0x7f) return true;
+  }
+  return false;
+}
+
+/**
+ * Wert für ein Attribut mit dem gegebenen Anführungszeichen schreiben (`&`, `<` und das Quote-Zeichen werden Entities;
+ * Tab/LF/CR werden Zeichenreferenzen). Steuerzeichen außer diesen dreien werfen: sie sind in XML nicht darstellbar,
+ * `applyChanges` meldet sie vorher als Problem.
+ */
 function escapeAttrValue(value: string, quote: '"' | "'"): string {
+  if (hasBadControl(value)) throw new RangeError("Attributwert enthält ein Steuerzeichen, das XML nicht darstellen kann");
   const q = quote === '"' ? "&quot;" : "&apos;";
   let out = "";
-  for (const ch of value) out += ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === quote ? q : ch;
+  for (const ch of value) {
+    out +=
+      ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === quote ? q : ch === "\t" ? "&#9;" : ch === "\n" ? "&#10;" : ch === "\r" ? "&#13;" : ch;
+  }
   return out;
 }
 
@@ -123,8 +147,9 @@ interface Planned extends TextSpan {
 
 export function applyChanges(text: string, changes: readonly SvgChange[]): ApplyResult {
   const scan = scanElements(text);
-  if (scan.issues.length > 0) {
-    return { ok: false, problems: scan.issues.map((i) => `Eingabetext nicht sauber lesbar: ${i.message} (Offset ${i.offset})`) };
+  const syntax = scan.issues.filter((i) => i.kind === "syntax");
+  if (syntax.length > 0) {
+    return { ok: false, problems: syntax.map((i) => `Eingabetext nicht sauber lesbar: ${i.message} (Offset ${i.offset})`) };
   }
   const elements = scan.elements;
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
@@ -173,6 +198,10 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
     for (const [name, value] of Object.entries(c.attrs)) {
       if (!ATTR_NAME.test(name)) {
         problems.push(`${label}: ungültiger Attributname "${name}"`);
+        continue;
+      }
+      if (value !== null && hasBadControl(value)) {
+        problems.push(`${label}: Wert von ${name} enthält ein Steuerzeichen, das XML nicht darstellen kann`);
         continue;
       }
       acc.attrs[name] = value;
@@ -283,7 +312,21 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
         problems.push(`${label}: leeres Markup`);
         return;
       }
-      countDelta += scanElements(markup).elements.length;
+      const ms = scanElements(markup);
+      if (ms.issues.length > 0) {
+        for (const x of ms.issues) problems.push(`${label}: Markup nicht sauber lesbar: ${x.message} (Offset ${x.offset})`);
+        return;
+      }
+      if (hasBadControl(markup)) {
+        problems.push(`${label}: Markup enthält ein Steuerzeichen, das XML nicht darstellen kann`);
+        return;
+      }
+      const tops = ms.elements.filter((e) => e.parentKey === null);
+      if (tops.length !== 1 || tops[0].start !== 0 || tops[0].end !== markup.length) {
+        problems.push(`${label}: Markup muss genau ein Element sein, das den ganzen Text füllt`);
+        return;
+      }
+      countDelta += ms.elements.length;
       if (after !== null) anchors.push({ op, after });
       plantInsert(label, op, parent, after, markup, null, true);
     } else if (c.op === "remove") {
@@ -380,26 +423,61 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
   const out = applySpans(text, spans);
   const wantAttrs = new Map<SvgElement, Record<string, string | null>>();
   for (const [el, m] of merged) wantAttrs.set(el, m.attrs);
-  const guard = roundTripProblems(out, spans, wantAttrs, elements.length + countDelta);
+  const guard = roundTripProblems(out, spans, wantAttrs, elements.length + countDelta, {
+    elements,
+    removed: new Set(removed.keys()),
+    moved: new Set(movedEls.keys()),
+  });
   if (guard.length > 0) return { ok: false, problems: guard };
   return { ok: true, text: out };
 }
 
-/** Round-Trip-Wächter: liest das Ergebnis neu und prüft, dass es sagt, was die Liste gemeint hat. */
-function roundTripProblems(
+/** Elternknoten je Element (Identität statt Schlüssel: Schlüssel können doppelt sein oder sich durch `id`-Änderungen verschieben). */
+function parentMap(elements: readonly SvgElement[]): Map<SvgElement, SvgElement | null> {
+  const parents = new Map<SvgElement, SvgElement | null>();
+  const stack: SvgElement[] = [];
+  for (const e of elements) {
+    while (stack.length > 0 && stack[stack.length - 1].end <= e.start) stack.pop();
+    parents.set(e, stack.length > 0 ? stack[stack.length - 1] : null);
+    stack.push(e);
+  }
+  return parents;
+}
+
+/** Wie oft jede id vorkommt, nur Werte ab zwei. */
+function duplicateIds(elements: readonly SvgElement[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const e of elements) if (e.id !== null) counts.set(e.id, (counts.get(e.id) ?? 0) + 1);
+  for (const [id, n] of counts) if (n < 2) counts.delete(id);
+  return counts;
+}
+
+/**
+ * Round-Trip-Wächter: liest das Ergebnis neu und prüft, dass es sagt, was die Liste gemeint hat.
+ * Nur für Tests exportiert.
+ */
+export function roundTripProblems(
   out: string,
   spans: readonly Planned[],
   merged: ReadonlyMap<SvgElement, Record<string, string | null>>,
   expectedCount: number,
+  originals: { elements: readonly SvgElement[]; removed: ReadonlySet<SvgElement>; moved: ReadonlySet<SvgElement> },
 ): string[] {
   const res = scanElements(out);
-  if (res.issues.length > 0) return res.issues.map((i) => `Ergebnis nicht lesbar: ${i.message} (Offset ${i.offset})`);
+  const syntax = res.issues.filter((i) => i.kind === "syntax");
+  if (syntax.length > 0) return syntax.map((i) => `Ergebnis nicht lesbar: ${i.message} (Offset ${i.offset})`);
   const problems: string[] = [];
   if (res.elements.length !== expectedCount) {
     problems.push(`Ergebnis hat ${res.elements.length} statt der erwarteten ${expectedCount} Elemente`);
   }
+  // Nur NEUE doppelte ids scheitern; was schon vorher doppelt war, bleibt so.
+  const before = duplicateIds(originals.elements);
+  for (const [id, n] of duplicateIds(res.elements)) {
+    if (n > (before.get(id) ?? 1)) problems.push(`id "${id}" wäre im Ergebnis ${n}-mal vergeben (doppelt)`);
+  }
   const atStart = new Map<number, SvgElement>();
   for (const e of res.elements) atStart.set(e.start, e);
+  const parentNowOf = parentMap(res.elements);
   // Ausgangs-Offset in Ergebnis-Offset umrechnen: jede Spanne, die davor endet, verschiebt ihn.
   const mapOffset = (s: number): number => spans.reduce((o, sp) => (sp.to <= s ? o + sp.insert.length - (sp.to - sp.from) : o), s);
 
@@ -435,16 +513,36 @@ function roundTripProblems(
       problems.push(`Eingefügtes Element unter "${ins.parent.key}" fehlt im Ergebnis`);
       continue;
     }
-    if (now.parentKey !== parentNow.key) {
+    if (parentNowOf.get(now) !== parentNow) {
       problems.push(`Eingefügtes Element "${now.key}" hängt nicht unter "${ins.parent.key}"`);
       continue;
     }
     // Davor darf nur das gemeinte `after` stehen oder ein anderes in derselben Liste eingefügtes Element.
-    const sibs = res.elements.filter((e) => e.parentKey === parentNow.key);
+    const sibs = res.elements.filter((e) => parentNowOf.get(e) === parentNow);
     const prev = sibs[sibs.indexOf(now) - 1];
     const wanted = ins.after === null ? undefined : atStart.get(mapOffset(ins.after.start));
     const fine = prev === undefined ? ins.after === null : prev === wanted || insertedStarts.has(prev.start);
     if (!fine) problems.push(`Eingefügtes Element "${now.key}" steht nicht hinter "${ins.after?.key ?? "dem Anfang"}"`);
+  }
+
+  // Jedes Originalelement, das weder entfernt noch verschoben wurde (auch nicht über einen Vorfahren), behält seinen Elternknoten.
+  const parentWas = parentMap(originals.elements);
+  const gone = new Set<SvgElement>();
+  for (const e of originals.elements) {
+    const parent = parentWas.get(e) ?? null;
+    if (originals.removed.has(e) || originals.moved.has(e) || (parent !== null && gone.has(parent))) {
+      gone.add(e);
+      continue;
+    }
+    const now = atStart.get(mapOffset(e.start));
+    if (now === undefined) {
+      problems.push(`Element "${e.key}" fehlt im Ergebnis`);
+      continue;
+    }
+    const wantParent = parent === null ? null : (atStart.get(mapOffset(parent.start)) ?? null);
+    if ((parentNowOf.get(now) ?? null) !== wantParent) {
+      problems.push(`Element "${e.key}" hätte im Ergebnis einen anderen Elternknoten als vorher (erwartet "${parent?.key ?? "keinen"}")`);
+    }
   }
   return problems;
 }

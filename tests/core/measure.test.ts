@@ -35,8 +35,9 @@ describe("measureCanvas", () => {
     expect(measureCanvas(`<svg viewBox="0 0 0 5" width="7" height="9"/>`)).toMatchObject({ source: "size" });
   });
 
-  it("liest Einheiten-Suffix bei width/height", () => {
-    expect(measureCanvas(`<svg width="10cm" height="5cm"/>`)).toMatchObject({ width: 10, height: 5, unit: "cm" });
+  it("liest die Einheit nur aus data-unit, nie aus dem Suffix von width/height", () => {
+    expect(measureCanvas(`<svg width="10cm" height="5cm"/>`)).toMatchObject({ width: 10, height: 5, unit: null });
+    expect(measureCanvas(`<svg width="10cm" height="5cm" data-unit="mm"/>`)).toMatchObject({ unit: "mm" });
     expect(measureCanvas(`<svg width="10px" height="5px"/>`)).toMatchObject({ unit: null });
     expect(measureCanvas(`<svg width="50%" height="5"/>`)).toBeNull();
   });

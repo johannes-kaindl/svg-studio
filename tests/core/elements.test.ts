@@ -161,6 +161,46 @@ describe("scanElements", () => {
     scanElements('<a b="'.repeat(n));
     scanElements("<!--".repeat(n));
     scanElements("<a ".repeat(n));
+    scanElements("&".repeat(n) + "<a>");
+    scanElements('<a b="&x'.repeat(n));
+    scanElements("<a>&amp;".repeat(n));
     expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  it("meldet doppelte id als kind duplicate-id, alles Übrige als syntax", () => {
+    const dup = scanElements(`<svg><rect id="a"/><rect id="a"/></svg>`).issues;
+    expect(dup.map((i) => i.kind)).toEqual(["duplicate-id"]);
+    expect(scanElements(`<svg><rect id=x/></svg>`).issues.every((i) => i.kind === "syntax")).toBe(true);
+  });
+
+  const syntaxIssues = (text: string): string[] => scanElements(text).issues.filter((i) => i.kind === "syntax").map((i) => i.message);
+
+  it("meldet doppelte Attributnamen im selben Tag", () => {
+    expect(syntaxIssues(`<svg><rect id="a" id="b"/></svg>`).join(" ")).toContain("doppelt");
+    expect(syntaxIssues(`<svg><rect x="1" y="2" x="3"/></svg>`).length).toBeGreaterThan(0);
+    expect(syntaxIssues(`<svg><rect x="1" y="2"/></svg>`)).toEqual([]);
+  });
+
+  it("meldet fehlenden Leerraum zwischen Attributen", () => {
+    expect(syntaxIssues(`<svg><rect id="a"x="1"/></svg>`).length).toBeGreaterThan(0);
+    expect(syntaxIssues(`<svg><rect id="a" x="1"/></svg>`)).toEqual([]);
+    expect(syntaxIssues(`<svg><rect id="a"/></svg>`)).toEqual([]);
+  });
+
+  it("meldet ein rohes < im Attributwert", () => {
+    expect(syntaxIssues(`<svg><rect id="a" x="<"/></svg>`).length).toBeGreaterThan(0);
+    expect(syntaxIssues(`<svg><rect id="a" x="&lt;"/></svg>`)).toEqual([]);
+  });
+
+  it("meldet Tag-Namen, die nicht mit Buchstabe, _ oder : beginnen", () => {
+    expect(syntaxIssues(`<svg><1rect id="a"/></svg>`).length).toBeGreaterThan(0);
+    expect(syntaxIssues(`<svg><-x/></svg>`).length).toBeGreaterThan(0);
+    expect(syntaxIssues(`<svg:svg xmlns:svg="u"><_a/><:b/></svg:svg>`)).toEqual([]);
+  });
+
+  it("meldet nicht deklarierte benannte Entities in Werten und Text, nicht die fünf XML-Entities", () => {
+    expect(syntaxIssues(`<svg><text id="a">&nbsp;</text></svg>`).join(" ")).toContain("&nbsp;");
+    expect(syntaxIssues(`<svg><rect id="a" title="a&copy;b"/></svg>`).join(" ")).toContain("&copy;");
+    expect(syntaxIssues(`<svg><text id="a">&amp;&lt;&gt;&quot;&apos;&#65;&#x42;</text></svg>`)).toEqual([]);
   });
 });

@@ -54,4 +54,22 @@ describe("ensureUnit", () => {
   it("verändert Text ohne Wurzel nicht", () => {
     expect(ensureUnit("kein svg", "cm")).toBe("kein svg");
   });
+
+});
+
+describe("doppelte ids und Syntaxbefunde", () => {
+  it("vergibt ids auch neben einer doppelten id anderswo (Spec § 6.2)", () => {
+    const t = `<svg>\n  <rect id="a"/>\n  <rect id="a"/>\n  <circle/>\n</svg>`;
+    const r = assignMissingIds(t);
+    expect(r.issues).toBeUndefined();
+    expect(r.assigned).toEqual(["circle-1"]);
+    expect(r.text).toBe(`<svg>\n  <rect id="a"/>\n  <rect id="a"/>\n  <circle id="circle-1"/>\n</svg>`);
+  });
+
+  it("ensureUnit lässt Text mit Syntaxbefunden unverändert", () => {
+    const t = `<svg data-unit=cm viewBox="0 0 1 1"></svg>`;
+    expect(ensureUnit(t, "cm")).toBe(t);
+    const dup = `<svg viewBox="0 0 1 1"><rect id="a"/><rect id="a"/></svg>`;
+    expect(ensureUnit(dup, "cm")).toBe(`<svg viewBox="0 0 1 1" data-unit="cm"><rect id="a"/><rect id="a"/></svg>`);
+  });
 });

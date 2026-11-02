@@ -20,15 +20,14 @@ function parseViewBox(value: string): { width: number; height: number } | null {
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
-/** Zahl plus optionale Längeneinheit; Prozentangaben und Unsinn ergeben `null`. */
-function parseLength(value: string | null): { n: number; unit: string | null } | null {
+/** Zahl mit optionalem Einheiten-Suffix; die Einheit selbst wird verworfen (sie kommt nur aus `data-unit`). Prozentangaben und Unsinn ergeben `null`. */
+function parseLength(value: string | null): { n: number } | null {
   if (value === null) return null;
   const m = LENGTH.exec(value.trim());
   if (!m) return null;
   const n = Number(m[1]);
   if (!(n > 0)) return null;
-  const unit = m[2].toLowerCase();
-  return { n, unit: unit === "" || unit === "px" ? null : unit };
+  return { n };
 }
 
 export function measureCanvas(text: string): Canvas | null {
@@ -42,6 +41,6 @@ export function measureCanvas(text: string): Canvas | null {
 
   const w = parseLength(attr(root, "width"));
   const h = parseLength(attr(root, "height"));
-  if (w && h) return { width: w.n, height: h.n, unit: dataUnit ?? w.unit, source: "size" };
+  if (w && h) return { width: w.n, height: h.n, unit: dataUnit, source: "size" };
   return null;
 }

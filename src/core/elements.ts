@@ -42,12 +42,17 @@ export interface SvgElement {
 export interface ScanIssue {
   offset: number;
   message: string;
+  /** `duplicate-id`: nur eine doppelte id (Spec § 6.2: wird in Reihenfolge gepaart, blockiert nichts); alles andere ist `syntax`. */
+  kind: "syntax" | "duplicate-id";
 }
 
 const isWs = (c: number): boolean => c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09;
 
 const NUMERIC_ENTITY = /^#(?:x([0-9a-f]{1,6})|([0-9]{1,7}))$/i;
 const NAMED_ENTITIES = new Map<string, string>([["amp", "&"], ["lt", "<"], ["gt", ">"], ["quot", '"'], ["apos", "'"]]);
+const ENTITY_NAME = /^[A-Za-z_:][A-Za-z0-9_.:-]*$/;
+/** Längste benannte Entity, bei der noch nach dem `;` gesucht wird (für die Prüfung auf nicht deklarierte Namen). */
+const MAX_NAMED_ENTITY_LEN = 40;
 /** Längste Entity-Schreibweise, die wir auflösen (`&#x10FFFF;` = 8 Zeichen zwischen & und ;). */
 const MAX_ENTITY_LEN = 9;
 
@@ -130,8 +135,40 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
   let hasTitle = false;
   let hasDesc = false;
 
-  const issue = (offset: number, message: string): void => {
-    issues.push({ offset, message });
+  const issue = (offset: number, message: string, kind: ScanIssue["kind"] = "syntax"): void => {
+    issues.push({ offset, message, kind });
+  };
+  // Eine DOCTYPE-Untermenge mit `<!ENTITY` deklariert eigene Namen; wir lösen sie nicht auf, prüfen dann aber auch nicht.
+  let customEntities = false;
+  // Nächstes "&" ab `from`, ohne bei jedem Aufruf bis ans Textende zu suchen (sonst quadratisch bei vielen Tags ohne "&").
+  let ampFrom = 0;
+  let ampAt = text.indexOf("&");
+  const nextAmp = (from: number): number => {
+    if (from < ampFrom || (ampAt >= 0 && ampAt < from)) {
+      ampFrom = from;
+      ampAt = text.indexOf("&", from);
+    }
+    return ampAt;
+  };
+  /** Meldet `&name;` mit einem Namen außerhalb der fünf XML-Entities (z. B. `&nbsp;`): kein wohlgeformtes XML ohne DTD. */
+  const checkEntities = (from: number, to: number): void => {
+    if (customEntities) return;
+    let amp = nextAmp(from);
+    while (amp >= 0 && amp < to) {
+      const limit = Math.min(to, amp + 2 + MAX_NAMED_ENTITY_LEN);
+      let semi = -1;
+      for (let j = amp + 1; j < limit; j++) {
+        if (text.charCodeAt(j) === 0x3b) {
+          semi = j;
+          break;
+        }
+      }
+      if (semi > 0) {
+        const name = text.slice(amp + 1, semi);
+        if (ENTITY_NAME.test(name) && !NAMED_ENTITIES.has(name)) issue(amp, `Entity &${name}; ist nicht deklariert`);
+      }
+      amp = nextAmp(amp + 1);
+    }
   };
 
   const readStartTag = (lt: number): TagRead => {
@@ -146,7 +183,9 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
       issue(lt, "Tag ohne Namen");
       return { ok: false, resume: lt + 1 };
     }
+    if (!/^[A-Za-z_:]/.test(rawName)) issue(lt, `Tag-Name <${rawName}> beginnt nicht mit Buchstabe, "_" oder ":"`);
     const attrs: AttrSpan[] = [];
+    const seen = new Set<string>();
     while (true) {
       while (i < n && isWs(text.charCodeAt(i))) i++;
       if (i >= n) {
@@ -194,8 +233,14 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
           return { ok: false, resume: n };
         }
         const raw = text.slice(k + 1, close);
+        if (seen.has(name)) issue(nameStart, `Attribut ${name} doppelt im Tag <${rawName}>`);
+        if (raw.includes("<")) issue(k + 1, `Attribut ${name}: rohes "<" im Wert`);
+        checkEntities(k + 1, close);
+        seen.add(name);
         attrs.push({ name, raw, value: decodeEntities(raw), quote, start: nameStart, valueStart: k + 1, valueEnd: close });
         i = close + 1;
+        const after = text.charCodeAt(i);
+        if (i < n && !isWs(after) && after !== 0x2f && after !== 0x3e) issue(i, `Attribut ${name}: kein Leerraum vor dem nächsten Attribut`);
       } else {
         issue(k, `Attribut ${name} ohne Anführungszeichen`);
         while (k < n) {
@@ -215,6 +260,7 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
   let pos = 0;
   while (pos < n) {
     const lt = text.indexOf("<", pos);
+    checkEntities(pos, lt < 0 ? n : lt);
     if (lt < 0) break;
 
     if (text.startsWith("<!--", lt)) {
@@ -246,6 +292,7 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
     }
     if (text.startsWith("<!", lt)) {
       const e = text.startsWith("<!DOCTYPE", lt) ? skipDoctype(text, lt + 9) : text.indexOf(">", lt + 2) + 1;
+      if (e > 0 && text.startsWith("<!DOCTYPE", lt) && text.slice(lt, e).includes("<!ENTITY")) customEntities = true;
       if (e <= 0) {
         issue(lt, "Deklaration nicht geschlossen");
         break;
@@ -313,7 +360,7 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
     // Ein fester Schlüssel schlägt die id (Spec § 5.1); die id bleibt im Feld `id`.
     const key = fixed ?? id ?? `@${++fallbackCount}`;
     if (id !== null) {
-      if (ids.has(id)) issue(lt, `id "${id}" doppelt`);
+      if (ids.has(id)) issue(lt, `id "${id}" doppelt`, "duplicate-id");
       ids.add(id);
     }
 
