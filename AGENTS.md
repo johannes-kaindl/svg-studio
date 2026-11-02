@@ -1,4 +1,4 @@
-# AGENTS.md
+# AGENTS — svg-studio
 
 Orientierung für KI-Agenten (Claude Code, Codex, …) und Mitwirkende an diesem Repository.
 
@@ -8,37 +8,64 @@ Orientierung für KI-Agenten (Claude Code, Codex, …) und Mitwirkende an diesem
 
 ## Project character
 
-Obsidian-Plugin `svg-studio` („SVG Studio") von Johannes Kaindl, Stand: gerade angelegt, nicht veröffentlicht. Der Nutzer beschreibt ein Icon, Logo, Schema oder einen Grundriss in Worten und bekommt ein echtes, exaktes SVG in seine Notiz; danach verbessert er es in Runden (Prompt oder Zahlenfelder, Element-Diff mit Annehmen/Ablehnen). Die 2D-Schwester von `3d-codeblocks`; Endpunkte und Modelle kommen vom Kit (`llm-endpoint-manager`), das Plugin trägt keine eigenen Schlüssel. Die Spec liegt im Coding-Cockpit des Maintainers: `25_Coding/svg-studio/_SDD/2026-11-02-svg-studio-design.md` (vault-relativ, maintainer-lokal); der Bauplan daneben als `…-plan-1-vorlauf-und-fachkern.md`.
+Obsidian-Plugin `svg-studio` („SVG Studio“) von Johannes Kaindl, nicht veröffentlicht. Der Nutzer beschreibt ein Icon, Logo, Schema oder einen Grundriss in Worten und bekommt ein echtes, exaktes SVG in seine Notiz; danach verbessert er es in Runden, per Prompt oder an einzelnen Zahlen, und nimmt jede Änderung eines Elements einzeln an oder lehnt sie ab. Die 2D-Schwester von `3d-codeblocks`. Endpunkte und Modelle kommen über das Kit (`llm-endpoint-manager`), das Plugin trägt keine eigenen Schlüssel.
+
+Stand 2026-11-02: Plan 1 ist abgeschlossen (Fachkern pure in `src/core/`, Messung lokaler Modelle). Das Plugin selbst ist noch ein Gerüst (`src/main.ts` lädt nichts). Plan 2 (Diff, Protokoll, Rendern, Panel) ist für Welle 30 eingeplant. Spec, Pläne, Messnote und Tasks liegen im Coding-Cockpit des Maintainers unter `25_Coding/svg-studio/` (vault-relativ, maintainer-lokal, `$CODING_COCKPIT_VAULT`).
+
+## Architecture principles
+
+- **Echtes SVG ist die Quelle**, keine eigene 2D-Sprache (Spec Nr. 1, durch die Messung bestätigt). Jedes Element unter der Wurzel trägt eine `id`; Diff, Zahlenfelder und die spätere 3D-Übergabe hängen daran.
+- **Byte-treu ändern:** Änderungen sind Spannen-Ersetzungen gegen den **aktuellen** Text, alles oder nichts, mit Round-Trip-Wächter. Was nicht betroffen ist, bleibt Byte für Byte gleich; eine Handänderung geht nie verloren.
+- **Fremdes SVG nur geprüft in den DOM:** Der Bereiniger `svg-guard` (code-kit) lehnt ab statt zu entfernen. Bei Erfolg liefert er den geprüften Baum (`{ ok: true, svg }`); eingefügt wird **genau dieser Baum** per `importNode`/`adoptNode`, nie der Text per `innerHTML` (Parser-Differenz HTML gegen XML).
+- **Pure-Core-Trennung:** `src/core/` bleibt Obsidian-, DOM- und node-frei (`npm run check:pure`).
+- **Bibliothek ab Eins (Kit-first):** Wiederverwendbares liegt von Anfang an in `obsidian-kit` bzw. `code-kit`; eine neue reine Funktion ohne plugin-eigenen Typ geht durchs Bibliothek-Gate des Dachs.
+- Aufbau und Warum: `docs/internal/architecture.md`, `docs/internal/decisions.md`.
 
 ## Commands
 
 ```bash
-npm run dev        # esbuild im Watch-/Dev-Modus
-npm run build      # Typecheck + Production-Bundle
+npm run gate       # lint + typecheck + typecheck:test + test + check:pure + check:bundle
 npm test           # Pfad-Guard + NUL-Guard + vitest run
 npm run lint       # eslint src (0 Warnungen erlaubt)
-npm run gate       # lint + typecheck(+test) + test + check:pure + check:bundle
+npm run dev        # esbuild im Watch-/Dev-Modus
+npm run build      # Typecheck + Production-Bundle
 npm run deploy     # build + Kopie nach $OBSIDIAN_PLUGIN_DIR
-npm run release    # Release via ../tools/release/ (braucht das Dach-Verzeichnis)
+npm run lab -- --status          # Messlabor (außerhalb des Gates), siehe docs/internal/LAB.md
 sh tools/sync-kit.sh [--check]   # Kit vendoren bzw. Drift messen
 ```
 
+Release-Infra und GitHub-Mirror kommen erst mit dem ersten Release (Skill `plugin-release-setup`, `npm run release` braucht das Dach).
+
 ## Conventions
 
-- Conventional Commits, deutsche Beschreibung erlaubt. Nur berührte Dateien stagen.
-- Pure-Core-Trennung: `src/core/` bleibt Obsidian-frei (`npm run check:pure` erzwingt das); Tests mit vitest. Ein Test mit DOM setzt `// @vitest-environment happy-dom` in die Kopfzeile.
-- **Bibliothek ab Eins (Kit-first):** Wiederverwendbares liegt von Anfang an in `obsidian-kit` bzw. `code-kit`. Der SVG-Bereiniger (`svg-guard`) kommt aus code-kit, nicht aus einer Plugin-Kopie. Vor einer neuen Hilfsfunktion `../REGISTRY.md` und `python3 ../tools/funktionsinventur/naehte_suche.py <wörter>` prüfen.
-- **`src/vendor/` ist ein Verbatim-Snapshot aus `obsidian-kit` und `code-kit`** — nie von Hand editieren, sondern `sh tools/sync-kit.sh` fahren (Wrapper auf `../tools/kit-sync/kit-sync.mjs`; Quellen, Pins und Zielordner stehen in `tools/kit-sync.json`). Bricht ein Kit-Modul hier, gehört der Fix ins Kit und danach ein erneutes Vendoring.
+- Conventional Commits, deutsche Beschreibung erlaubt. Nur berührte Dateien stagen, per Pathspec.
+- Ein Test mit DOM setzt `// @vitest-environment happy-dom` in die Kopfzeile. happy-dom parst anders als Chromium: für Sicherheits- und Parserfragen zählt der Lauf im echten Chromium (code-kit `npm run check:svg-guard-chromium`).
+- **`src/vendor/` ist ein Verbatim-Snapshot** aus `code-kit` (heute `svg-guard`, `safe-markdown`, Pin 0.45.0) und `obsidian-kit` (Pin 0.75.0) — nie von Hand editieren, sondern `sh tools/sync-kit.sh` fahren (Quellen, Pins und Zielordner in `tools/kit-sync.json`). Bricht ein Kit-Modul hier, gehört der Fix ins Kit.
+- Vor einer neuen Hilfsfunktion `../REGISTRY.md` und `python3 ../tools/funktionsinventur/naehte_suche.py <wörter>` prüfen.
+- Specs, Pläne, Messnoten und Task-Reports gehören ins Cockpit (`25_Coding/svg-studio/_SDD/`), nicht ins Repo (CORE-META-14).
 
 ## Gotchas
 
-- Der Pin `code-kit` 0.45.0 in `tools/kit-sync.json` zeigt auf einen Tag, der mit dem Kit-Release entsteht; vorher ist `src/vendor/` leer und darf nichts importieren.
-- Fremdes SVG nie ungeprüft in den DOM: erst durch den Bereiniger (`svg-guard`), der ablehnt statt zu entfernen (Spec § 3 und § 5).
-- Nie im Repo: absolute Pfade außerhalb des Repos (`/Users/…`, Vault-Pfade) — Platzhalter nutzen (`$VAULT/…`, repo-relativ). Gate: `scripts/check-no-abs-paths.mjs` (Teil von `npm test`).
+- **Schlüssel in einer Änderungsliste beziehen sich auf den Ausgangstext.** Ein in derselben Liste hinzugefügtes oder verschobenes Element ist kein Anker; `@n`-Schlüssel nimmt `applyChanges` nicht an (erst `assignMissingIds`). `change` auf einem Nachfahren eines verschobenen Elements lehnt `applyChanges` heute noch ab — erster Schritt von Plan 2. Vertrag im Kopfkommentar von `src/core/changes.ts`.
+- **svg-guard lehnt ab, was Modelle gelegentlich schreiben:** CSS-Kommentare `/*` in `<style>`, `<a>`, `<image>`, Inkscape-Namensräume (`sodipodi:`, `inkscape:`), jeden Backslash in Attributen oder CSS. Das ist Kit-Vertrag, kein Fehler im Plugin.
+- **Messlabor lädt große lokale Modelle:** vorher Netzteil und Last prüfen und Johannes fragen, Modell per `lms load` mit festem Kontext laden (nicht per JIT), danach sofort entladen. Details `docs/internal/LAB.md`.
+- Nie im Repo: absolute Pfade außerhalb des Repos (`/Users/…`, Vault-Pfade) — Platzhalter nutzen (`$CODING_COCKPIT_VAULT`, repo-relativ). Gate: `scripts/check-no-abs-paths.mjs` (Teil von `npm test`).
 
 ## Context index
 
-- Vor jeder Änderung am Verhalten: die Spec im Cockpit (Pfad oben), besonders § 3 „Was nicht passieren darf" und § 5 „Der SVG-Vertrag".
+- Vor jeder Änderung am Verhalten: die Spec im Cockpit (Note „2026-11-02-svg-studio-design“ in _SDD), besonders § 3 „Was nicht passieren darf“ und § 5 „Der SVG-Vertrag“.
+- Vor Arbeit an Plan 2 oder dem Panel: Cockpit-Task „Plan 2 schreiben — Diff, Protokoll, Rendern, Panel“ (alle Eingänge aus Plan 1) und die Messnote (Note „2026-11-02-svg-studio-messung“ in _SDD).
+- Vor Änderungen an Modul-Layout oder Datenfluss: `docs/internal/architecture.md`.
+- Bevor du eine Altentscheidung (echtes SVG, Antwortform, Codeblock-Sprache, Ablage, Bereiniger lehnt ab) übernimmst: `docs/internal/decisions.md`.
+- Vor einem Messlauf mit lokalen Modellen: `docs/internal/LAB.md`.
 - Vor UI-Arbeit: `../UI-STANDARD.md` und `../.claude/rules/ui-bausteine.md`.
-- Vor einem Release: `../.claude/rules/release-und-store.md`, Skill `plugin-release-setup` (Release-Infra und GitHub-Mirror kommen erst mit dem ersten Release).
+- Vor einem Release: `../.claude/rules/release-und-store.md`, Skill `plugin-release-setup`.
 - Dach-Kontext: `../AGENTS.md` (Kit-first-Regel), `../REGISTRY.md`, `../KIT-MATRIX.md`.
+
+## Memory
+
+Projekt-Memory unter `~/.claude/projects/<slug>/memory/` mit `MEMORY.md`-Index. Lesestoff für Johannes gehört ins Cockpit (`25_Coding/svg-studio/`), nicht ins Memory.
+
+## Abweichungen von der Leitkonvention
+
+- CORE-META-03/04 (Bilder, Nutzer-Doku nach Diátaxis) und CORE-META-11 (Uplink-Seite): offen bis zum ersten Release; das Plugin hat noch keine Oberfläche.
