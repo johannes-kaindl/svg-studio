@@ -1,0 +1,345 @@
+{
+ "hinweis": "Fallliste für scripts/svg-lab.ts (Spec § 10). `kind`/`slug` nur zur Lesbarkeit. `messen` prüft die Ausdehnung benannter Elemente per getBBox (w/h in Einheiten = cm, Toleranz 1) bzw. Länge/Winkel einer Linie aus den Endpunkten (Toleranz 1 Einheit/1°). `erlaubt` beschreibt beim Verfeinern, was die Anweisung ändern darf; alles andere zählt als nicht verlangt (Heuristik in svg-lab.ts). `prueft` sind Erfüllt-Prüfungen in der Browserseite. `attrs` einer Regel: Attributnamen oder Klassen (`@geometrie`, `@farbe`); `ids` ist ein regulärer Ausdruck gegen den Schlüssel (id bzw. #wurzel), `tags` eine Liste lokaler Elementnamen.",
+ "erzeugen": [
+  {
+   "id": "E1",
+   "slug": "mond",
+   "art": "icon",
+   "prompt": "Erzeuge ein Icon: Mond als Sichel, 24 × 24."
+  },
+  {
+   "id": "E2",
+   "slug": "zahnrad",
+   "art": "icon",
+   "prompt": "Erzeuge ein Icon: Zahnrad mit 8 Zähnen."
+  },
+  {
+   "id": "E3",
+   "slug": "umschlag",
+   "art": "icon",
+   "prompt": "Erzeuge ein Icon: Briefumschlag, Strichstärke 2."
+  },
+  {
+   "id": "E4",
+   "slug": "wortmarke",
+   "art": "logo",
+   "prompt": "Erzeuge ein Logo: die Wortmarke „Order from Traces“ plus ein Kreis."
+  },
+  {
+   "id": "E5",
+   "slug": "jk-quadrat",
+   "art": "logo",
+   "prompt": "Erzeuge ein Logo: die Initialen „JK“ in einem Quadrat mit Eckenradius 8."
+  },
+  {
+   "id": "E6",
+   "slug": "kaesten-abc",
+   "art": "schema",
+   "prompt": "Erzeuge ein Schema: drei Kästen A → B → C, mit Pfeilen dazwischen. Jeder Kasten trägt seinen Buchstaben (A, B, C) als Text."
+  },
+  {
+   "id": "E7",
+   "slug": "pi-router-nas",
+   "art": "schema",
+   "prompt": "Erzeuge ein Schema: Raspberry Pi an Router an NAS."
+  },
+  {
+   "id": "E8",
+   "slug": "raum-420",
+   "art": "grundriss",
+   "prompt": "Erzeuge einen Grundriss: ein Raum von 420 × 385 cm (Breite × Tiefe), mit einer Tür von 90 cm Breite in der Nordwand. Der Raum ist ein Rechteck mit der id `raum`, die vier Wände sind Linien mit den ids `wand-nord`, `wand-ost`, `wand-sued` und `wand-west` (entlang der Raumkanten), die Tür ist ein Rechteck mit der id `tuer`.",
+   "messen": {
+    "raum": {
+     "w": 420,
+     "h": 385
+    },
+    "wand-nord": {
+     "w": 420
+    },
+    "wand-ost": {
+     "h": 385
+    },
+    "wand-sued": {
+     "w": 420
+    },
+    "wand-west": {
+     "h": 385
+    },
+    "tuer": {
+     "w": 90
+    }
+   }
+  },
+  {
+   "id": "E9",
+   "slug": "zwei-raeume",
+   "art": "grundriss",
+   "prompt": "Erzeuge einen Grundriss: zwei Räume nebeneinander, der linke 300 × 400 cm, der rechte 250 × 400 cm (Breite × Tiefe), mit einer gemeinsamen Trennwand. Die Räume sind Rechtecke mit den ids `raum-links` und `raum-rechts`, die Wände sind Linien mit den ids `wand-nord` und `wand-sued` (je über beide Räume), `wand-west`, `wand-ost` und `wand-trennung`.",
+   "messen": {
+    "raum-links": {
+     "w": 300,
+     "h": 400
+    },
+    "raum-rechts": {
+     "w": 250,
+     "h": 400
+    },
+    "wand-nord": {
+     "w": 550
+    },
+    "wand-sued": {
+     "w": 550
+    },
+    "wand-west": {
+     "h": 400
+    },
+    "wand-ost": {
+     "h": 400
+    },
+    "wand-trennung": {
+     "h": 400
+    }
+   }
+  },
+  {
+   "id": "E10",
+   "slug": "schraege-ostwand",
+   "art": "grundriss",
+   "prompt": "Erzeuge einen Grundriss: ein Raum mit schräger Ostwand. Die Südwand ist 400 cm lang, die Nordwand 300 cm, die Höhe (Nord–Süd) beträgt 350 cm, die Westwand steht senkrecht. Der Raum ist ein Polygon mit der id `raum`, die Wände sind Linien mit den ids `wand-nord`, `wand-sued`, `wand-west` und `wand-ost`; `wand-ost` ist die Schräge.",
+   "messen": {
+    "raum": {
+     "w": 400,
+     "h": 350
+    },
+    "wand-nord": {
+     "w": 300
+    },
+    "wand-sued": {
+     "w": 400
+    },
+    "wand-west": {
+     "h": 350
+    },
+    "wand-ost": {
+     "laenge": 364.005,
+     "winkel": 74.05
+    }
+   }
+  }
+ ],
+ "verfeinern": [
+  {
+   "id": "V1",
+   "basis": "E1",
+   "prompt": "Mache den Mond 1,5-mal so groß.",
+   "erlaubt": {
+    "change": [
+     {
+      "attrs": [
+       "@geometrie",
+       "stroke-width"
+      ]
+     },
+     {
+      "attrs": [
+       "viewBox",
+       "width",
+       "height"
+      ],
+      "ids": "^#wurzel$"
+     }
+    ],
+    "add": false,
+    "remove": false
+   },
+   "prueft": [
+    {
+     "art": "skala",
+     "faktor": 1.5,
+     "toleranz": 0.15
+    }
+   ]
+  },
+  {
+   "id": "V2",
+   "basis": "E5",
+   "prompt": "Setze die Farbe der Initialen auf #2a6f97.",
+   "erlaubt": {
+    "change": [
+     {
+      "attrs": [
+       "@farbe"
+      ],
+      "tags": [
+       "text",
+       "tspan",
+       "path",
+       "g"
+      ]
+     }
+    ],
+    "add": false,
+    "remove": false
+   },
+   "prueft": [
+    {
+     "art": "farbe",
+     "wert": "#2a6f97"
+    }
+   ]
+  },
+  {
+   "id": "V3",
+   "basis": "E8",
+   "prompt": "Verschiebe die Tür um 20 cm nach links.",
+   "erlaubt": {
+    "change": [
+     {
+      "attrs": [
+       "@geometrie"
+      ],
+      "ids": "^tuer"
+     }
+    ],
+    "add": false,
+    "remove": false
+   },
+   "prueft": [
+    {
+     "art": "verschiebung",
+     "id": "tuer",
+     "dx": -20,
+     "dy": 0
+    }
+   ]
+  },
+  {
+   "id": "V4",
+   "basis": "E8",
+   "prompt": "Füge ein Fenster von 120 cm Breite mittig in die Südwand ein. Das Fenster ist ein Rechteck mit der id `fenster`.",
+   "erlaubt": {
+    "add": true,
+    "remove": false
+   },
+   "prueft": [
+    {
+     "art": "fenster",
+     "id": "fenster",
+     "breite": 120,
+     "wand": "wand-sued"
+    }
+   ]
+  },
+  {
+   "id": "V5",
+   "basis": "E6",
+   "prompt": "Entferne Kasten B samt seinen Pfeilen.",
+   "erlaubt": {
+    "add": false,
+    "remove": {
+     "tags": [
+      "line",
+      "path",
+      "polyline",
+      "polygon",
+      "marker"
+     ],
+     "ids": "(^|[^a-z0-9])b([^a-z0-9]|$)|(kasten|box|rect|schritt|knoten)-?b",
+     "text": [
+      "B"
+     ]
+    }
+   },
+   "prueft": [
+    {
+     "art": "texte",
+     "fehlt": [
+      "B"
+     ],
+     "da": [
+      "A",
+      "C"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "V6",
+   "basis": "E6",
+   "prompt": "Füge einen Kasten D nach C ein, mit einem Pfeil von C nach D. Der Kasten trägt den Buchstaben D als Text.",
+   "erlaubt": {
+    "change": [
+     {
+      "attrs": [
+       "viewBox",
+       "width",
+       "height"
+      ],
+      "ids": "^#wurzel$"
+     }
+    ],
+    "add": true,
+    "remove": false
+   },
+   "prueft": [
+    {
+     "art": "texte",
+     "da": [
+      "A",
+      "B",
+      "C",
+      "D"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "V7",
+   "basis": "E9",
+   "prompt": "Setze die Strichstärke aller Wände auf 12.",
+   "erlaubt": {
+    "change": [
+     {
+      "attrs": [
+       "stroke-width",
+       "style"
+      ],
+      "ids": "^wand-"
+     }
+    ],
+    "add": false,
+    "remove": false
+   },
+   "prueft": [
+    {
+     "art": "strichstaerke",
+     "ids": "^wand-",
+     "wert": 12
+    }
+   ]
+  },
+  {
+   "id": "V8",
+   "basis": "E9",
+   "prompt": "Beschrifte den linken Raum mit „Küche“ und den rechten mit „Bad“, jeweils mittig im Raum.",
+   "erlaubt": {
+    "add": true,
+    "remove": false
+   },
+   "prueft": [
+    {
+     "art": "beschriftung",
+     "text": "Küche",
+     "raum": "raum-links",
+     "toleranz": 10
+    },
+    {
+     "art": "beschriftung",
+     "text": "Bad",
+     "raum": "raum-rechts",
+     "toleranz": 10
+    }
+   ]
+  }
+ ]
+}
