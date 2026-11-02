@@ -7,11 +7,19 @@ import { scanElements, type SvgElement } from "../../src/core/elements";
 
 // ---------- Antworten lesen ----------
 
-/** Entfernt <think>…</think> (auch ein nie geschlossenes: dann ist nichts Antwort). */
+/** Entfernt <think>…</think>. Ein nie geschlossenes `<think>` verschluckt den Rest (dann ist nichts Antwort); ein einzelnes `</think>`
+ *  ohne Eröffnung (der Chat-Vorlagen-Eintrag steht schon im Prompt) schneidet alles bis zum letzten `</think>` weg. */
 export function stripThink(raw: string): string {
   const closed = raw.replace(/<think>[\s\S]*?<\/think>/gi, "");
   const open = closed.search(/<think>/i);
-  return (open >= 0 ? closed.slice(0, open) : closed).trim();
+  if (open >= 0) return closed.slice(0, open).trim();
+  const lone = closed.toLowerCase().lastIndexOf("</think>");
+  return (lone >= 0 ? closed.slice(lone + "</think>".length) : closed).trim();
+}
+
+/** Kommentare zählen nicht (Auswertungsvertrag): durch Leerzeichen gleicher Länge ersetzt, Offsets bleiben gültig. */
+export function blankComments(text: string): string {
+  return text.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " "));
 }
 
 /** Inhalt des ersten Markdown-Zauns, der `needle` enthält; sonst der Text selbst. */
@@ -117,7 +125,8 @@ export interface Pairing {
 
 interface Tree { els: SvgElement[]; parent: number[]; kids: number[][]; own: string[] }
 
-function buildTree(text: string): Tree | null {
+function buildTree(source: string): Tree | null {
+  const text = blankComments(source);
   const { elements, issues } = scanElements(text);
   if (issues.length > 0 || elements.length === 0) return null;
   const parent: number[] = [];

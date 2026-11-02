@@ -16,6 +16,7 @@ import https from "node:https";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyChanges } from "../src/core/changes";
+import { scanElements } from "../src/core/elements";
 import {
   decomposable, extractChanges, extractSvg, idQuote, judgeEntries, pairElements,
   type Allowed, type Pairing, type Unrequested,
@@ -27,7 +28,9 @@ const LAB_DIR = join(ROOT, "scripts", "lab");
 
 /** Sampling: Modus `transform` aus code-kit `sampling-profiles` (MODES.transform: temperature 0.2, thinking off). Nicht vendort, weil
  *  das Modul eine Familienauflösung mitbringt, die ein Messskript nicht braucht; Spec § 10 lässt die Messung den Modus bestätigen.
- *  Überschreibbar mit --temperature. `reasoning_effort` wird nur auf Wunsch mitgeschickt (--effort none|low|…). */
+ *  Überschreibbar mit --temperature. `reasoning_effort` ist STANDARDMÄSSIG `none` (Produktmodus transform = Denken aus; Pilot 2026-11-02:
+ *  E1 mit Qwen in 12,7 s statt über 10 Minuten mit Denken); `--effort <x>` überschreibt, `--effort weglassen` sendet das Feld nicht. */
+const DEFAULT_EFFORT = "none";
 const TRANSFORM_TEMPERATURE = 0.2;
 /** Obergrenze je Anfrage: 15 Minuten, nie kürzer. */
 const REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
@@ -53,6 +56,10 @@ interface LabRecord {
   finish?: string;
   usage?: unknown;
   reasoningChars?: number;
+  /** Sampling-Einstellungen des Laufs (Spec § 10: die Messung bestätigt den Modus). */
+  temperature?: number;
+  effort?: string | null;
+  max_tokens?: number;
 }
 
 // ---------- Argumente ----------
@@ -63,7 +70,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { endpoint: "http://localhost:1234/v1", model: "", phase: "alles", nur: null, dir: join(ROOT, "tests", "fixtures", "lab"), auswerten: false, status: false, json: false, temperature: TRANSFORM_TEMPERATURE, maxTokens: 16384, effort: null };
+  const a: Args = { endpoint: "http://localhost:1234/v1", model: "", phase: "alles", nur: null, dir: join(ROOT, "tests", "fixtures", "lab"), auswerten: false, status: false, json: false, temperature: TRANSFORM_TEMPERATURE, maxTokens: 16384, effort: DEFAULT_EFFORT };
   const next = (i: number, name: string): string => {
     const v = argv[i + 1];
     if (v === undefined || v.startsWith("--")) throw new Error(`${name} braucht einen Wert`);
@@ -79,7 +86,7 @@ function parseArgs(argv: string[]): Args {
     else if (k === "--dir") a.dir = resolve(next(i++, k));
     else if (k === "--temperature") a.temperature = Number(next(i++, k));
     else if (k === "--max-tokens") a.maxTokens = Number(next(i++, k));
-    else if (k === "--effort") a.effort = next(i++, k);
+    else if (k === "--effort") { const v = next(i++, k); a.effort = v === "weglassen" ? null : v; }
     else if (k === "--auswerten") a.auswerten = true;
     else if (k === "--status") a.status = true;
     else if (k === "--json") a.json = true;
@@ -208,7 +215,7 @@ async function lauf(args: Args): Promise<void> {
     log(`[${new Date().toLocaleTimeString("de-DE")}] ${args.model} ${c} ${form} …`);
     const a = await chat(args, system, user);
     const ms = Date.now() - t0;
-    await write({ case: c, form, model: args.model, prompt, raw: a.raw, ms, ...extra, finish: a.finish, usage: a.usage, ...(a.reasoningChars !== undefined ? { reasoningChars: a.reasoningChars } : {}) });
+    await write({ case: c, form, model: args.model, prompt, raw: a.raw, ms, ...extra, temperature: args.temperature, effort: args.effort, max_tokens: args.maxTokens, finish: a.finish, usage: a.usage, ...(a.reasoningChars !== undefined ? { reasoningChars: a.reasoningChars } : {}) });
     log(`    ${(ms / 1000).toFixed(1)} s, ${a.raw.length} Zeichen, finish=${a.finish ?? "?"}`);
   };
 
@@ -270,6 +277,7 @@ interface Row {
   zerlegbar: boolean | null; zerlegbarWarum?: string;
   erfuellt: boolean | null; prueft: PageCheck[];
   notes: string[];
+  finish: string | null;
 }
 
 async function analysieren(dir: string): Promise<Row[]> {
@@ -287,7 +295,7 @@ async function analysieren(dir: string): Promise<Row[]> {
     const row: Row = {
       model: rec.model, case: rec.case, kind: create ? "erzeugen" : "verfeinern", form: rec.form, ms: rec.ms, ...(rec.base !== undefined ? { base: rec.base } : {}),
       rein: false, fenced: false, parse: false, applied: null, guard: false, idQuote: null, idComplete: false, dupIds: 0,
-      massTreu: null, messen: null, entries: null, unrequested: null, share: null, unrequestedList: [], done: null, zerlegbar: null, erfuellt: null, prueft: [], notes: [],
+      finish: rec.finish ?? null, massTreu: null, messen: null, entries: null, unrequested: null, share: null, unrequestedList: [], done: null, zerlegbar: null, erfuellt: null, prueft: [], notes: [],
     };
     let text: string | null = null;
     if (rec.form === "svg") {
@@ -332,8 +340,13 @@ async function analysieren(dir: string): Promise<Row[]> {
     }
     if (refine && rec.input !== undefined && row.guard) {
       const pair = pairElements(rec.input, text);
-      if (pair === null) row.notes.push("Ausgang oder Ergebnis nicht scanbar");
-      else {
+      if (pair === null) {
+        // Nicht scanbar (etwa doppelte ids) ist KEIN Ausschluss: in der SVG-Form zählt es als „nicht zerlegbar“.
+        const issue = scanElements(text).issues[0];
+        const why = issue ? `nicht scanbar: ${issue.message}` : "nicht scanbar";
+        row.notes.push(why);
+        if (rec.form === "svg") { row.zerlegbar = false; row.zerlegbarWarum = why; }
+      } else {
         const j: Unrequested = judgeEntries(pair, refine.erlaubt);
         row.entries = j.total; row.unrequested = j.unrequested; row.share = j.share; row.unrequestedList = j.list; row.done = j.done;
         if (rec.form === "svg") {
@@ -356,81 +369,124 @@ const pct = (x: number | null): string => (x === null ? "–" : `${(x * 100).toF
 const sec = (x: number | null): string => (x === null ? "–" : `${(x / 1000).toFixed(1)} s`);
 const md = (head: string[], rows: string[][]): string => [`| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`, ...rows.map((r) => `| ${r.join(" | ")} |`)].join("\n");
 
+/** Spec § 10: drei Grundrisse (E8–E10), Nenner fest, auch wenn die Messung unvollständig ist. */
+const GRUNDRISSE = 3;
+
+/** Ein Verfeinern-Ergebnis geht in den Formvergleich ein, wenn es etwas geändert hat UND die Anweisung erfüllt ist. */
+const nutzbar = (r: Row): boolean => r.share !== null && (r.entries ?? 0) > 0 && r.erfuellt === true;
+
+interface FormStats { n: number; eintraege: number; unverlangt: number; anteilGepoolt: number | null; anteilMittel: number | null; faelleMitUnverlangtem: number }
+function formStats(rs: Row[]): FormStats {
+  const eintraege = rs.reduce((x, r) => x + (r.entries ?? 0), 0);
+  const unverlangt = rs.reduce((x, r) => x + (r.unrequested ?? 0), 0);
+  return { n: rs.length, eintraege, unverlangt, anteilGepoolt: eintraege === 0 ? null : unverlangt / eintraege, anteilMittel: mean(rs.map((r) => r.share as number)), faelleMitUnverlangtem: rs.filter((r) => (r.unrequested ?? 0) > 0).length };
+}
+
 interface Summary {
-  erzeugen: Array<{ model: string; n: number; parse: number; guard: number; idComplete: number; brauchbar: number; idQuote: number | null; grundrisseMasstreu: number; grundrisse: number; rein: number; msMittel: number | null; msSumme: number }>;
-  verfeinern: Array<{ model: string; form: Form; n: number; parse: number; applied: number | null; guard: number; erfuellt: number; nichtsGetan: number; auswertbar: number; anteilMittel: number | null; faelleMitUnverlangtem: number; nichtZerlegbar: number | null; zerlegbarAuswertbar: number; idQuote: number | null; msMittel: number | null }>;
-  form: Array<{ form: Form; auswertbar: number; eintraege: number; unverlangt: number; anteilGepoolt: number | null; anteilMittel: number | null; faelleMitUnverlangtem: number; erfuellt: number; n: number }>;
+  erzeugen: Array<{ model: string; n: number; parse: number; guard: number; idComplete: number; brauchbar: number; idQuote: number | null; grundrisseMasstreu: number; rein: number; finishLength: number; msMittel: number | null; msSumme: number }>;
+  verfeinern: Array<{ model: string; form: Form; n: number; keinErgebnis: number; parse: number; applied: number | null; guard: number; erfuellt: number; nichtsGetan: number; auswertbar: number; anteilMittel: number | null; anteilMittelErfuellt: number | null; faelleMitUnverlangtem: number; unverlangtAbsolut: number; nichtZerlegbar: number | null; zerlegbarAuswertbar: number; finishLength: number; idQuote: number | null; msMittel: number | null }>;
+  /** Über alle Modelle, je Form, auf ALLEN auswertbaren Zeilen (roh) und auf den nutzbaren (geändert und erfüllt). */
+  form: Array<{ form: Form; n: number; keinErgebnis: number; roh: FormStats; nutzbar: FormStats }>;
+  /** Nur die (Modell, Fall)-Paare, in denen BEIDE Formen nutzbar sind. */
+  gemeinsam: { paare: number; svg: FormStats; json: FormStats; gewinner: Form | null; gleichstand: boolean };
   hinweise: string[];
 }
 
 function zusammenfassen(rows: Row[]): Summary {
   const models = [...new Set(rows.map((r) => r.model))].sort();
-  const s: Summary = { erzeugen: [], verfeinern: [], form: [], hinweise: [] };
+  const hinweise: string[] = [];
+  const erzeugen: Summary["erzeugen"] = [];
   for (const m of models) {
     const rs = rows.filter((r) => r.model === m && r.kind === "erzeugen");
     if (rs.length === 0) continue;
-    const gr = rs.filter((r) => r.massTreu !== null);
-    s.erzeugen.push({
+    erzeugen.push({
       model: m, n: rs.length, parse: rs.filter((r) => r.parse).length, guard: rs.filter((r) => r.guard).length,
       idComplete: rs.filter((r) => r.idComplete).length, brauchbar: rs.filter((r) => r.parse && r.guard && r.idComplete).length,
       idQuote: mean(rs.filter((r) => r.idQuote !== null).map((r) => r.idQuote as number)),
-      grundrisseMasstreu: gr.filter((r) => r.massTreu).length, grundrisse: gr.length, rein: rs.filter((r) => r.rein).length,
+      grundrisseMasstreu: rs.filter((r) => r.massTreu === true).length, rein: rs.filter((r) => r.rein).length, finishLength: rs.filter((r) => r.finish === "length").length,
       msMittel: mean(rs.map((r) => r.ms)), msSumme: rs.reduce((x, r) => x + r.ms, 0),
     });
   }
+  const verfeinern: Summary["verfeinern"] = [];
   for (const m of models) for (const form of ["svg", "json"] as const) {
     const rs = rows.filter((r) => r.model === m && r.kind === "verfeinern" && r.form === form);
     if (rs.length === 0) continue;
     const aus = rs.filter((r) => r.share !== null);
+    const nutz = rs.filter(nutzbar);
     const zer = rs.filter((r) => r.zerlegbar !== null);
-    s.verfeinern.push({
-      model: m, form, n: rs.length, parse: rs.filter((r) => r.parse).length, applied: form === "json" ? rs.filter((r) => r.applied).length : null,
+    verfeinern.push({
+      model: m, form, n: rs.length, keinErgebnis: rs.filter((r) => !r.guard).length, parse: rs.filter((r) => r.parse).length, applied: form === "json" ? rs.filter((r) => r.applied).length : null,
       guard: rs.filter((r) => r.guard).length, erfuellt: rs.filter((r) => r.erfuellt).length, nichtsGetan: aus.filter((r) => r.entries === 0).length,
-      auswertbar: aus.length, anteilMittel: mean(aus.map((r) => r.share as number)), faelleMitUnverlangtem: aus.filter((r) => (r.unrequested ?? 0) > 0).length,
+      auswertbar: aus.length, anteilMittel: mean(aus.map((r) => r.share as number)), anteilMittelErfuellt: mean(nutz.map((r) => r.share as number)),
+      faelleMitUnverlangtem: aus.filter((r) => (r.unrequested ?? 0) > 0).length, unverlangtAbsolut: aus.reduce((x, r) => x + (r.unrequested ?? 0), 0),
       nichtZerlegbar: form === "svg" ? zer.filter((r) => !r.zerlegbar).length : null, zerlegbarAuswertbar: zer.length,
-      idQuote: mean(rs.filter((r) => r.idQuote !== null).map((r) => r.idQuote as number)), msMittel: mean(rs.map((r) => r.ms)),
+      finishLength: rs.filter((r) => r.finish === "length").length, idQuote: mean(rs.filter((r) => r.idQuote !== null).map((r) => r.idQuote as number)), msMittel: mean(rs.map((r) => r.ms)),
     });
   }
-  for (const form of ["svg", "json"] as const) {
-    const rs = rows.filter((r) => r.kind === "verfeinern" && r.form === form);
+  const form: Summary["form"] = [];
+  for (const f of ["svg", "json"] as const) {
+    const rs = rows.filter((r) => r.kind === "verfeinern" && r.form === f);
     if (rs.length === 0) continue;
-    const aus = rs.filter((r) => r.share !== null);
-    const ent = aus.reduce((x, r) => x + (r.entries ?? 0), 0);
-    const bad = aus.reduce((x, r) => x + (r.unrequested ?? 0), 0);
-    s.form.push({ form, n: rs.length, auswertbar: aus.length, eintraege: ent, unverlangt: bad, anteilGepoolt: ent === 0 ? null : bad / ent, anteilMittel: mean(aus.map((r) => r.share as number)), faelleMitUnverlangtem: aus.filter((r) => (r.unrequested ?? 0) > 0).length, erfuellt: rs.filter((r) => r.erfuellt).length });
+    form.push({ form: f, n: rs.length, keinErgebnis: rs.filter((r) => !r.guard).length, roh: formStats(rs.filter((r) => r.share !== null)), nutzbar: formStats(rs.filter(nutzbar)) });
   }
+  // Gemeinsame Menge: (Modell, Fall) mit nutzbarer Antwort in BEIDEN Formen.
+  const ref = rows.filter((r) => r.kind === "verfeinern");
+  const sv: Row[] = [];
+  const js: Row[] = [];
+  for (const r of ref.filter((x) => x.form === "svg" && nutzbar(x))) {
+    const o = ref.find((x) => x.form === "json" && x.model === r.model && x.case === r.case && nutzbar(x));
+    if (o) { sv.push(r); js.push(o); }
+  }
+  const gs = formStats(sv);
+  const gj = formStats(js);
+  const gleichstand = gs.anteilGepoolt !== null && gs.anteilGepoolt === gj.anteilGepoolt;
+  const gewinner: Form | null = gs.anteilGepoolt === null || gj.anteilGepoolt === null ? null : gj.anteilGepoolt < gs.anteilGepoolt ? "json" : "svg";
+  const gemeinsam: Summary["gemeinsam"] = { paare: sv.length, svg: gs, json: gj, gewinner, gleichstand };
+
   // Hinweise nach Spec § 10 (Zahlen, keine Entscheidung; die trifft der Master bzw. Johannes).
-  for (const e of s.erzeugen) {
+  for (const e of erzeugen) {
     const ok = e.brauchbar >= 8 && e.grundrisseMasstreu >= 2;
-    s.hinweise.push(`${e.model}: brauchbar ${e.brauchbar}/${e.n} (parsebar, bereinigt, ids vollständig), maßtreue Grundrisse ${e.grundrisseMasstreu}/${e.grundrisse} — ${ok ? "erfüllt die Brauchbarkeits-Schwelle (8/10 und 2/3)" : "unter der Brauchbarkeits-Schwelle (8/10 und 2/3): Warnung in der Messzeile"}${e.n < 10 ? " (Messung unvollständig)" : ""}`);
-    if (e.brauchbar < 6 || e.grundrisseMasstreu === 0) s.hinweise.push(`${e.model}: unter 6/10 oder kein maßtreuer Grundriss — gilt dies für das GROSSE Modell, geht Spec Nr. 1 mit den Zahlen an Johannes zurück`);
+    hinweise.push(`${e.model}: brauchbar ${e.brauchbar}/${e.n} (parsebar, bereinigt, ids vollständig), maßtreue Grundrisse ${e.grundrisseMasstreu}/${GRUNDRISSE} — ${ok ? "erfüllt die Brauchbarkeits-Schwelle (8/10 und 2/3)" : "unter der Brauchbarkeits-Schwelle (8/10 und 2/3): Warnung in der Messzeile"}${e.n < 10 ? " (Messung unvollständig)" : ""}`);
+    if (e.brauchbar < 6 || e.grundrisseMasstreu === 0) hinweise.push(`${e.model}: unter 6/10 oder kein maßtreuer Grundriss — gilt dies für das GROSSE Modell, geht Spec Nr. 1 mit den Zahlen an Johannes zurück`);
+    if (e.finishLength > 0) hinweise.push(`${e.model}: ${e.finishLength} Erzeugen-Antwort(en) mit finish=length (abgeschnitten, vermutlich zu langes Denken oder Schleife)`);
   }
-  const f = Object.fromEntries(s.form.map((x) => [x.form, x]));
-  if (f.svg && f.json && f.svg.anteilGepoolt !== null && f.json.anteilGepoolt !== null) {
-    const win = f.json.anteilGepoolt < f.svg.anteilGepoolt ? "json" : "svg";
-    s.hinweise.push(`Antwortform (gepoolter Anteil nicht verlangter Einträge): svg ${pct(f.svg.anteilGepoolt)} (${f.svg.unverlangt}/${f.svg.eintraege}), json ${pct(f.json.anteilGepoolt)} (${f.json.unverlangt}/${f.json.eintraege}) → Zahl spricht für ${win}${f.json.anteilGepoolt === f.svg.anteilGepoolt ? " (Gleichstand: vollständiges SVG)" : ""}; auswertbare Fälle svg ${f.svg.auswertbar}/${f.svg.n}, json ${f.json.auswertbar}/${f.json.n}`);
-  }
-  return s;
+  const sub = (st: FormStats): string => `${pct(st.anteilGepoolt)} (${st.unverlangt}/${st.eintraege} Einträge, Ø je Fall ${pct(st.anteilMittel)}, Fälle mit Unverlangtem ${st.faelleMitUnverlangtem}/${st.n})`;
+  for (const f of form) hinweise.push(`${f.form}: ohne brauchbares Ergebnis ${f.keinErgebnis}/${f.n}; roh (alle auswertbaren Zeilen) ${sub(f.roh)}; nur erfüllt und geändert ${sub(f.nutzbar)}`);
+  if (gemeinsam.paare === 0) hinweise.push("Antwortform: keine gemeinsame Menge (kein Fall, in dem beide Formen geändert UND erfüllt haben) — keine Wahl möglich");
+  else hinweise.push(`Antwortform auf der gemeinsamen Menge (${gemeinsam.paare} Fälle, beide Formen geändert und erfüllt): svg ${sub(gs)}, json ${sub(gj)} → ${gemeinsam.gleichstand ? "Gleichstand: vollständiges SVG" : `weniger Unverlangtes: ${gewinner}`}${gemeinsam.paare < 6 ? " (kleine Menge, mit Vorsicht lesen)" : ""}`);
+  return { erzeugen, verfeinern, form, gemeinsam, hinweise };
 }
 
+const KOPF = [
+  "# svg-lab Auswertung",
+  "",
+  "- Kommentare (`<!-- … -->`) zählen nicht: sie werden vor dem Paaren, Normalisieren und Vergleichen ausgeblendet („nicht zerlegbar“ ist kein Artefakt von Kommentaren).",
+  "- „nicht verlangt“ ist eine je Fall von Hand definierte Heuristik (`scripts/lab/prompts.json`, `erlaubt`); sie kennt die vom Modell gewählten ids nicht.",
+  "- Formvergleich nur auf der gemeinsamen Menge: (Modell, Fall) mit einer Antwort in BEIDEN Formen, die etwas geändert hat und die Anweisung erfüllt. Fälle ohne brauchbares Ergebnis stehen je Form in „kein Ergebnis“; doppelte ids in einer SVG-Antwort zählen als „nicht zerlegbar“.",
+  "- Grundrisse maßtreu: Nenner fest 3 (E8–E10). `finish=length`: Antwort am Token-Limit abgeschnitten.",
+  "",
+].join("\n");
+
 function render(rows: Row[], s: Summary): string {
-  const out: string[] = [];
+  const out: string[] = [KOPF];
   out.push("## Erzeugen (10 Fälle je Modell, Antwortform vollständiges SVG)", "");
-  out.push(md(["Modell", "n", "parsebar", "bereinigt", "ids vollständig", "brauchbar", "id-Quote Ø", "Grundrisse maßtreu", "rein (kein Zaun/Prosa)", "Laufzeit Ø", "Laufzeit Σ"],
-    s.erzeugen.map((e) => [e.model, String(e.n), frac(e.parse, e.n), frac(e.guard, e.n), frac(e.idComplete, e.n), frac(e.brauchbar, e.n), pct(e.idQuote), frac(e.grundrisseMasstreu, e.grundrisse), frac(e.rein, e.n), sec(e.msMittel), sec(e.msSumme)])), "");
+  out.push(md(["Modell", "n", "parsebar", "bereinigt", "ids vollständig", "brauchbar", "id-Quote Ø", `Grundrisse maßtreu (von ${GRUNDRISSE})`, "rein (kein Zaun/Prosa)", "finish=length", "Laufzeit Ø", "Laufzeit Σ"],
+    s.erzeugen.map((e) => [e.model, String(e.n), frac(e.parse, e.n), frac(e.guard, e.n), frac(e.idComplete, e.n), frac(e.brauchbar, e.n), pct(e.idQuote), frac(e.grundrisseMasstreu, GRUNDRISSE), frac(e.rein, e.n), String(e.finishLength), sec(e.msMittel), sec(e.msSumme)])), "");
   out.push("## Verfeinern (8 Fälle je Modell und Antwortform)", "");
-  out.push(md(["Modell", "Form", "n", "lesbar", "angewendet", "bereinigt", "erfüllt", "nichts getan", "Anteil nicht verlangt Ø", "Fälle mit Unverlangtem", "nicht zerlegbar", "id-Quote Ø", "Laufzeit Ø"],
-    s.verfeinern.map((v) => [v.model, v.form, String(v.n), frac(v.parse, v.n), v.applied === null ? "–" : frac(v.applied, v.n), frac(v.guard, v.n), frac(v.erfuellt, v.n), String(v.nichtsGetan), `${pct(v.anteilMittel)} (${v.auswertbar} ausw.)`, frac(v.faelleMitUnverlangtem, v.auswertbar), v.nichtZerlegbar === null ? "–" : frac(v.nichtZerlegbar, v.zerlegbarAuswertbar), pct(v.idQuote), sec(v.msMittel)])), "");
+  out.push(md(["Modell", "Form", "n", "kein Ergebnis", "lesbar", "angewendet", "bereinigt", "erfüllt", "nichts getan", "Anteil nicht verlangt Ø (roh / nur erfüllt)", "unverlangte Einträge Σ", "Fälle mit Unverlangtem", "nicht zerlegbar", "finish=length", "id-Quote Ø", "Laufzeit Ø"],
+    s.verfeinern.map((v) => [v.model, v.form, String(v.n), frac(v.keinErgebnis, v.n), frac(v.parse, v.n), v.applied === null ? "–" : frac(v.applied, v.n), frac(v.guard, v.n), frac(v.erfuellt, v.n), String(v.nichtsGetan), `${pct(v.anteilMittel)} / ${pct(v.anteilMittelErfuellt)} (${v.auswertbar} ausw.)`, String(v.unverlangtAbsolut), frac(v.faelleMitUnverlangtem, v.auswertbar), v.nichtZerlegbar === null ? "–" : frac(v.nichtZerlegbar, v.zerlegbarAuswertbar), String(v.finishLength), pct(v.idQuote), sec(v.msMittel)])), "");
   out.push("## Antwortform (über alle Modelle)", "");
-  out.push(md(["Form", "auswertbar", "Einträge", "nicht verlangt", "Anteil gepoolt", "Anteil Ø je Fall", "Fälle mit Unverlangtem", "erfüllt"],
-    s.form.map((x) => [x.form, frac(x.auswertbar, x.n), String(x.eintraege), String(x.unverlangt), pct(x.anteilGepoolt), pct(x.anteilMittel), frac(x.faelleMitUnverlangtem, x.auswertbar), frac(x.erfuellt, x.n)])), "");
+  const fr = (st: FormStats): string[] => [String(st.n), String(st.eintraege), String(st.unverlangt), pct(st.anteilGepoolt), pct(st.anteilMittel), frac(st.faelleMitUnverlangtem, st.n)];
+  out.push(md(["Menge", "Form", "Fälle", "Einträge", "nicht verlangt", "Anteil gepoolt", "Anteil Ø je Fall", "Fälle mit Unverlangtem"],
+    [...s.form.map((x) => ["roh (auswertbar)", x.form, ...fr(x.roh)]), ...s.form.map((x) => ["geändert und erfüllt", x.form, ...fr(x.nutzbar)]), ["GEMEINSAM", "svg", ...fr(s.gemeinsam.svg)], ["GEMEINSAM", "json", ...fr(s.gemeinsam.json)]]), "");
+  out.push(md(["Form", "Zeilen", "kein Ergebnis"], s.form.map((x) => [x.form, String(x.n), frac(x.keinErgebnis, x.n)])), "");
   out.push("## Hinweise (Zahlen nach Spec § 10, keine Entscheidung)", "", ...s.hinweise.map((h) => `- ${h}`), "");
   out.push("## Fälle im Einzelnen", "");
   const yn = (b: boolean | null): string => (b === null ? "–" : b ? "ja" : "nein");
-  out.push(md(["Modell", "Fall", "Form", "parse", "bereinigt", "ids", "maßtreu/erfüllt", "Einträge (unverlangt)", "zerlegbar", "Notiz"],
+  out.push(md(["Modell", "Fall", "Form", "parse", "bereinigt", "ids", "maßtreu/erfüllt", "Einträge (unverlangt, Anteil)", "zerlegbar", "finish", "Notiz"],
     rows.map((r) => [r.model, r.case + (r.base !== undefined ? ` (Basis: ${r.base})` : ""), r.form, yn(r.parse), yn(r.guard), r.idQuote === null ? "–" : `${(r.idQuote * 100).toFixed(0)} %${r.dupIds ? ` (${r.dupIds} doppelt)` : ""}`,
       r.kind === "erzeugen" ? (r.messen ? `${yn(r.massTreu)}${r.massTreu ? "" : `: ${r.messen.filter((c) => !c.ok).map((c) => `${c.art} ${c.detail}`).join("; ")}`}` : "–") : `${yn(r.erfuellt)}${r.erfuellt === false ? `: ${r.prueft.filter((c) => !c.ok).map((c) => `${c.art} ${c.detail}`).join("; ")}` : ""}`,
-      r.entries === null ? "–" : `${r.entries} (${r.unrequested}${r.unrequestedList.length ? `: ${r.unrequestedList.join(", ")}` : ""})`, yn(r.zerlegbar) + (r.zerlegbarWarum ? ` (${r.zerlegbarWarum})` : ""), r.notes.join("; ").replace(/\|/g, "\\|")])), "");
+      r.entries === null ? "–" : `${r.entries} (${r.unrequested}, ${pct(r.share)}${r.unrequestedList.length ? `: ${r.unrequestedList.join(", ")}` : ""})`, yn(r.zerlegbar) + (r.zerlegbarWarum ? ` (${r.zerlegbarWarum})` : ""), r.finish ?? "–", r.notes.join("; ").replace(/\|/g, "\\|")])), "");
   return out.join("\n");
 }
 
@@ -438,7 +494,7 @@ async function auswerten(args: Args): Promise<void> {
   const rows = await analysieren(args.dir);
   if (rows.length === 0) { console.error(`keine auswertbaren Zeilen in ${args.dir}`); process.exitCode = 1; return; }
   const s = zusammenfassen(rows);
-  console.log(args.json ? JSON.stringify({ rows, summary: s }, null, 1) : render(rows, s));
+  console.log(args.json ? JSON.stringify({ hinweis: KOPF, rows, summary: s }, null, 1) : render(rows, s));
 }
 
 // ---------- Einstieg ----------
