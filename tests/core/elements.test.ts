@@ -36,6 +36,20 @@ describe("scanElements", () => {
     expect(keys).toEqual(["#wurzel", "#style-1", "#style-2", "#title", "#desc"]);
   });
 
+  it("fester Schlüssel schlägt die id (Wurzel, style, title)", () => {
+    const { elements } = scanElements(`<svg id="svg5"><style id="s">a{}</style><title id="t">x</title><rect id="r"/></svg>`);
+    expect(elements.map((e) => e.key)).toEqual(["#wurzel", "#style-1", "#title", "r"]);
+    expect(elements[0]!.id).toBe("svg5");
+    expect(elements[1]!.id).toBe("s");
+    expect(elements[3]!.parentKey).toBe("#wurzel");
+  });
+
+  it("#title und #desc nur für direkte Kinder der Wurzel", () => {
+    const { elements } = scanElements(`<svg><g id="g"><title>t</title></g><title>doc</title><desc>d</desc></svg>`);
+    expect(elements.map((e) => e.key)).toEqual(["#wurzel", "g", "@1", "#title", "#desc"]);
+    expect(elements[2]!.parentKey).toBe("g");
+  });
+
   it("vergibt @n ohne id", () => {
     const { elements } = scanElements(`<svg><rect/><rect/></svg>`);
     expect(elements.map((e) => e.key)).toEqual(["#wurzel", "@1", "@2"]);
@@ -81,9 +95,9 @@ describe("scanElements", () => {
   });
 
   it("dekodiert alle Entity-Formen", () => {
-    const text = `<svg><g id="g" a="&amp;&lt;&gt;&quot;&apos;&#65;&#x42;&unbekannt;&#xZZ;"/></svg>`;
+    const text = `<svg><g id="g" a="&amp;&lt;&gt;&quot;&apos;&#65;&#x42;&unbekannt;&#xZZ;&valueOf;&toString;&__proto__;"/></svg>`;
     const g = find(scanElements(text).elements, "g");
-    expect(attr(g, "a")).toBe(`&<>"'AB&unbekannt;&#xZZ;`);
+    expect(attr(g, "a")).toBe(`&<>"'AB&unbekannt;&#xZZ;&valueOf;&toString;&__proto__;`);
     expect(attr(g, "fehlt")).toBeNull();
   });
 

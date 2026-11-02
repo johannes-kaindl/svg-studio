@@ -47,7 +47,7 @@ export interface ScanIssue {
 const isWs = (c: number): boolean => c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09;
 
 const NUMERIC_ENTITY = /^#(?:x([0-9a-f]{1,6})|([0-9]{1,7}))$/i;
-const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+const NAMED_ENTITIES = new Map<string, string>([["amp", "&"], ["lt", "<"], ["gt", ">"], ["quot", '"'], ["apos", "'"]]);
 /** Längste Entity-Schreibweise, die wir auflösen (`&#x10FFFF;` = 8 Zeichen zwischen & und ;). */
 const MAX_ENTITY_LEN = 9;
 
@@ -70,7 +70,7 @@ function decodeEntities(raw: string): string {
     let decoded: string | null = null;
     if (semi > 0) {
       const name = raw.slice(amp + 1, semi);
-      decoded = NAMED_ENTITIES[name] ?? null;
+      decoded = NAMED_ENTITIES.get(name) ?? null;
       if (decoded === null) {
         const m = NUMERIC_ENTITY.exec(name);
         if (m) {
@@ -303,14 +303,15 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
     } else if (local === "style") {
       styleCount++;
       fixed = `#style-${styleCount}`;
-    } else if (local === "title" && !hasTitle) {
+    } else if (local === "title" && stack.length === 1 && !hasTitle) {
       fixed = "#title";
       hasTitle = true;
-    } else if (local === "desc" && !hasDesc) {
+    } else if (local === "desc" && stack.length === 1 && !hasDesc) {
       fixed = "#desc";
       hasDesc = true;
     }
-    const key = id ?? fixed ?? `@${++fallbackCount}`;
+    // Ein fester Schlüssel schlägt die id (Spec § 5.1); die id bleibt im Feld `id`.
+    const key = fixed ?? id ?? `@${++fallbackCount}`;
     if (id !== null) {
       if (ids.has(id)) issue(lt, `id "${id}" doppelt`);
       ids.add(id);
