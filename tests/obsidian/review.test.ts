@@ -70,7 +70,7 @@ describe("Prüfliste: Karten aus den Einträgen der aktiven Runde", () => {
       expect(c.querySelector("button.okit-review-reject")!.getAttribute("aria-pressed")).toBe("false");
       expect(c.querySelector(".okit-review-decided")!.textContent).toBe("Accepted");
     }
-    expect(cards[0]!.querySelector(".okit-redline")!.textContent).toBe("Circle mond: r 4060");
+    expect(cards[0]!.querySelector(".okit-redline")!.textContent).toBe("Circle mond: r 40 → 60");
     expect(cards[0]!.querySelector(".okit-redline-del")!.textContent).toBe("40");
     expect(cards[0]!.querySelector(".okit-redline-ins")!.textContent).toBe("60");
     expect(cards[1]!.querySelector(".okit-redline")!.textContent).toContain("Rectangle tuer: x");
@@ -81,7 +81,7 @@ describe("Prüfliste: Karten aus den Einträgen der aktiven Runde", () => {
   it("auf Deutsch: Kreis, Annehmen, Angenommen", () => {
     initStrings("de");
     const h = harness(withRound());
-    expect(h.cards()[0]!.querySelector(".okit-redline")!.textContent).toBe("Kreis mond: r 4060");
+    expect(h.cards()[0]!.querySelector(".okit-redline")!.textContent).toBe("Kreis mond: r 40 → 60");
     expect(h.cards()[0]!.querySelector("button.okit-review-accept")!.textContent).toBe("Annehmen");
     expect(h.cards()[0]!.querySelector(".okit-review-decided")!.textContent).toBe("Angenommen");
     expect(h.host.querySelector(".okit-review-bulk")!.textContent).toBe("Alle annehmenAlle ablehnen");

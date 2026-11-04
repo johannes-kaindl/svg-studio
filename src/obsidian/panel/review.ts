@@ -19,6 +19,11 @@ import { buildPreview } from "./preview";
 import type { PreviewViewDeps } from "./preview-view";
 import type { ChangesCtx } from "./shell";
 
+/** Gestrichener und eingefügter Wert stehen im Redline sonst ohne Trennung nebeneinander („x 165145“): ein Pfeil dazwischen (GUI-Smoke D3). Nur Darstellung, die Segmente des Diffs bleiben, wie sie sind. */
+function withArrows<S extends { kind: string; text: string }>(segs: readonly S[]): S[] {
+  return segs.flatMap((seg, i): S[] => (seg.kind === "ins" && segs[i - 1]?.kind === "del" ? [{ ...seg, kind: "same", text: " → " }, seg] : [seg]));
+}
+
 export interface ReviewDeps {
   /** Hintergrund der kleinen Vorschauen (dieselbe Wahl wie die große Vorschau). */
   background: PreviewViewDeps["background"];
@@ -81,7 +86,7 @@ export function renderReview(host: HTMLElement, round: SvgRound | null, session:
     b.form === "list"
       ? b.entries.map((e, i): ReviewChange => {
           const text = describeEntry(e, texts);
-          return { kind: "change", id: String(i), author, when, changeKind: text.changeKind, segments: text.segments, stale, decision: decisionOf(round, i).state };
+          return { kind: "change", id: String(i), author, when, changeKind: text.changeKind, segments: withArrows(text.segments), stale, decision: decisionOf(round, i).state };
         })
       : [{
           kind: "change", id: "0", author, when, changeKind: "substitution", stale, decision: b.decision,
@@ -183,5 +188,5 @@ function renderRule(host: HTMLElement, round: SvgRound, session: SvgSession): vo
     return;
   }
   const texts = labelTexts();
-  for (const e of diff.entries) renderRedline(box.createDiv({ cls: "svg-studio-rule-line" }), describeEntry(e, texts).segments);
+  for (const e of diff.entries) renderRedline(box.createDiv({ cls: "svg-studio-rule-line" }), withArrows(describeEntry(e, texts).segments));
 }
