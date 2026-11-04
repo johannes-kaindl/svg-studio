@@ -46,7 +46,7 @@ Release-Infra und GitHub-Mirror kommen erst mit dem ersten Release (Skill `plugi
 
 ## Gotchas
 
-- **Schlüssel in einer Änderungsliste beziehen sich auf den Ausgangstext.** Ein in derselben Liste hinzugefügtes oder verschobenes Element ist kein Anker; `@n`-Schlüssel nimmt `applyChanges` nicht an (erst `assignMissingIds`). `change` auf einem Nachfahren eines verschobenen Elements lehnt `applyChanges` heute noch ab — erster Schritt von Plan 2. Vertrag im Kopfkommentar von `src/core/changes.ts`.
+- **Schlüssel in einer Änderungsliste beziehen sich auf den Ausgangstext.** Ein in derselben Liste hinzugefügtes oder verschobenes Element ist kein Anker; `@n`-Schlüssel nimmt `applyChanges` nicht an (erst `assignMissingIds`). `change`, `add`, `remove` und `move` auf Nachfahren eines verschobenen Elements gelten am neuen Ort (Scheiben, seit Plan 2 B2); `remove` von `#style-n`, `#title`, `#desc` braucht `expect` (kanonische Form). Vertrag im Kopfkommentar von `src/core/changes.ts`.
 - **svg-guard lehnt ab, was Modelle gelegentlich schreiben:** CSS-Kommentare `/*` in `<style>`, `<a>`, `<image>`, Inkscape-Namensräume (`sodipodi:`, `inkscape:`), jeden Backslash in Attributen oder CSS. Das ist Kit-Vertrag, kein Fehler im Plugin.
 - **Messlabor lädt große lokale Modelle:** vorher Netzteil und Last prüfen und Johannes fragen, Modell per `lms load` mit festem Kontext laden (nicht per JIT), danach sofort entladen. Details `docs/internal/LAB.md`.
 - Nie im Repo: absolute Pfade außerhalb des Repos (`/Users/…`, Vault-Pfade) — Platzhalter nutzen (`$CODING_COCKPIT_VAULT`, repo-relativ). Gate: `scripts/check-no-abs-paths.mjs` (Teil von `npm test`).
