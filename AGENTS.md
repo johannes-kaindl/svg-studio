@@ -16,7 +16,7 @@ Stand 2026-11-05: Version 1 ist gebaut, aber nicht veröffentlicht (Plan 1 und P
 
 - **Echtes SVG ist die Quelle**, keine eigene 2D-Sprache (Spec Nr. 1, durch die Messung bestätigt). Jedes Element unter der Wurzel trägt eine `id`; Diff, Zahlenfelder und die spätere 3D-Übergabe hängen daran.
 - **Byte-treu ändern:** Änderungen sind Spannen-Ersetzungen gegen den **aktuellen** Text, alles oder nichts, mit Round-Trip-Wächter. Was nicht betroffen ist, bleibt Byte für Byte gleich; eine Handänderung geht nie verloren.
-- **Fremdes SVG nur geprüft in den DOM:** Der Bereiniger `svg-guard` (code-kit) lehnt ab statt zu entfernen. Bei Erfolg liefert er den geprüften Baum (`{ ok: true, svg }`); eingefügt wird **genau dieser Baum** per `importNode`/`adoptNode`, nie der Text per `innerHTML` (Parser-Differenz HTML gegen XML).
+- **Fremdes SVG nur geprüft in den DOM:** Der Bereiniger `svg-guard` (code-kit) lehnt ab statt zu entfernen. Bei Erfolg liefert er den geprüften Baum (`{ ok: true, svg }`); im Panel (Vorschau, Zahlenfelder) wird **genau dieser Baum** per `importNode`/`adoptNode` in einen Shadow Root eingefügt, nie der Text per `innerHTML` (Parser-Differenz HTML gegen XML). Der Block und die Einbettung in der Notiz zeigen das geprüfte SVG dagegen als `<img class="svg-studio-img">` mit Data-URL (`render-block.ts`), ohne Shadow Root.
 - **Pure-Core-Trennung:** `src/core/` bleibt Obsidian-, DOM- und node-frei (`npm run check:pure`).
 - **Bibliothek ab Eins (Kit-first):** Wiederverwendbares liegt von Anfang an in `obsidian-kit` bzw. `code-kit`; eine neue reine Funktion ohne plugin-eigenen Typ geht durchs Bibliothek-Gate des Dachs.
 - Aufbau und Warum: `docs/internal/architecture.md`, `docs/internal/decisions.md`.
