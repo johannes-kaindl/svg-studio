@@ -6,7 +6,7 @@ Describe an icon, logo, diagram or floor plan in words and get an exact, editabl
 
 ## Status
 
-The pure core is in place (element scanner with source offsets, byte-preserving change lists, id assignment, canvas measurement) and local models have been measured: a 27B model wrote 10 of 10 valid, sanitized SVGs and all three floor plans to exact measurements. The plugin itself does not render or generate anything yet. The first usable version will cover generating an SVG from a description, rounds with rollback, repair of broken answers, a background switch and a streaming status with cancel, plus number fields for single elements and an element-level diff.
+Version 1 is built and tested but not released. A code block with the language `svg-studio` is shown as an image; a panel in the sidebar creates and refines SVGs in rounds with a local or OpenAI-compatible model, shows every change as a card you accept or reject, lets you edit numbers of a selected element, and applies the result to a file or a code block in your note. Local models have been measured: a 27B model wrote 10 of 10 valid, sanitized SVGs and all three floor plans to exact measurements. The first release waits for the maintainer's go-ahead.
 
 ## Development
 

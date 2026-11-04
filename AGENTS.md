@@ -10,7 +10,7 @@ Orientierung für KI-Agenten (Claude Code, Codex, …) und Mitwirkende an diesem
 
 Obsidian-Plugin `svg-studio` („SVG Studio“) von Johannes Kaindl, nicht veröffentlicht. Der Nutzer beschreibt ein Icon, Logo, Schema oder einen Grundriss in Worten und bekommt ein echtes, exaktes SVG in seine Notiz; danach verbessert er es in Runden, per Prompt oder an einzelnen Zahlen, und nimmt jede Änderung eines Elements einzeln an oder lehnt sie ab. Die 2D-Schwester von `3d-codeblocks`. Endpunkte und Modelle kommen über das Kit (`llm-endpoint-manager`), das Plugin trägt keine eigenen Schlüssel.
 
-Stand 2026-11-02: Plan 1 ist abgeschlossen (Fachkern pure in `src/core/`, Messung lokaler Modelle). Das Plugin selbst ist noch ein Gerüst (`src/main.ts` lädt nichts). Plan 2 (Diff, Protokoll, Rendern, Panel) ist für Welle 30 eingeplant. Spec, Pläne, Messnote und Tasks liegen im Coding-Cockpit des Maintainers unter `25_Coding/svg-studio/` (vault-relativ, maintainer-lokal, `$CODING_COCKPIT_VAULT`).
+Stand 2026-11-05: Version 1 ist gebaut, aber nicht veröffentlicht (Plan 1 und Plan 2 abgeschlossen: Fachkern, Diff, Protokoll, Rendern als Bild, Panel mit Modellzeile, Lauf mit Rückfrage, Prüfliste, Zahlenfelder, Übernehmen als Datei und Block, Reparatur am Bestand; GUI-Smoke gegen eine Zweitinstanz grün). Das erste Release braucht Johannes' ausdrückliche Freigabe (E6). Spec, Pläne, Messnote und Tasks liegen im Coding-Cockpit des Maintainers unter `25_Coding/svg-studio/` (vault-relativ, maintainer-lokal, `$CODING_COCKPIT_VAULT`).
 
 ## Architecture principles
 
@@ -35,7 +35,7 @@ npm run smoke:gui -- --port 9660 [--nur <punkt,…>] [--bilder <ordner>]   # GUI
 sh tools/sync-kit.sh [--check]   # Kit vendoren bzw. Drift messen
 ```
 
-Release-Infra und GitHub-Mirror kommen erst mit dem ersten Release (Skill `plugin-release-setup`, `npm run release` braucht das Dach).
+Release-Infra und GitHub-Mirror kommen erst mit dem ersten Release (Skill `plugin-release-setup`, `npm run release` braucht das Dach). `npm run deploy` kopiert den Build nach `$OBSIDIAN_PLUGIN_DIR` (für Messungen am Gerät).
 
 ## Conventions
 
@@ -49,13 +49,16 @@ Release-Infra und GitHub-Mirror kommen erst mit dem ersten Release (Skill `plugi
 
 - **Schlüssel in einer Änderungsliste beziehen sich auf den Ausgangstext.** Ein in derselben Liste hinzugefügtes oder verschobenes Element ist kein Anker; `@n`-Schlüssel nimmt `applyChanges` nicht an (erst `assignMissingIds`). `change`, `add`, `remove` und `move` auf Nachfahren eines verschobenen Elements gelten am neuen Ort (Scheiben, seit Plan 2 B2); `remove` von `#style-n`, `#title`, `#desc` braucht `expect` (kanonische Form). Vertrag im Kopfkommentar von `src/core/changes.ts`.
 - **svg-guard lehnt ab, was Modelle gelegentlich schreiben:** CSS-Kommentare `/*` in `<style>`, `<a>`, `<image>`, Inkscape-Namensräume (`sodipodi:`, `inkscape:`), jeden Backslash in Attributen oder CSS. Das ist Kit-Vertrag, kein Fehler im Plugin.
+- **Gemma antwortet „Entwurf, `<channel|>`, Antwort“** (Denkkanal im `content`); der Leser des Plugins (`protocol.ts` `extractSvg`, Kit `stripThinkBlocks` mit `channel: true`, Rückfall auf den Text davor) nimmt die Antwort, der Labor-Leser früher den Entwurf. Messzeile und Messnote gelten für den Leser des Plugins.
+- **Ein Schreibweg läuft immer über `acceptText` → `acceptPanel` → `checkWrite`:** die Runde wird gegen den Text von JETZT angewendet; eine Runde „ganzes Bild“ oder „Namen vergeben“ mit Folgerunde greift nur, wenn der Text noch ihr Ausgang ist (sonst Abbruch, nichts geschrieben). Vorschau und Felder rendern nur den geprüften Baum (`importNode` in einen Shadow Root mit `contain: paint`-Wrapper).
+- **Das Panel-Bundle trägt die LLM-Verbindung des Kits:** `check-bundle` mit Schranke 400 KB (angehoben 2026-11-05).
 - **Messlabor lädt große lokale Modelle:** vorher Netzteil und Last prüfen und Johannes fragen, Modell per `lms load` mit festem Kontext laden (nicht per JIT), danach sofort entladen. Details `docs/internal/LAB.md`.
 - Nie im Repo: absolute Pfade außerhalb des Repos (`/Users/…`, Vault-Pfade) — Platzhalter nutzen (`$CODING_COCKPIT_VAULT`, repo-relativ). Gate: `scripts/check-no-abs-paths.mjs` (Teil von `npm test`).
 
 ## Context index
 
 - Vor jeder Änderung am Verhalten: die Spec im Cockpit (Note „2026-11-02-svg-studio-design“ in _SDD), besonders § 3 „Was nicht passieren darf“ und § 5 „Der SVG-Vertrag“.
-- Vor Arbeit an Plan 2 oder dem Panel: Cockpit-Task „Plan 2 schreiben — Diff, Protokoll, Rendern, Panel“ (alle Eingänge aus Plan 1) und die Messnote (Note „2026-11-02-svg-studio-messung“ in _SDD).
+- Vor Arbeit am Panel, an Prompts oder an der Messzeile: die Messnote (Note „2026-11-02-svg-studio-messung“ in _SDD, mit dem Abschnitt „Korrektur der Auswertung 2026-11-04“) und der Plan 2 (Note „2026-11-03-svg-studio-plan-2-diff-protokoll-rendern-panel“ in _SDD); offene Reste: die Cockpit-Tasks „Reste aus Plan 2 …“ und „Befunde aus Plan 2 …“ in `_Tasks/`.
 - Vor Änderungen an Modul-Layout oder Datenfluss: `docs/internal/architecture.md`.
 - Bevor du eine Altentscheidung (echtes SVG, Antwortform, Codeblock-Sprache, Ablage, Bereiniger lehnt ab) übernimmst: `docs/internal/decisions.md`.
 - Vor einem Messlauf mit lokalen Modellen: `docs/internal/LAB.md`.
