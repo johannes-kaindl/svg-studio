@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - Pure core: element diff with a completeness check (the answer of the model is split into entries you accept or reject one by one), canonical form, the prompts of the measurement, answer reader and validators (`protocol.ts`).
+- Pure core: round model for the panel (rounds with accept/reject per entry, hand edits, rule rounds for ids and editor metadata, apply against the text that stands now) and removal of editor metadata (Inkscape `sodipodi:`/`inkscape:`) as a visible rule round.
 - Pure core: quality line from the measurement of 2026-11-02 (what was measured per model and task, tied to the measured prompt); not shown yet.
 - Pure core: element scanner with UTF-16 source offsets and stable element keys, byte-preserving change lists (`change`, `add`, `remove`, `move`) with an all-or-nothing round-trip guard, id assignment and `data-unit`, canvas measurement from `viewBox` or `width`/`height`.
 - SVG sanitizer `svg-guard` vendored from code-kit (rejects instead of stripping).
