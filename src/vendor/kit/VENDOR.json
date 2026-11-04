@@ -2,7 +2,7 @@
   "source": "code-kit",
   "version": "0.52.1",
   "sha": "f368e77",
-  "vendored": "svg-guard.ts, safe-markdown.ts, answer-retry.ts, llm-answer.ts, think-splitter.ts, sha256.ts, data-url.ts, slug.ts, measured-quality.ts (code-kit@0.54.0, b593494)",
+  "vendored": "svg-guard.ts, safe-markdown.ts, answer-retry.ts, llm-answer.ts, think-splitter.ts, sha256.ts, data-url.ts, slug.ts, measured-quality.ts (code-kit@0.54.0, b593494), fences.ts (code-kit@0.54.0, b593494), panel-session.ts (code-kit@0.54.0, b593494), rounds.ts (code-kit@0.54.0, b593494), run-slot.ts (code-kit@0.54.0, b593494)",
   "obsidian_kit_version": "0.78.0",
   "obsidian_kit_sha": "c5961de",
   "obsidian_kit_vendored": "block-writer.ts"

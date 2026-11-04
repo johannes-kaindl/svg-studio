@@ -6,7 +6,7 @@ Modul-Layout und Datenfluss. Das Warum steht in `docs/internal/decisions.md`, di
 
 - `src/core/**` ist obsidian-, DOM- und node-frei (`npm run check:pure`). Hier liegt der Fachkern; er rechnet auf dem SVG-**Text**, nicht auf einem DOM.
 - `src/main.ts` ist heute ein leeres Plugin-Gerüst. Rendern, Panel und Schreibwege kommen mit Plan 2 (Inkremente 2 bis 5 der Spec).
-- `src/vendor/kit/` trägt die Kit-Module aus code-kit 0.52.1 (`svg-guard`, `safe-markdown`, `answer-retry`, `llm-answer`, `think-splitter`, `sha256`, `data-url`, `slug`; `measured-quality` aus 0.54.0) und obsidian-kit 0.78.0 (`block-writer`); `src/vendor/kit-obsidian/` die Obsidian-Schicht (`status-indicator`, `choice-modal`, `write-ports`); `tests/vendor/kit/` die Test-Helfer (`kit-css`, `linear-probe`, `window-timers`). Vendort über `tools/sync-kit.sh` (Wrapper auf `tools/kit-sync`) mit Herkunfts-Header, nie von Hand.
+- `src/vendor/kit/` trägt die Kit-Module aus code-kit 0.52.1 (`svg-guard`, `safe-markdown`, `answer-retry`, `llm-answer`, `think-splitter`, `sha256`, `data-url`, `slug`; `measured-quality`, `fences`, `panel-session`, `rounds`, `run-slot` aus 0.54.0) und obsidian-kit 0.78.0 (`block-writer`); `src/vendor/kit-obsidian/` die Obsidian-Schicht (`status-indicator`, `choice-modal`, `write-ports`); `tests/vendor/kit/` die Test-Helfer (`kit-css`, `linear-probe`, `window-timers`). Vendort über `tools/sync-kit.sh` (Wrapper auf `tools/kit-sync`) mit Herkunfts-Header, nie von Hand.
 
 ## Module in `src/core/`
 
@@ -17,8 +17,9 @@ Modul-Layout und Datenfluss. Das Warum steht in `docs/internal/decisions.md`, di
 - `canon.ts` — kanonische Form eines Dokuments oder Elements (`buildCanonTree`, `canonNode`, `canonDocument`, `normalizeValue`): Attribute sortiert, Leerraum und Kommentare egal, eigener Text je Element mit seiner Stelle zwischen den Kindern; doppelte ids erlaubt (Index statt Schlüssel). Verbraucher: `remove.expect` in `changes.ts`, später `diff.ts`.
 - `diff.ts` — `diffSvg(ausgang, antwort)`: Paarung über den Schlüssel, Einträge je Änderung (`attr`, `add`, `remove`, `move`, `replace` mit Grund `text`/`style`/`moved-and-text`/`wrap`/`unwrap`), jeder mit eigener Änderungsliste; am Ende werden alle Einträge angewendet und kanonisch mit der Antwort verglichen (Vollständigkeitsprüfung, sonst „nicht zerlegbar“ mit Grund). `changesFor(einträge, angenommene)` bildet die Liste der angenommenen. Das Messlabor nutzt dieselbe Funktion (`scripts/lab/analyse.ts`).
 - `protocol.ts` — die Prompts der Messung wortgleich (`CREATE_SYSTEM`, `REFINE_SYSTEM`; Test gegen `scripts/lab/system-prompt.md`), `RETRY_INSTRUCTION` (ungemessen), Nachrichten (`buildCreateMessages`, `buildRefineMessages`, `buildRepairMessages`), `promptFingerprint` (Kit `measured-quality`), Antwortleser `extractSvg` (Denken weg, Denkkanal von Gemma, `<svg` bis letztes `</svg>`) und die Prüfer `validateCreate`, `validateRefine`, `validateRepair` für `askUntilValid`. Der Bereiniger kommt als Funktion herein (`GuardFn`); der Kern kennt kein DOM.
+- `quality.ts` — die vier Messzeilen (Erzeugen und Verfeinern, qwen3.8-27b und gemma-4-e4b; Zahlen nach der Korrektur der Auswertung 2026-11-04) und `svgQualityLine`/`svgFailureHint` auf dem Kit-Baustein `measured-quality`; jede Zeile trägt den Prompt-Fingerabdruck aus `protocol.ts`, `quality.test.ts` leitet die Zahlen aus `tests/fixtures/lab/auswertung-2026-11-02.json` ab.
 
-Geplant mit Plan 2: `quality.ts` (Messzeile je Modell).
+Geplant mit Plan 2: `session.ts` (Rundenmodell), `fields.ts`, `editor-metadata.ts`.
 
 ## Messlabor
 
