@@ -5,6 +5,7 @@ import { defineStrings, getLang, setLang, t, type Lang } from "../vendor/kit/i18
 import type { QualityTexts } from "../vendor/kit/measured-quality";
 import type { MeasureTexts } from "../core/measure-line";
 import type { PanelStrings } from "../obsidian/panel/shell";
+import type { AcceptStrings } from "../vendor/kit-obsidian/panel-accept";
 
 export type T = (key: string, ...args: (string | number)[]) => string;
 export { getLang, setLang, t, type Lang };
@@ -43,7 +44,6 @@ const EN: Record<string, string> = {
   "panel.rounds": "Rounds",
   "panel.reasoning": "Thinking…",
   "panel.copyReasoning": "Copy thinking",
-  "panel.acceptSoon": "Applying is not wired up yet; it follows with the next step.",
   "panel.noEndpoint": "No language model is set up yet.",
   "panel.noEndpointDetail": "Reason: {0}",
   "panel.openSettings": "Open settings",
@@ -56,6 +56,7 @@ const EN: Record<string, string> = {
   "panel.roundNew": "new",
   "panel.roundWhole": "whole image",
   "panel.roundRepair": "repair",
+  "panel.roundRepairWhole": "repair · whole image",
   "panel.roundChanges": "{0} change(s)",
   "panel.roundHand": "by hand",
   "panel.roundRule": "rule",
@@ -78,9 +79,62 @@ const EN: Record<string, string> = {
   "run.targetGone": "The target is gone or cannot be read any more; nothing was asked.",
   "run.noRound": "The answer could not be added as a round: {0}",
   "run.error": "Error: {0}",
+  "accept.title": "Apply new SVG as",
+  "accept.message": "Where should the new SVG go?",
+  "accept.noNote": "No note is open, so a code block is not possible.",
+  "accept.cancel": "Cancel",
+  "accept.blockNeedsNote": "A code block needs an open note. Open a note, or set “Apply new SVG as” to a file.",
+  "accept.invalid": "The result is not a valid SVG: {0}",
+  "accept.notApplied": "{0}; nothing was written.",
+  "accept.backupFailed": "Could not back up {0} first: {1}",
+  "accept.unchanged": "Nothing to apply: the target already has this content.",
+  "accept.cannotReplace": "A new image can't replace an existing target; nothing was written.",
+  "accept.blockMoved": "Block changed: it moved or was deleted since the panel opened; nothing was written.",
+  "accept.blockChanged": "Block changed: its content differs from what the panel opened; nothing was written.",
+  "accept.noteChanged": "The target changed while applying; nothing was written. Try again.",
+  "accept.closesFence": "A line of the result would close the code block; nothing was written.",
+  "accept.cancelled": "Cancelled; nothing was written.",
+  "accept.noNoteOpen": "No note is open to put a code block in; nothing was written.",
+  "accept.readingView": "The note is in reading view; nothing was written. Switch it to editing.",
+  "accept.applied": "Applied to {0}.",
+  "accept.asBlock.cursor": "Code block inserted at the cursor.",
+  "accept.asBlock.afterBlock": "Code block inserted after the code block at the cursor.",
+  "accept.asBlock.afterSelection": "Code block inserted after the selection.",
+  "accept.appended": "The note is in reading view, so the code block was added at the end of the note.",
+  "accept.fileGone": "{0} no longer exists; nothing was written.",
+  "accept.fileExists": "{0} already exists; nothing was written.",
+  "accept.couldNotCreate": "Could not create {0}: {1}",
+  "accept.savedRef": "Saved {0} and inserted its link at the cursor.",
+  "accept.savedNoNote": "Saved {0}. No note is open, so no link was inserted.",
+  "accept.savedReading": "Saved {0}. The note is in reading view; no link was inserted.",
+  "accept.savedNoteChanged": "Saved {0}. The active note changed meanwhile; no link was inserted.",
+  "accept.savedAppended": "Saved {0}. The note is in reading view, so its link was added at the end of the note.",
+  "accept.savedRefFailed": "Saved {0}, but the link could not be inserted: {1}",
+  "accept.unclosed": "A code block in the note is never closed, so the SVG would land inside it; nothing was inserted.",
+  "accept.unclosedSel": "The selection ends in a code block that is never closed; nothing was inserted.",
+  "accept.couldNotApply": "Could not apply: {0}",
+  "round.repair": "Repair",
+  "round.names": "Assign names",
+  "round.cleanup": "Remove editor data",
+  "bestand.unusable": "This SVG can't be used as it is: {0}",
+  "bestand.unnamed": "{0} element(s) have no name (id). Changing needs a name on every element.",
+  "bestand.editor": "This SVG carries editor data (for example from Inkscape) that the sanitizer rejects.",
+  "bestand.repair": "Repair",
+  "bestand.repair.hint": "Asks the model to fix the SVG. You check the result as a round before anything is written.",
+  "bestand.names": "Assign names",
+  "bestand.names.hint": "Gives every element without an id a name. No model involved.",
+  "bestand.cleanup": "Remove editor data",
+  "bestand.cleanup.hint": "Removes the editor's elements and attributes. No model involved; you see the result as a round.",
+  "bestand.doneNames": "Names assigned — check the result, then apply.",
+  "bestand.doneCleanup": "Editor data removed — check the result, then apply.",
+  "bestand.failed": "That did not work: {0}",
+  "bestand.changesWhole": "The whole image changes.",
+  "run.repairFailed": "The repair did not produce a usable SVG; nothing was changed.",
+  "run.doneRepair": "Repair proposed — check the result, then apply.",
   "quality.measured.create": "Measured: {0} of {1} test descriptions gave an SVG the sanitizer accepted{2} ({3}, {4}, n = 1 per description).",
   "quality.measured.refine": "Measured: {0} of {1} test change requests were applied in full{2} ({3}, {4}, n = 1 per request).",
   "quality.extra.plans": ", floor plans {0} of {1}",
+  "quality.extra.noTopP": ", measured without top_p",
   "quality.notMeasured": "Not measured for this model.",
   "quality.smallReference": "Not measured for this model; the small model {0} managed {1} of {2} on the same task, bigger models usually do better.",
   "quality.failure.create": "The answer could not be turned into an SVG.",
@@ -139,7 +193,6 @@ const DE: Record<string, string> = {
   "panel.rounds": "Runden",
   "panel.reasoning": "Denkt nach …",
   "panel.copyReasoning": "Denken kopieren",
-  "panel.acceptSoon": "Übernehmen ist noch nicht verdrahtet; es folgt mit dem nächsten Schritt.",
   "panel.noEndpoint": "Noch kein Sprachmodell eingerichtet.",
   "panel.noEndpointDetail": "Grund: {0}",
   "panel.openSettings": "Einstellungen öffnen",
@@ -152,6 +205,7 @@ const DE: Record<string, string> = {
   "panel.roundNew": "neu",
   "panel.roundWhole": "ganzes Bild",
   "panel.roundRepair": "Reparatur",
+  "panel.roundRepairWhole": "Reparatur · ganzes Bild",
   "panel.roundChanges": "{0} Änderung(en)",
   "panel.roundHand": "von Hand",
   "panel.roundRule": "Regel",
@@ -174,9 +228,62 @@ const DE: Record<string, string> = {
   "run.targetGone": "Das Ziel ist weg oder nicht mehr lesbar; es wurde nichts gefragt.",
   "run.noRound": "Die Antwort ließ sich nicht als Runde hinzufügen: {0}",
   "run.error": "Fehler: {0}",
+  "accept.title": "Neues SVG übernehmen als",
+  "accept.message": "Wohin soll das neue SVG?",
+  "accept.noNote": "Keine Notiz offen, ein Codeblock ist deshalb nicht möglich.",
+  "accept.cancel": "Abbrechen",
+  "accept.blockNeedsNote": "Ein Codeblock braucht eine offene Notiz. Öffne eine Notiz, oder stelle „Neues SVG übernehmen als“ auf Datei.",
+  "accept.invalid": "Das Ergebnis ist kein gültiges SVG: {0}",
+  "accept.notApplied": "{0}; nichts geschrieben.",
+  "accept.backupFailed": "Die Sicherung von {0} vorab ist fehlgeschlagen: {1}",
+  "accept.unchanged": "Nichts zu übernehmen: Das Ziel hat schon diesen Inhalt.",
+  "accept.cannotReplace": "Ein neues Bild ersetzt kein bestehendes Ziel; nichts geschrieben.",
+  "accept.blockMoved": "Block geändert: Er wurde seit dem Öffnen des Panels verschoben oder gelöscht; nichts geschrieben.",
+  "accept.blockChanged": "Block geändert: Sein Inhalt weicht von dem ab, den das Panel geöffnet hat; nichts geschrieben.",
+  "accept.noteChanged": "Das Ziel hat sich beim Übernehmen geändert; nichts geschrieben. Versuche es noch einmal.",
+  "accept.closesFence": "Eine Zeile des Ergebnisses würde den Codeblock schließen; nichts geschrieben.",
+  "accept.cancelled": "Abgebrochen; nichts geschrieben.",
+  "accept.noNoteOpen": "Keine Notiz offen, in die ein Codeblock käme; nichts geschrieben.",
+  "accept.readingView": "Die Notiz steht im Lesemodus; nichts geschrieben. Stelle sie auf Bearbeiten.",
+  "accept.applied": "Übernommen in {0}.",
+  "accept.asBlock.cursor": "Codeblock am Cursor eingefügt.",
+  "accept.asBlock.afterBlock": "Codeblock hinter dem Codeblock am Cursor eingefügt.",
+  "accept.asBlock.afterSelection": "Codeblock hinter der Auswahl eingefügt.",
+  "accept.appended": "Die Notiz steht im Lesemodus, deshalb steht der Codeblock am Ende der Notiz.",
+  "accept.fileGone": "{0} gibt es nicht mehr; nichts geschrieben.",
+  "accept.fileExists": "{0} gibt es schon; nichts geschrieben.",
+  "accept.couldNotCreate": "{0} ließ sich nicht anlegen: {1}",
+  "accept.savedRef": "{0} gespeichert, der Link steht am Cursor.",
+  "accept.savedNoNote": "{0} gespeichert. Keine Notiz offen, deshalb kein Link.",
+  "accept.savedReading": "{0} gespeichert. Die Notiz steht im Lesemodus; kein Link eingefügt.",
+  "accept.savedNoteChanged": "{0} gespeichert. Die aktive Notiz hat inzwischen gewechselt; kein Link eingefügt.",
+  "accept.savedAppended": "{0} gespeichert. Die Notiz steht im Lesemodus, deshalb steht der Link am Ende der Notiz.",
+  "accept.savedRefFailed": "{0} gespeichert, aber der Link ließ sich nicht einfügen: {1}",
+  "accept.unclosed": "Ein Codeblock in der Notiz wird nie geschlossen, das SVG käme in ihn hinein; nichts eingefügt.",
+  "accept.unclosedSel": "Die Auswahl endet in einem Codeblock, der nie geschlossen wird; nichts eingefügt.",
+  "accept.couldNotApply": "Übernehmen nicht möglich: {0}",
+  "round.repair": "Reparatur",
+  "round.names": "Namen vergeben",
+  "round.cleanup": "Editor-Angaben entfernen",
+  "bestand.unusable": "Dieses SVG ist so nicht brauchbar: {0}",
+  "bestand.unnamed": "{0} Element(e) ohne Namen (id). Ändern braucht an jedem Element einen Namen.",
+  "bestand.editor": "Dieses SVG trägt Editor-Angaben (zum Beispiel von Inkscape), die der Bereiniger ablehnt.",
+  "bestand.repair": "Reparieren",
+  "bestand.repair.hint": "Das Modell soll das SVG reparieren. Du prüfst das Ergebnis als Runde, bevor etwas geschrieben wird.",
+  "bestand.names": "Namen vergeben",
+  "bestand.names.hint": "Gibt jedem Element ohne id einen Namen. Ohne Modell.",
+  "bestand.cleanup": "Editor-Angaben entfernen",
+  "bestand.cleanup.hint": "Entfernt die Elemente und Attribute des Editors. Ohne Modell; du siehst das Ergebnis als Runde.",
+  "bestand.doneNames": "Namen vergeben — prüfe das Ergebnis, dann übernehmen.",
+  "bestand.doneCleanup": "Editor-Angaben entfernt — prüfe das Ergebnis, dann übernehmen.",
+  "bestand.failed": "Das hat nicht geklappt: {0}",
+  "bestand.changesWhole": "Das ganze Bild ändert sich.",
+  "run.repairFailed": "Die Reparatur ergab kein brauchbares SVG; es wurde nichts geändert.",
+  "run.doneRepair": "Reparatur vorgeschlagen — prüfe das Ergebnis, dann übernehmen.",
   "quality.measured.create": "Gemessen: {0} von {1} Testbeschreibungen ergaben ein SVG, das der Bereiniger annahm{2} ({3}, {4}, n = 1 je Beschreibung).",
   "quality.measured.refine": "Gemessen: {0} von {1} Test-Änderungswünschen wurden vollständig umgesetzt{2} ({3}, {4}, n = 1 je Wunsch).",
   "quality.extra.plans": ", Grundrisse {0} von {1}",
+  "quality.extra.noTopP": ", ohne top_p gemessen",
   "quality.notMeasured": "Für dieses Modell nicht gemessen.",
   "quality.smallReference": "Für dieses Modell nicht gemessen; das kleine Modell {0} schaffte {1} von {2} bei derselben Aufgabe, größere Modelle schneiden meist besser ab.",
   "quality.failure.create": "Die Antwort ließ sich nicht in ein SVG verwandeln.",
@@ -213,8 +320,15 @@ export function initStrings(lang: Lang): void {
 /** Die Sätze der Messzeile (Kit `measured-quality`) in der Sprache des Plugins; die Zahlen kommen aus der Tabelle in `core/quality.ts`. */
 /** Der sprachneutrale Zusatz einer Messzeile als Satzteil (`plans:2/3` → „, floor plans 2 of 3“); Unbekanntes bleibt weg statt unübersetzt zu erscheinen. */
 function extraText(extra: string | undefined): string {
-  const plans = extra === undefined ? null : /^plans:(\d+)\/(\d+)$/.exec(extra);
-  return plans === null ? "" : t("quality.extra.plans", Number(plans[1]), Number(plans[2]));
+  if (extra === undefined) return "";
+  return extra
+    .split(";")
+    .map((part) => {
+      const plans = /^plans:(\d+)\/(\d+)$/.exec(part);
+      if (plans !== null) return t("quality.extra.plans", Number(plans[1]), Number(plans[2]));
+      return part === "no-top-p" ? t("quality.extra.noTopP") : "";
+    })
+    .join("");
 }
 
 export function qualityTexts(): QualityTexts {
@@ -271,4 +385,33 @@ export function panelStrings(): PanelStrings {
 /** Die Wörter der Maßzeile (`core/measure-line.ts`); das Dezimaltrennzeichen folgt der Sprache. */
 export function measureTexts(): MeasureTexts {
   return { decimal: getLang() === "de" ? "," : ".", area: t("measure.area"), drawing: t("measure.drawing"), at: t("measure.at"), units: t("measure.units"), ambiguous: t("measure.ambiguous") };
+}
+
+/** Die Meldungen von Übernehmen (Kit `panel-accept`). `notApplied` setzt den Schluss „nichts geschrieben“ hinter ein Problem; ein Satzpunkt am Ende wird vorher abgenommen. */
+export function acceptStrings(): AcceptStrings {
+  return {
+    unsupported: (label) => t("panel.unsupported", label),
+    notApplied: (problem) => t("accept.notApplied", problem.replace(/[.\s]+$/, "")),
+    unchanged: t("accept.unchanged"),
+    cannotReplace: t("accept.cannotReplace"),
+    blockMoved: t("accept.blockMoved"),
+    blockChanged: t("accept.blockChanged"),
+    noteChanged: t("accept.noteChanged"),
+    closesFence: t("accept.closesFence"),
+    cancelled: t("accept.cancelled"),
+    noNoteOpen: t("accept.noNoteOpen"),
+    noteInReadingView: t("accept.readingView"),
+    appliedTo: (label) => t("accept.applied", label),
+    appliedAsBlock: (where) => t(where === "at-cursor" ? "accept.asBlock.cursor" : where === "after-selection" ? "accept.asBlock.afterSelection" : "accept.asBlock.afterBlock"),
+    appendedToNote: t("accept.appended"),
+    fileGone: (path) => t("accept.fileGone", path),
+    fileExists: (path) => t("accept.fileExists", path),
+    couldNotCreate: (path, reason) => t("accept.couldNotCreate", path, reason),
+    savedFileWithReference: (path) => t("accept.savedRef", path),
+    savedFileNoReference: (path, why) => t(why === "no-note" ? "accept.savedNoNote" : why === "reading" ? "accept.savedReading" : "accept.savedNoteChanged", path),
+    savedFileAppended: (path) => t("accept.savedAppended", path),
+    savedFileReferenceFailed: (path, reason) => t("accept.savedRefFailed", path, reason),
+    unclosedFence: (selected) => t(selected ? "accept.unclosedSel" : "accept.unclosed"),
+    couldNotApply: (reason) => t("accept.couldNotApply", reason),
+  };
 }

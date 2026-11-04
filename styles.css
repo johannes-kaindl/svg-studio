@@ -617,6 +617,49 @@
   display: none;
 }
 
+/* Bestand beim Öffnen: je Befund eine Karte mit Text und Knopf (nicht allein Farbe: der Text nennt den Befund, der Rand ist neutral). */
+.svg-studio-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.svg-studio-notices:empty {
+  display: none;
+}
+
+.svg-studio-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.svg-studio-notice-text {
+  flex: 1 1 12em;
+  overflow-wrap: anywhere;
+}
+
+.svg-studio-accept-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.svg-studio-accept-hint:empty {
+  display: none;
+}
+
+.svg-studio-change-whole {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
 .svg-studio-input {
   width: 100%;
   resize: vertical;

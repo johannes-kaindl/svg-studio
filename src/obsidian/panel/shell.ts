@@ -63,6 +63,8 @@ export interface PanelDeps<S extends PanelSession<unknown> = PanelSession<unknow
   readTargetText: (t: Target) => Promise<string | null>;
   /** Übernehmen (Verdrahtung in C4). Bekommt die Sitzung, die der Kern hält. */
   accept(session: S): Promise<AcceptOutcome>;
+  /** Der Grund, aus dem Übernehmen jetzt nicht geht (gesperrter Knopf, Grund sichtbar daneben), sonst `null`. Neu bewertet bei jedem Zeichnen und bei `refreshAccept()`. */
+  acceptBlockedReason?: (session: S) => string | null;
   openSettings(): void;
   confirm(message: string, labels: { confirm: string; cancel: string }): Promise<boolean>;
   managerPresent(): boolean;
@@ -102,7 +104,8 @@ export interface PanelSlots<R, S extends PanelSession<R> = PanelSession<R>> {
   /** Eine leere Sitzung für ein Ziel (beim Start, bei Verwerfen und Neu). */
   fresh(target: Target): S;
   renderPreview(host: HTMLElement, round: R | null, text: string | null): void;
-  renderChanges(host: HTMLElement, round: R | null): void;
+  /** Die Änderungen der aktiven Runde; die Sitzung gibt den Ausgang, gegen den eine Regelrunde ihre Einträge zeigt. */
+  renderChanges(host: HTMLElement, round: R | null, session: S): void;
   roundLabel(round: R, index: number): string;
   roundMeta(round: R): string;
   /** Der Text nach dieser Runde (Vorschau). */
@@ -110,8 +113,25 @@ export interface PanelSlots<R, S extends PanelSession<R> = PanelSession<R>> {
   quality(model: string, task: Task): { measured: boolean; text: string };
   /** Der Lauf: Anfrage, Prüfung, Rückfrage, neue Runde. Wirft nicht; Fehler kommen als `RunResult`. */
   run(call: RunCall<S>): Promise<RunResult<S>>;
+  /** Hinweise zum Text, auf dem die Sitzung steht (Bestand: kaputt, ohne Namen, Editor-Angaben), mit Knöpfen, die über `ctx` eine Regelrunde setzen oder einen Lauf starten.
+   *  Wird bei jedem Zeichnen mit leerem `host` gerufen; `ctx.current()` sagt, ob das Zeichnen noch gilt (der Slot darf asynchron lesen). */
+  notices?(host: HTMLElement, ctx: NoticeCtx<S>): void;
   extras?(host: HTMLElement): void;
   dispose?(): void;
+}
+
+/** Was ein Hinweis am Panel tun darf. */
+export interface NoticeCtx<S> {
+  /** Gilt dieses Zeichnen noch? Nach `await` prüfen, bevor der Host beschrieben wird. */
+  current: () => boolean;
+  /** Läuft gerade ein Lauf oder Übernehmen? Dann sind Knöpfe gesperrt. */
+  busy: () => boolean;
+  session: () => S;
+  /** Die Sitzung ersetzen (eine lokale Regelrunde) und neu zeichnen; im Lauf und beim Übernehmen wirkungslos. */
+  setSession: (s: S) => void;
+  /** Einen Lauf mit eigener Anfrage starten (gleiche Sperre, gleicher Abbruch wie das Senden). */
+  run: (instruction: string, exec: (call: RunCall<S>) => Promise<RunResult<S>>) => void;
+  setStatus: (phase: StatusPhase, text: string) => void;
 }
 
 export interface PanelShell<S> {
@@ -127,6 +147,8 @@ export interface PanelShell<S> {
   requestClose(): Promise<boolean>;
   /** Zeichnet die Modellzeile samt Denk-Steuerung aus dem Zustand neu (ohne Abruf). */
   refreshModelBar(): void;
+  /** Wertet die Sperre von Übernehmen neu aus (die zuletzt aktive Notiz hat gewechselt). */
+  refreshAccept(): void;
   /** Lädt die Modell-Liste der Zeile neu (der Endpunkt oder der Manager haben gewechselt). */
   reloadModels(): void;
   destroy(): void;
@@ -178,6 +200,7 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
   });
 
   const quality = buildStatus(panelEl, "svg-studio-quality", { idleIcon: null });
+  const noticesHost = panelEl.createDiv({ cls: "svg-studio-notices" });
 
   // Kein Eingabefeld-Ersatz ohne Endpunkt: der Empty-State steht daneben, das Feld bleibt.
   const noEndpointEl = panelEl.createDiv({ cls: "svg-studio-empty-endpoint is-hidden" });
@@ -217,6 +240,7 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
   const roundsEl = panelEl.createDiv({ cls: "svg-studio-rounds" });
   slots.extras?.(panelEl.createDiv({ cls: "svg-studio-extras" }));
 
+  const acceptHint = panelEl.createDiv({ cls: "svg-studio-accept-hint", attr: { id: "svg-studio-accept-hint" } });
   const end = panelEl.createDiv({ cls: "svg-studio-actions svg-studio-end" });
   const acceptBtn = end.createEl("button", { cls: "mod-cta svg-studio-accept", text: st.accept, attr: { type: "button" } });
   acceptBtn.addEventListener("click", () => { void apply(); });
@@ -246,11 +270,19 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     // Genau ein Lauf: `begin()` ohne `supersede` gibt während eines Laufs `null`.
     const r = slot.begin();
     if (r === null) return pending;
-    pending = runInner(instruction, r);
+    pending = runInner(instruction, r, (call) => slots.run(call));
     return pending;
   }
 
-  async function runInner(instruction: string, r: Run): Promise<void> {
+  /** Ein Lauf, den ein Hinweis anstößt (etwa die Reparatur): gleiche Sperre, gleicher Abbruch, gleiche Anzeige wie das Senden. */
+  function runAction(instruction: string, exec: (call: RunCall<S>) => Promise<RunResult<S>>): void {
+    if (!canSend()) return;
+    const r = slot.begin();
+    if (r === null) return;
+    pending = runInner(instruction, r, exec);
+  }
+
+  async function runInner(instruction: string, r: Run, exec: (call: RunCall<S>) => Promise<RunResult<S>>): Promise<void> {
     noEndpoint = false;
     let streamed = "";
     const io: RunIo = {
@@ -264,7 +296,7 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     };
     try {
       renderControls();
-      const res = await slots.run({ session, instruction, signal: r.signal, model: model(), io });
+      const res = await exec({ session, instruction, signal: r.signal, model: model(), io });
       r.guard(() => {
         if (res.ok) {
           session = res.session;
@@ -312,7 +344,6 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     if (roundCount() === 0 || applying || slot.running()) return;
     applying = true;
     renderControls();
-    const started = session.target;
     pending = (async () => {
       let outcome: AcceptOutcome;
       try {
@@ -323,8 +354,8 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
       try {
         if (outcome.ok) {
           // Das geschriebene Ziel trägt den neuen Text: ohne `retarget` bliebe der Fingerabdruck des Blocks veraltet.
-          const target = outcome.retarget !== undefined && sameTarget(session.target, started) ? outcome.retarget : session.target;
-          session = slots.fresh(target);
+          // Während des Schreibens sind Ziel und Runden gesperrt (`applying`): das Ziel ist noch das, das übernommen wurde.
+          session = slots.fresh(outcome.retarget ?? session.target);
           kept = false;
           offered = null;
           setStatus("ok", outcome.message);
@@ -387,9 +418,14 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     modelBar.update(); // die Sperre der Modellzeile folgt demselben Zustand
     sendBtn.disabled = !canSend();
     stopBtn.toggleClass("is-hidden", !running);
-    acceptBtn.disabled = n === 0 || running || applying;
+    const blocked = deps.acceptBlockedReason?.(session) ?? null;
+    acceptBtn.disabled = n === 0 || running || applying || blocked !== null;
+    acceptHint.setText(blocked ?? "");
+    if (blocked === null) acceptBtn.removeAttribute("aria-describedby");
+    else acceptBtn.setAttribute("aria-describedby", "svg-studio-accept-hint");
     discardBtn.disabled = n === 0 || running || applying;
     newBtn.disabled = running || applying;
+    for (const b of Array.from(noticesHost.querySelectorAll("button"))) b.disabled = running || applying;
     noEndpointEl.toggleClass("is-hidden", !noEndpoint);
     // Zwei getrennte Elemente; trifft beides zu, gewinnt „kein Endpunkt“.
     examplesEl.toggleClass("is-hidden", noEndpoint || running || n > 0 || session.target.kind !== "new");
@@ -408,6 +444,7 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
         renderRounds();
         renderChanges();
         renderPreview();
+        renderNotices();
       },
       heading: st.rounds,
     });
@@ -422,12 +459,32 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
 
   function renderChanges(): void {
     changesHost.empty();
-    slots.renderChanges(changesHost, activeRound());
+    slots.renderChanges(changesHost, activeRound(), session);
+  }
+
+  let noticeTicket = 0;
+  function renderNotices(): void {
+    noticesHost.empty();
+    if (destroyed || slots.notices === undefined) return;
+    const ticket = ++noticeTicket;
+    slots.notices(noticesHost, {
+      current: () => !destroyed && ticket === noticeTicket,
+      busy: () => slot.running() || applying,
+      session: () => session,
+      setSession(next) {
+        if (destroyed || slot.running() || applying) return;
+        session = next;
+        renderAll();
+      },
+      run: runAction,
+      setStatus,
+    });
   }
 
   function renderAll(): void {
     if (destroyed) return;
     renderHeader();
+    renderNotices();
     renderRounds();
     renderChanges();
     renderPreview();
@@ -451,6 +508,7 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
         offered = kept ? target : null;
       }
       renderHeader();
+      renderNotices();
     },
     session: () => session,
     running: () => slot.running(),
@@ -464,6 +522,9 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     refreshModelBar() {
       modelBar.update();
       renderHeader();
+    },
+    refreshAccept() {
+      renderControls();
     },
     reloadModels() {
       void modelBar.refresh();

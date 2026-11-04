@@ -1,7 +1,8 @@
-import { getLanguage, Notice, Plugin, type TFile } from "obsidian";
+import { getLanguage, MarkdownView, Notice, Plugin, type TFile } from "obsidian";
 import { DEFAULT_SETTINGS, loadSettings, type SvgStudioSettings } from "./core/settings";
 import { getLang, initStrings, t } from "./i18n/strings";
 import type { SvgSession } from "./core/session";
+import { acceptBlockReason, acceptSvgSession, buildAcceptEnv, firstPromptLineOf } from "./obsidian/accept";
 import { installEmbedButtons } from "./obsidian/embed-button";
 import { BLOCK_LANG, fileTarget, registerFileMenu, targetFromContext } from "./obsidian/entry";
 import { SvgStudioView } from "./obsidian/panel/view";
@@ -15,6 +16,7 @@ import { onLevelFor, thinkingFor, withThinkingLevel, type ThinkingLevel } from "
 import { findEndpointManager, onEndpointManagerChanged } from "./vendor/kit-obsidian/endpoint-source";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
 import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
+import { obsidianWritePorts } from "./vendor/kit-obsidian/write-ports";
 
 export default class SvgStudioPlugin extends Plugin {
   settings: SvgStudioSettings = DEFAULT_SETTINGS;
@@ -75,8 +77,9 @@ export default class SvgStudioPlugin extends Plugin {
       // Die letzte Stellung bleibt gespeichert (Spec § 7.3); sie betrifft nur die Vorschau.
       background: { get: () => this.settings.background, set: (s) => { this.settings.background = s; void this.saveSettings(); } },
       readTargetText: (target) => readTargetText(this.app, target),
-      // Übernehmen wird mit C4 verdrahtet (Schreibweg über `panel-accept` und `block-writer`).
-      accept: () => Promise.resolve({ ok: false, message: t("panel.acceptSoon") }),
+      // Übernehmen: Kit `panel-accept` und `block-writer`, davor ein Schnappschuss der Datei und `checkSvg` auf dem fertigen Text (Spec § 3 Punkt 4, § 7.6).
+      accept: (session) => acceptSvgSession(this.acceptEnv(), session, { guard: checkSvg, firstPromptLine: firstPromptLineOf(session), pluginId: this.manifest.id }),
+      acceptBlockedReason: (session) => acceptBlockReason(session, this.settings.acceptAs, this.lastEditor() !== null),
       openSettings: () => {
         // Interne API: fehlt sie, sagt eine Notice, wo die Einstellungen stehen, statt zu werfen.
         const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
@@ -92,6 +95,8 @@ export default class SvgStudioPlugin extends Plugin {
       stash: { take: () => { const s = this.stashed; this.stashed = null; return s; }, put: (s) => { this.stashed = s; } },
     }));
     this.addSettingTab(new SvgStudioSettingTab(this.app, this));
+    // Die zuletzt aktive Notiz bestimmt, ob ein Codeblock möglich ist: das Panel wertet die Sperre von Übernehmen neu aus, wenn das Blatt wechselt.
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => { for (const v of this.panels()) v.refreshAccept(); }));
 
     this.addCommand({ id: "new-svg", name: t("cmd.new"), callback: () => { void this.openPanel({ kind: "new" }); } });
     this.addCommand({
@@ -136,6 +141,18 @@ export default class SvgStudioPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /** Die zuletzt bediente Notiz: das zuletzt benutzte Blatt der Hauptfläche (`rootSplit`), nicht das aktive, denn beim Übernehmen hat das Panel den Fokus und liegt in der
+   *  Seitenleiste (REGISTRY „Panel-Aktionen brauchen den Editor aus dem rootSplit“). Quell- und Lesemodus zählen beide. */
+  private lastEditor(): MarkdownView | null {
+    const { workspace } = this.app;
+    const recent = workspace.getMostRecentLeaf(workspace.rootSplit)?.view;
+    return recent instanceof MarkdownView && recent.file !== null ? recent : null;
+  }
+
+  private acceptEnv() {
+    return buildAcceptEnv({ app: this.app, ports: obsidianWritePorts(this.app), settings: () => this.settings, lastEditor: () => this.lastEditor() });
   }
 
   private panels(): SvgStudioView[] {

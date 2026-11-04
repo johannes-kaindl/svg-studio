@@ -82,6 +82,11 @@ export class SvgStudioView extends ItemView {
     this.shell?.refreshModelBar();
   }
 
+  /** Wertet die Sperre von Übernehmen neu aus (die zuletzt aktive Notiz hat gewechselt). */
+  refreshAccept(): void {
+    this.shell?.refreshAccept();
+  }
+
   /** Lädt die Modell-Liste der Zeile neu (der Endpunkt oder der Manager haben gewechselt). */
   reloadModels(): void {
     this.shell?.reloadModels();

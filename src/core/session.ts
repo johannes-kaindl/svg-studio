@@ -2,7 +2,7 @@
 // Eine Runde speichert, was geschah (`art`, `instruction`, `body`) und das Ergebnis (`result`: der Text nach den angenommenen Einträgen). Das Modell bekommt beim
 // Verfeinern den Text der aktiven Runde; Übernehmen wendet die angenommenen Einträge aller Runden bis zur aktiven, in Reihenfolge, auf den Text an, der JETZT dasteht:
 // Handänderungen dazwischen bleiben erhalten, ein Eintrag, dessen Element sich seither geändert hat, bricht ab (alles oder nichts).
-import { normalizeValue } from "./canon";
+import { buildCanonTree, canonDocument, canonNode, normalizeValue } from "./canon";
 import { applyChanges, type SvgChange } from "./changes";
 import { changesFor, type DiffEntry } from "./diff";
 import { stripEditorMetadata } from "./editor-metadata";
@@ -181,9 +181,55 @@ export function decide(s: SvgSession, round: number, entry: number, d: Decision)
   return { ...s, rounds: { rounds, active: s.rounds.active } };
 }
 
+/** Zwei Texte, die für die Runde derselbe Ausgang sind: byte-gleich oder kanonisch gleich (Einzug und Zeilenumbruch zählen nicht). Ist einer nicht lesbar, zählt nur Byte-Gleichheit. */
+function sameStand(a: string, b: string): boolean {
+  if (a === b) return true;
+  const ca = canonDocument(a);
+  return ca !== null && ca === canonDocument(b);
+}
+
+/** Die Elemente, denen `assign-ids` auf `text` Namen gibt, samt ihrer kanonischen Form (ohne `id`-Unterschied nach Vergabe); `null`: der Text ist nicht lesbar. */
+function nameAssignment(text: string): Map<string, string> | null {
+  const r = assignMissingIds(text);
+  if (r.issues !== undefined) return null;
+  const tree = buildCanonTree(r.text);
+  if (tree === null) return null;
+  const out = new Map<string, string>();
+  for (const id of r.assigned) {
+    const i = tree.elements.findIndex((e) => e.key === id);
+    if (i >= 0) out.set(id, canonNode(tree, i));
+  }
+  return out;
+}
+
+/** Tragen die Elemente, denen die Runde Namen gab (`then`), jetzt (`now`) dieselben Namen? Nur dann hängen die Einträge späterer Runden (sie nennen `rect-2`) noch am gemeinten
+ *  Element. Ein Element ohne Namen, das seither hinzukam und hinter allen steht, schadet nicht; davor eingefügt verschiebt es die Namen, und der Vergleich fällt auf. */
+function sameNaming(now: Map<string, string> | null, then: Map<string, string> | null): boolean {
+  if (now === null || then === null) return false;
+  for (const [id, canon] of then) if (now.get(id) !== canon) return false;
+  return true;
+}
+
+/** Eine Runde der Kette auf den Text anwenden, der JETZT gilt. Zwei Runden hängen an dem Stand, den sie sahen, und prüfen ihn:
+ *  - ein ganzes Bild (`whole`, angenommen) ersetzt den Text; hat der Nutzer die Datei seither verändert, ginge seine Änderung lautlos verloren (Spec § 3 Punkt 3);
+ *  - „Namen vergeben“ mit einer Folgerunde: deren Einträge nennen die vergebenen Namen, und die leitet die Regel auf dem Text von JETZT ab; ein Element ohne Namen mehr
+ *    oder weniger davor verschöbe die Namen auf andere Elemente. Als letzte Runde der Kette bleibt die Regel frei (ein neues Element bekommt auch einen Namen).
+ *  Einträge von Runden mit Regel `strip-editor-metadata` hängen an ids, nicht an Nummern: dort genügt die Neuableitung. */
+function applyChained(s: SvgSession, text: string | null, r: SvgRound, index: number): Step {
+  const base = baseOf(s, r.basedOn);
+  const b = r.body;
+  if (b.form === "whole" && b.decision === "accepted" && text !== null && base !== null && !sameStand(text, base)) {
+    return fail("Das Ziel hat sich seit der Runde geändert; die Runde ersetzt das ganze Bild.");
+  }
+  if (b.form === "rule" && b.rule === "assign-ids" && index !== s.rounds.active && text !== null && base !== null && !sameStand(text, base)) {
+    if (!sameNaming(nameAssignment(text), nameAssignment(base))) return fail("Die Elemente ohne Namen haben sich seit der Runde geändert; bitte neu Namen vergeben.");
+  }
+  return applyRound(text, r);
+}
+
 /** Der Text, den Übernehmen schreibt: die angenommenen Einträge aller Runden bis zur aktiven, in Reihenfolge, auf den Text, der jetzt gilt. */
 export function acceptText(s: SvgSession, current: string | null): Step {
-  return acceptChain(s.rounds, current, { basedOnOf: (r) => r.basedOn, applyRound: (text, r) => applyRound(text, r) });
+  return acceptChain(s.rounds, current, { basedOnOf: (r) => r.basedOn, applyRound: (text, r, index) => applyChained(s, text, r, index) });
 }
 
 /** Der Text, auf dem die nächste Verfeinerung aufsetzt: der der aktiven Runde (nur Angenommenes), sonst der aktuelle. */

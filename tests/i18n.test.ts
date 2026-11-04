@@ -56,4 +56,18 @@ describe("Messzeile ist einsprachig", () => {
     expect(qualityTexts().measured(row)).toContain("Grundrisse 2 von 3");
     initStrings("en");
   });
+
+  it("qwen: der Zusatz 'ohne top_p gemessen' erscheint in beiden Sprachen, gemma trägt ihn nicht", async () => {
+    const { qualityTexts } = await import("../src/i18n/strings");
+    const { MEASUREMENTS } = await import("../src/core/quality");
+    const qwen = MEASUREMENTS.find((m) => m.model.startsWith("qwen") && m.task === "create")!;
+    const gemma = MEASUREMENTS.find((m) => m.model.startsWith("google") && m.task === "create")!;
+    initStrings("en");
+    expect(qualityTexts().measured(qwen)).toContain("measured without top_p");
+    expect(qualityTexts().measured(qwen)).toContain("floor plans 3 of 3");
+    expect(qualityTexts().measured(gemma)).not.toContain("top_p");
+    initStrings("de");
+    expect(qualityTexts().measured(qwen)).toContain("ohne top_p gemessen");
+    initStrings("en");
+  });
 });

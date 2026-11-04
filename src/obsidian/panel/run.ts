@@ -1,7 +1,7 @@
 // Der Lauf des Panels (Spec § 8 „In der Runde“): Erzeugen und Verfeinern mit Rückfrage bei ungültiger Antwort, dann eine Runde im Rundenmodell.
 // Formatgebunden (SVG); der Kern `shell.ts` ruft ihn über den Slot `run`. Sampling (Modus `transform`, Temperatur 0,2, Denken aus, `max_tokens` 16384) setzt
 // die Verbindung in `main.ts`; hier steht nur, was zum Protokoll gehört.
-import { buildCreateMessages, buildRefineMessages, RETRY_INSTRUCTION, validateCreate, validateRefine, type GuardFn } from "../../core/protocol";
+import { buildCreateMessages, buildRefineMessages, buildRepairMessages, RETRY_INSTRUCTION, validateCreate, validateRefine, validateRepair, type GuardFn } from "../../core/protocol";
 import { svgFailureHint } from "../../core/quality";
 import { addRound, canRefine, refineBaseText, type SvgRound, type SvgSession } from "../../core/session";
 import { getLang, qualityTexts, t } from "../../i18n/strings";
@@ -56,24 +56,7 @@ export async function runSvgPrompt(call: RunCall<SvgSession>, d: SvgRunDeps): Pr
     if (session.rounds.rounds.length === 0) start = { ...session, startText: text };
   }
 
-  let lastProblem = "";
-  const wrap = <V>(verdict: Verdict<V>): Verdict<V> => {
-    if (!verdict.ok) lastProblem = verdict.problem;
-    return verdict;
-  };
-  const ask = askFor(d.llm, {
-    signal: call.signal,
-    onToken: io.onToken,
-    onReasoning: io.onReasoning,
-    onContentReset: io.onContentReset,
-    // Jeder Versuch leert den Antwortbereich; ab dem zweiten sagt der Status, warum gefragt wird.
-    onAttempt: (n) => {
-      if (n === 1) return;
-      io.clearAnswer();
-      io.setStatus("checking", t("run.attempt", n, MAX_RETRIES + 1, lastProblem));
-    },
-  });
-  const opts = (messages: ReturnType<typeof buildCreateMessages>) => ({ messages, instruction: RETRY_INSTRUCTION, maxRetries: MAX_RETRIES, stopOnTruncated: true });
+  const { ask, wrap, opts } = asking(call, d);
 
   io.start();
   try {
@@ -91,19 +74,69 @@ export async function runSvgPrompt(call: RunCall<SvgSession>, d: SvgRunDeps): Pr
     const added = addRound(start, { art: "prompt", instruction, basedOn: start.rounds.active >= 0 ? start.rounds.active : null, body });
     return "problem" in added ? error(t("run.noRound", added.problem)) : { ok: true, session: added, message: t("run.doneRefine") };
   } catch (e) {
-    if (call.signal.aborted) return { ok: false, kind: "aborted" };
-    if (e instanceof LlmAskError) {
-      if (e.kind === "aborted") return { ok: false, kind: "aborted" };
-      if (e.kind === "no-endpoint") return { ok: false, kind: "no-endpoint", detail: noEndpointMessage(e) };
-      return error(t("run.error", e.detail));
-    }
-    return error(t("run.error", e instanceof Error ? e.message : String(e)));
+    return failedRun(e, call);
+  }
+}
+
+/** Frage, Verdict-Umhüllung und Optionen der Rückfrage, gemeinsam für Erzeugen, Verfeinern und Reparatur: jeder Versuch leert den Antwortbereich, ab dem zweiten sagt der Status warum. */
+function asking(call: RunCall<SvgSession>, d: SvgRunDeps) {
+  const { io } = call;
+  let lastProblem = "";
+  const wrap = <V>(verdict: Verdict<V>): Verdict<V> => {
+    if (!verdict.ok) lastProblem = verdict.problem;
+    return verdict;
+  };
+  const ask = askFor(d.llm, {
+    signal: call.signal,
+    onToken: io.onToken,
+    onReasoning: io.onReasoning,
+    onContentReset: io.onContentReset,
+    onAttempt: (n) => {
+      if (n === 1) return;
+      io.clearAnswer();
+      io.setStatus("checking", t("run.attempt", n, MAX_RETRIES + 1, lastProblem));
+    },
+  });
+  const opts = (messages: ReturnType<typeof buildCreateMessages>) => ({ messages, instruction: RETRY_INSTRUCTION, maxRetries: MAX_RETRIES, stopOnTruncated: true });
+  return { ask, wrap, opts };
+}
+
+/** Der Text zu einem Fehler des Laufs (Abbruch, kein Endpunkt, sonstiger Fehler) als Ergebnis des Kerns. */
+function failedRun(e: unknown, call: RunCall<SvgSession>): RunResult<SvgSession> {
+  if (call.signal.aborted) return { ok: false, kind: "aborted" };
+  if (e instanceof LlmAskError) {
+    if (e.kind === "aborted") return { ok: false, kind: "aborted" };
+    if (e.kind === "no-endpoint") return { ok: false, kind: "no-endpoint", detail: noEndpointMessage(e) };
+    return error(t("run.error", e.detail));
+  }
+  return error(t("run.error", e instanceof Error ? e.message : String(e)));
+}
+
+/** Reparatur am Bestand (Spec § 8): das fehlerhafte SVG samt Befund geht ans Modell, mit derselben Rückfrage wie beim Erzeugen; das Ergebnis ist eine Runde `repair`.
+ *  Ist der Ausgang unlesbar, ist der Diff nicht zerlegbar und die Runde steht als „ganzes Bild“. Wirft nicht. */
+export async function runSvgRepair(call: RunCall<SvgSession>, d: SvgRunDeps, o: { text: string; problem: string; instruction: string }): Promise<RunResult<SvgSession>> {
+  const guard = d.guard ?? svgGuard;
+  const { ask, wrap, opts } = asking(call, d);
+  const { session } = call;
+  const start = session.rounds.rounds.length === 0 ? { ...session, startText: o.text } : session;
+  call.io.start();
+  try {
+    const res = await askUntilValid(ask, (raw) => wrap(validateRepair(raw, { guard, base: o.text })), opts(buildRepairMessages(o.text, o.problem)));
+    if (!res.ok) return failed(res, call, "repair", d);
+    const diff = res.value.diff;
+    const body: SvgRound["body"] = diff.decomposable ? { form: "list", entries: diff.entries, decisions: [] } : { form: "whole", text: res.value.svg, decision: "accepted" };
+    const added = addRound(start, { art: "repair", instruction: o.instruction, basedOn: start.rounds.active >= 0 ? start.rounds.active : null, body });
+    return "problem" in added ? error(t("run.noRound", added.problem)) : { ok: true, session: added, message: t("run.doneRepair") };
+  } catch (e) {
+    return failedRun(e, call);
   }
 }
 
 /** Die Antwort blieb ungültig. Abgeschnitten heißt: ein Budget, kein Modellfehler, und keine zweite Anfrage (Review-Fokus 1). Der Rohtext bleibt im Antwortbereich stehen. */
-function failed(res: Extract<AskUntilValidResult<unknown>, { ok: false }>, call: RunCall<SvgSession>, task: "create" | "refine", d: SvgRunDeps): RunResult<SvgSession> {
+function failed(res: Extract<AskUntilValidResult<unknown>, { ok: false }>, call: RunCall<SvgSession>, task: "create" | "refine" | "repair", d: SvgRunDeps): RunResult<SvgSession> {
   if (res.truncated) return error(t("run.tooBig", res.raw.length));
+  // Für die Reparatur gibt es keine Messung: kein Hinweis auf ein einfacheres Wort oder ein größeres Modell, nur der Satz, dass nichts geändert wurde.
+  if (task === "repair") return error(`${t("run.failed", res.problem)} ${t("run.repairFailed")}`);
   const hint = svgFailureHint(call.model, task, { family: d.llm.source().family, texts: qualityTexts() });
   return error(`${t("run.failed", res.problem)} ${hint}`);
 }

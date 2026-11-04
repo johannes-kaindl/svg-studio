@@ -40,7 +40,7 @@ describe("MEASUREMENTS", () => {
     const row = (model: string, task: string) => MEASUREMENTS.find((m) => m.model.startsWith(model) && m.task === task)!;
     for (const model of ["qwen/qwen3.8-27b", "google/gemma-4-e4b"]) {
       expect([row(model, "create").good, row(model, "create").of]).toEqual([e(model).guard, e(model).n]);
-      expect(row(model, "create").extra).toBe(`plans:${e(model).grundrisseMasstreu}/3`);
+      expect(row(model, "create").extra?.split(";")[0]).toBe(`plans:${e(model).grundrisseMasstreu}/3`);
       expect([row(model, "refine").good, row(model, "refine").of]).toEqual([v(model).erfuellt, v(model).n]);
     }
     // Die Zahlen der Messnote nach der Korrektur der Auswertung vom 2026-11-04.
@@ -55,7 +55,7 @@ describe("MEASUREMENTS", () => {
 
   it("qwen wird auch unter @4bit gefunden", () => {
     expect(findMeasurement("qwen/qwen3.8-27b@4bit", "create", MEASUREMENTS)?.good).toBe(10);
-    expect(svgQualityLine("qwen/qwen3.8-27b@4bit", "refine", o)).toEqual({ measured: true, text: "Gemessen: 8 von 8 (qwen/qwen3.8-27b)." });
+    expect(svgQualityLine("qwen/qwen3.8-27b@4bit", "refine", o)).toEqual({ measured: true, text: "Gemessen: 8 von 8, no-top-p (qwen/qwen3.8-27b)." });
   });
 });
 
@@ -76,7 +76,7 @@ describe("svgQualityLine", () => {
 describe("svgQualityLine mit Denken", () => {
   it("thinking: true → Zusatz an gemessener und an Bezugszeile, nicht an 'nicht gemessen'", () => {
     const t = { ...o, thinking: true };
-    expect(svgQualityLine("qwen/qwen3.8-27b", "create", t).text).toBe(`Gemessen: 10 von 10, plans:3/3 (qwen/qwen3.8-27b). ${NOTE}`);
+    expect(svgQualityLine("qwen/qwen3.8-27b", "create", t).text).toBe(`Gemessen: 10 von 10, plans:3/3;no-top-p (qwen/qwen3.8-27b). ${NOTE}`);
     expect(svgQualityLine("meta/llama-9", "create", t).text).toContain(NOTE);
     expect(svgQualityLine("x", "create", { ...t, family: "claude" }).text).toBe("Für dieses Modell nicht gemessen.");
   });

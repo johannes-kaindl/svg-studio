@@ -223,3 +223,114 @@ describe("Ergebnis stimmt mit der Antwort", () => {
     expect(canonDocument(s.rounds.rounds[0].result)).toBe(canonDocument(answer));
   });
 });
+
+describe("acceptText: ein ganzes Bild ersetzt nur den Ausgang, den die Runde kannte (Review C4, B1)", () => {
+  const neu = S(`  <g id="gruppe">\n    <circle id="mond" r="60"/>\n  </g>\n  <rect id="haus" x="1"/>`);
+  const whole = (startText: string, text: string, art: "prompt" | "repair" = "prompt"): SvgSession =>
+    ok(addRound(open(startText), { art, instruction: "x", basedOn: null, body: { form: "whole", text, decision: "accepted" } }));
+
+  it("die Datei ist, wie die Runde sie sah → das ganze Bild wird übernommen", () => {
+    expect(acceptText(whole(BASE, neu), BASE)).toEqual({ ok: true, text: neu });
+  });
+
+  it("eine Handänderung seither (ein Element ergänzt) → Abbruch mit Meldung, nichts wird ersetzt", () => {
+    const hand = BASE.replace("</svg>", `  <text id="notiz">Wichtig</text>\n</svg>`);
+    const r = acceptText(whole(BASE, neu), hand);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.problem).toMatch(/^round 1: Das Ziel hat sich seit der Runde geändert/);
+  });
+
+  it("dasselbe als Reparatur eines unlesbaren Ausgangs (roher Vergleich, weil kanonisch nichts zu vergleichen ist)", () => {
+    const broken = `<svg xmlns="http://www.w3.org/2000/svg"><g id="g"><circle id="mond" r="4"/></svg>`;
+    const fixed = `<svg xmlns="http://www.w3.org/2000/svg"><g id="g"><circle id="mond" r="4"/></g></svg>`;
+    const s = whole(broken, fixed, "repair");
+    expect(acceptText(s, broken)).toEqual({ ok: true, text: fixed });
+    const hand = broken.replace("</svg>", `<text id="notiz">Wichtig</text></svg>`);
+    expect(acceptText(s, hand).ok).toBe(false);
+  });
+
+  it("anderer Zeilenumbruch und Einzug allein sind keine Handänderung (kanonisch gleich)", () => {
+    const reformatted = BASE.replace(/\n {2}/g, "\n      ").replace(/\n/g, "\r\n");
+    expect(acceptText(whole(BASE, neu), reformatted)).toEqual({ ok: true, text: neu });
+  });
+
+  it("eine abgelehnte ganze Runde ändert nichts und prüft nichts", () => {
+    const rej = ok(addRound(open(BASE), { art: "prompt", instruction: "x", basedOn: null, body: { form: "whole", text: neu, decision: "rejected" } }));
+    const hand = BASE.replace(`x="1"`, `x="9"`);
+    expect(acceptText(rej, hand)).toEqual({ ok: true, text: hand });
+  });
+
+  it("Kette: Einträge, dann ein ganzes Bild auf deren Ergebnis → übernommen; mit Handänderung dazwischen nicht", () => {
+    let s = ok(addRound(open(BASE), prompt(BASE, BASE.replace(`r="40"`, `r="60"`))));
+    const after = s.rounds.rounds[0].result;
+    s = ok(addRound(s, { art: "prompt", instruction: "y", basedOn: 0, body: { form: "whole", text: neu, decision: "accepted" } }));
+    expect(acceptText(s, BASE)).toEqual({ ok: true, text: neu });
+    expect(after).not.toBe(BASE);
+    const r = acceptText(s, BASE.replace(`x="1"`, `x="9"`));
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.problem).toMatch(/^round 2:/);
+  });
+});
+
+describe("acceptText: „Namen vergeben“ mit Folgerunde (Review C4, B2)", () => {
+  const UNNAMED = S(`  <rect x="1"/>\n  <rect x="2"/>`);
+  const withFollow = (): SvgSession => {
+    let s = ok(addRound(open(UNNAMED), { art: "names", instruction: "n", basedOn: null, body: { form: "rule", rule: "assign-ids" } }));
+    s = ok(addHandChange(s, [{ op: "change", id: "rect-2", attrs: { fill: "red" } }], "Von Hand"));
+    return s;
+  };
+
+  it("unverändert → beide Runden greifen, das zweite Rechteck wird rot", () => {
+    const r = acceptText(withFollow(), UNNAMED);
+    expect(r).toEqual({ ok: true, text: S(`  <rect x="1" id="rect-1"/>\n  <rect x="2" id="rect-2" fill="red"/>`) });
+  });
+
+  it("ein Element ohne id davor eingefügt → Abbruch, es wird nie das falsche Rechteck rot", () => {
+    const hand = UNNAMED.replace(`  <rect x="1"/>`, `  <rect x="0" data-hand="ja"/>\n  <rect x="1"/>`);
+    const r = acceptText(withFollow(), hand);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.problem).toMatch(/^round 1: Die Elemente ohne Namen haben sich seit der Runde geändert/);
+  });
+
+  it("ein Element ohne id HINTER den vergebenen Namen (am Ende ergänzt) verschiebt nichts: das zweite Rechteck wird rot, das neue bekommt rect-3", () => {
+    const hand = UNNAMED.replace("</svg>", `  <rect x="3"/>\n</svg>`);
+    const r = acceptText(withFollow(), hand);
+    expect(r).toEqual({ ok: true, text: S(`  <rect x="1" id="rect-1"/>\n  <rect x="2" id="rect-2" fill="red"/>\n  <rect x="3" id="rect-3"/>`) });
+  });
+
+  it("das benannte Element ist seither gelöscht → Abbruch mit der Meldung zu den Namen (nicht erst die Folgerunde)", () => {
+    const hand = UNNAMED.replace(`  <rect x="2"/>\n`, "");
+    const r = acceptText(withFollow(), hand);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.problem).toMatch(/^round 1: Die Elemente ohne Namen haben sich seit der Runde geändert/);
+  });
+
+  it("eine Handänderung an anderer Stelle (benannte Elemente) ist kein Grund abzubrechen", () => {
+    const withNamed = S(`  <circle id="mond" r="4"/>\n  <rect x="1"/>\n  <rect x="2"/>`);
+    let s = ok(addRound(open(withNamed), { art: "names", instruction: "n", basedOn: null, body: { form: "rule", rule: "assign-ids" } }));
+    s = ok(addHandChange(s, [{ op: "change", id: "rect-2", attrs: { fill: "red" } }], "Von Hand"));
+    const hand = withNamed.replace(`r="4"`, `r="7"`);
+    const r = acceptText(s, hand);
+    expect(r).toEqual({ ok: true, text: S(`  <circle id="mond" r="7"/>\n  <rect x="1" id="rect-1"/>\n  <rect x="2" id="rect-2" fill="red"/>`) });
+  });
+
+  it("der Text ist inzwischen nicht mehr lesbar → Abbruch mit Meldung, kein Wurf", () => {
+    const r = acceptText(withFollow(), `<svg xmlns="http://www.w3.org/2000/svg"><rect x="1"/><g></svg>`);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.problem).toMatch(/^round 1: Die Elemente ohne Namen haben sich seit der Runde geändert/);
+  });
+
+  it("als LETZTE Runde darf auch ein Element ohne id VOR den anderen stehen: die Regel benennt auf dem Text von JETZT, es hängt nichts an den alten Namen", () => {
+    const s = ok(addRound(open(UNNAMED), { art: "names", instruction: "n", basedOn: null, body: { form: "rule", rule: "assign-ids" } }));
+    const hand = UNNAMED.replace(`  <rect x="1"/>`, `  <rect x="0"/>\n  <rect x="1"/>`);
+    const r = acceptText(s, hand);
+    expect(r.ok && r.text).toContain(`<rect x="0" id="rect-1"/>`);
+  });
+
+  it("ohne Folgerunde wird die Regel weiter auf dem Text von JETZT abgeleitet (auch ein neues Element bekommt eine id)", () => {
+    const s = ok(addRound(open(UNNAMED), { art: "names", instruction: "n", basedOn: null, body: { form: "rule", rule: "assign-ids" } }));
+    const hand = UNNAMED.replace("</svg>", `  <rect x="3"/>\n</svg>`);
+    const r = acceptText(s, hand);
+    expect(r.ok && r.text).toContain(`id="rect-3"`);
+  });
+});

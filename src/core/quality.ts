@@ -3,7 +3,7 @@
 // und für Sampling `transform` (Temperatur 0,2, Denken aus, `max_tokens` 16384). Neue Zeilen kommen nur aus einem Messlauf (`docs/internal/LAB.md`).
 // Die Zahlen leitet `quality.test.ts` aus der archivierten Auswertung (`tests/fixtures/lab/auswertung-2026-11-02.json`) ab. Sie sind die der
 // Messnote nach der Korrektur der Auswertung vom 2026-11-04 (Leser des Plugins statt des Entwurfs im Denkkanal von Gemma).
-// `extra` ist sprachneutral (`plans:2/3` = Grundrisse maßtreu 2 von 3); den Satz baut `qualityTexts()` aus `src/i18n/strings.ts`.
+// `extra` ist sprachneutral, Teile mit `;` getrennt: `plans:2/3` = Grundrisse maßtreu 2 von 3; `no-top-p` = ohne top_p gemessen (die Verbindung sendet es für die qwen-Familie, Entscheidung Johannes 2026-11-04: Vorbehalt jetzt, Nachmessung später); den Satz baut `qualityTexts()` aus `src/i18n/strings.ts`.
 // „Erzeugen“ zählt die vom Bereiniger (`svg-guard`) angenommenen Antworten, „Verfeinern“ die Fälle, in denen die Anweisung erfüllt ist (vollständiges SVG).
 import { failureHint, qualityLine, type Measurement, type QualityTexts } from "../vendor/kit/measured-quality";
 import { promptFingerprint } from "./protocol";
@@ -14,9 +14,9 @@ const CREATE_SHA = promptFingerprint("create");
 const REFINE_SHA = promptFingerprint("refine");
 
 export const MEASUREMENTS: readonly Measurement[] = [
-  { model: "qwen/qwen3.8-27b", aliases: QWEN_ALIASES, mode: "transform", task: "create", good: 10, of: 10, extra: "plans:3/3", measuredAt: "2026-11-02", promptSha: CREATE_SHA, source: SOURCE },
+  { model: "qwen/qwen3.8-27b", aliases: QWEN_ALIASES, mode: "transform", task: "create", good: 10, of: 10, extra: "plans:3/3;no-top-p", measuredAt: "2026-11-02", promptSha: CREATE_SHA, source: SOURCE },
   { model: "google/gemma-4-e4b", mode: "transform", task: "create", good: 9, of: 10, extra: "plans:2/3", measuredAt: "2026-11-02", promptSha: CREATE_SHA, source: SOURCE },
-  { model: "qwen/qwen3.8-27b", aliases: QWEN_ALIASES, mode: "transform", task: "refine", good: 8, of: 8, measuredAt: "2026-11-02", promptSha: REFINE_SHA, source: SOURCE },
+  { model: "qwen/qwen3.8-27b", aliases: QWEN_ALIASES, mode: "transform", task: "refine", good: 8, of: 8, extra: "no-top-p", measuredAt: "2026-11-02", promptSha: REFINE_SHA, source: SOURCE },
   { model: "google/gemma-4-e4b", mode: "transform", task: "refine", good: 6, of: 8, measuredAt: "2026-11-02", promptSha: REFINE_SHA, source: SOURCE },
 ];
 
