@@ -1,0 +1,623 @@
+// vendored from obsidian-kit@0.79.1, src/obsidian/llm-connection.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+/** Die LLM-Anbindung eines Fachplugins als EINE Komposition: Endpunkt-Quelle (Manager oder lokale
+ *  Liste mit Schlüsselbund), gemerkte Auflösung, Modellliste, Anfrage-Parameter je Modus, Client mit
+ *  Transport und Fristen, Prüfung der Antwort und beide Settings-Abschnitte.
+ *
+ *  Warum es das gibt: die Bausteine lagen im Kit, ihre Zusammensetzung nicht. Die Messung
+ *  `_SDD/2026-10-03-llm-anbindung-messung.md` (kit-llm) fand sie in 16 Resolve-Stellen und 12
+ *  Client-Wrappern je neu verdrahtet — eine Kopier-Kette für das Merken der Auflösung, sieben
+ *  Bauten des `ResponseFacts`, drei Kopien der Fristen. Was dort OHNE Grund verschieden war, ist
+ *  hier eine Regel; was einen fachlichen Grund hat, ist eine Option oder ein Hook:
+ *
+ *  - zweite Liste (Embedding, Bild): zwei Verbindungen je Fähigkeit, nicht eine mit zwei Listen —
+ *    `capability` "embedding" und "image" sind deshalb RESERVIERT und werfen (noch nicht gebaut);
+ *  - Bildteile und Prompts: `buildMessages` ist ein Parameter von `complete`, nicht Logik hier;
+ *  - Tool-Calls (koda) und ein Gesamt-Timer (vault-crews) bleiben beim Plugin: koda nimmt
+ *    `createChatClient` direkt, `totalMs` ist Sache des Aufrufers (`signal`);
+ *  - Manager-only (ghostline): `managerOnly`; kein Fallback-Transport (koda): `fallback: "none"`;
+ *    Kurzbefehl-Transport (transmute, lingotuner): `transports.shortcuts`;
+ *  - Ping (`probe`) und Backend-Erkennung (`backendOf`, Default `createObsidianBackendProbe`) sind
+ *    überschreibbar.
+ *
+ *  Vereinheitlicht (ohne Grund verschieden gewesen): `choice` gilt NUR mit Manager — ohne ihn
+ *  übersteuerte eine alte Manager-Wahl das lokale Modell (nur transmute, neurovim und
+ *  image-to-markdown hatten das gefiltert); der Manager wird nie gemerkt, die lokale Auflösung bis
+ *  `invalidate()`; der erste Chunk bekommt die JIT-Frist; `truncated` ist standardmäßig ein
+ *  Ergebnis mit `finishReason: "length"`; `errorText = body ?? detail`.
+ *
+ *  Transport-Verdrahtung: ohne Angabe wählt `transportFor` selbst — `xhrSseTransport` (Stream) mit
+ *  `requestUrlTransport` als Rückfall ohne Stream (CORS-freier Weg über den Hauptprozess). Ein Plugin
+ *  übergibt `transports` nur, wenn es davon abweichen muss: `fallback: "none"` (koda), `shortcuts`
+ *  für Apple Intelligence (transmute, lingotuner) oder eigene Transporte in Tests.
+ *
+ *  `onResolved` und `models()` (seit 0.70.0): `models()` löst still auf, `onResolved` feuert dabei nur, wenn das Ergebnis sich vom zuletzt
+ *  gezeigten unterscheidet (Adresse, Modell, Familie, Backend, Grund). Vorher rief jede Auflösung den Rückruf, und ein Rückruf, der
+ *  `models()` rief (Modellzeile neu laden), lief im Kreis; `resolve()`, `invalidate()` und `setModel()` melden weiter immer. Trotzdem gilt
+ *  für den Rückruf: nur neu zeichnen, wenn sich etwas geändert hat (vault-rag und image-to-markdown tun es und können es behalten).
+ *
+ *  **`onResolved` darf `resolve()` nicht rufen, auch nicht mittelbar** (seit 0.70.1 mit Sperre): ein `resolve()`, das synchron aus dem eigenen Rückruf kommt, löst auf und
+ *  meldet nur ein geändertes Ergebnis (wie `models()`). Ruft der Rückruf `resolve()` erst nach einem Warten (Speichern, eine Probe, ein Timer), greift die Sperre nicht und
+ *  jede Auflösung ruft ihn wieder: ein Kreis (Renderer 101 % CPU; gemessen am settings-assistant über `refreshChatViews` → `reload()` → `resolveEndpoint()` → `resolve()`).
+ *  Dort bleibt es beim Hinweis: den Rückruf nur neu zeichnen lassen, die Auflösung davon trennen.
+ *
+ *  Vertrag an `persist`: es übernimmt den Patch in die Settings des Plugins SYNCHRON (bevor es
+ *  speichert) — die Endpunkt-Liste liest ihre Zeilen danach über `getSettings()` zurück. */
+import { Setting, type App } from "obsidian";
+import { normalizeEndpoint } from "../kit/endpoint";
+import type { RedactRules } from "../kit/redact";
+import { type EndpointConfig } from "../kit/endpoint_config";
+import { createModelListCache, type ModelListResult } from "../kit/model-list-cache";
+import {
+  checkResponse, mapTruncated, overrideDroppedDeviation, resolveRequestParams, responseFactsOf, thinkingFor, DEFAULT_REQUEST_SETTINGS,
+  type BackendId, type Deviation, type FamilyKey, type ModeId, type RequestSettings, type ResponseFacts, type ThinkingLevel, type TruncatedPolicy,
+} from "../kit/sampling-profiles";
+import {
+  resolveEndpointSource, describeModel,
+  type Capability, type EndpointChoice, type EndpointSourceResult, type LlmEndpointManagerApi, type ShortcutTransportConfig,
+} from "../kit/endpoint-source";
+import {
+  createChatClient, JIT_FIRST_CHUNK_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS,
+  type ChatClient, type ChatResult, type ChatTiming, type ChatWireMessage, type SseTransport,
+} from "./chat-client";
+import { requestUrlTransport, transportFor, TransportMissingError, xhrSseTransport } from "./chat-transport";
+import { splitCallOverrides } from "../kit/override-guard";
+import { createAnthropicChatTransport, createAnthropicState, type AnthropicState } from "./anthropic-transport";
+import { realClock, type ClockPort } from "./clock";
+import { createObsidianBackendProbe, fetchLoadedModelsAt } from "./backend-probe";
+import type { LoadedModel } from "../kit/capabilities";
+import { buildEndpointList } from "./endpoint-list";
+import { prepareLocalEndpoints } from "./endpoint-secrets";
+import { createEndpointPlumbing } from "./endpoint-plumbing";
+import { createEmbeddingConnection, type EmbeddingConnection, type EmbeddingConnectionOptions } from "./embedding-connection";
+import { buildEndpointSourceSection, findEndpointManager, openEndpointManagerSettings } from "./endpoint-source";
+import { buildRequestSection, type RequestSectionState } from "./request-section";
+import { createRequestSession, type RequestSession } from "./request-session";
+import { LLM_CONNECTION_STRINGS_DE, LLM_CONNECTION_STRINGS_EN, resolveLlmConnectionStrings, type LlmConnectionStrings, type LlmConnectionStringsOverride } from "./llm-connection-strings";
+
+export type { LlmConnectionStrings };
+
+export interface LlmConnectionSettings {
+  endpoints: EndpointConfig[];
+  /** Wahl am Manager; ohne Manager ohne Wirkung. */
+  choice?: EndpointChoice;
+  request?: RequestSettings;
+}
+
+export interface LlmConnectionTimeouts {
+  idleMs?: number;
+  /** Default `JIT_FIRST_CHUNK_TIMEOUT_MS`. */
+  firstChunkMs?: number;
+  toolIdleMs?: number;
+  nonStreamMs?: number;
+}
+
+export interface LlmConnectionTransports {
+  /** Default `xhrSseTransport`; Tests und Sonderfälle injizieren. */
+  http?: SseTransport;
+  /** Default `requestUrlTransport`; nur mit `fallback: "auto"` wirksam. */
+  httpFallback?: SseTransport;
+  /** Transport für Endpunkte mit `transport: "shortcuts"` — fertig oder aus der Kurzbefehl-Konfiguration gebaut. */
+  shortcuts?: SseTransport | ((shortcut: ShortcutTransportConfig) => SseTransport);
+  /** Opt-in für Endpunkte mit `transport: "anthropic"` (native Messages-API, Welle 23): `true` verdrahtet den Kit-Transport
+   *  (`createAnthropicChatTransport` über `http`/`httpFallback`), ein `SseTransport` ersetzt ihn. Ohne Opt-in fragt die
+   *  Verbindung den Manager nicht nach solchen Endpunkten (`list`/`resolve` ohne `"anthropic"` in `transports`).
+   *  **Seit 0.73.0 `"explicit"`:** derselbe Transport, aber „Automatisch“ fragt nur `["http"]`; die Eintragsliste und eine ausdrückliche Wahl
+   *  (`choice`) kennen Claude. Bei `true` nimmt „Automatisch“ den ersten Eintrag mit der Fähigkeit, und die Claude-Vorlage trägt `vision`:
+   *  steht Claude vorn, gingen Bilder ohne Rückfrage an Anthropic. Ein älterer Manager ignoriert das Feld `transports` (dann gilt für beide Wege sein Standard). */
+  anthropic?: boolean | "explicit" | SseTransport;
+  /** `"auto"` (Default): nach einem Netzfehler im Stream einmal ohne Stream wiederholen; `"none"` (koda):
+   *  ein CORS-Block soll sichtbar bleiben. */
+  fallback?: "auto" | "none";
+}
+
+export interface LlmConnectionOptions {
+  app: App;
+  pluginId: string;
+  caller: string;
+  /** "chat" und "vision" sind gebaut; "image" reserviert den Namen und wirft. `"embedding"` liefert seit 0.54.0 eine
+   *  `EmbeddingConnection` (`EmbeddingConnectionOptions`), keine `LlmConnection`. */
+  capability: Exclude<Capability, "embedding">;
+  getSettings(): LlmConnectionSettings;
+  persist(patch: Partial<LlmConnectionSettings>): Promise<void>;
+  /** Erreichbarkeit einer lokalen Zeile (Default: `GET /v1/models`, 5 s). Wird nur ohne Manager gerufen. */
+  probe?: (cfg: EndpointConfig) => Promise<boolean>;
+  /** Modell-Ids einer lokalen Zeile (Default: `GET /v1/models`). */
+  listModels?: (cfg: EndpointConfig) => Promise<string[]>;
+  /** Zeigt in der lokalen Endpunkt-Liste unter jeder erreichbaren Zeile mit Modell die Kontextlänge („geladen N · max M“),
+   *  wenn der Server sie nennt (LM Studio, Ollama). Default an; `false` schaltet sie ab. */
+  contextLength?: boolean;
+  /** Backend des Endpunkts, wenn der Manager es nicht nennt. Default: `createObsidianBackendProbe()`
+   *  (je Verbindung ein eigener 30-s-Zwischenspeicher); überschreibbar. */
+  backendOf?: (cfg: EndpointConfig) => Promise<BackendId | null>;
+  /** Welche Modelle der Endpunkt gerade geladen hat — für die Warnung im Anfrage-Abschnitt, wenn die Anfrage ein anderes per JIT laden und ein
+   *  geladenes verdrängen würde (nur LM Studio). Default: `fetchLoadedModelsAt` (`GET /api/v1/models`, nur lesend). `null` = unbekannt. */
+  loadedModels?: (cfg: EndpointConfig) => Promise<readonly LoadedModel[] | null>;
+  managerOnly?: boolean;
+  /** Seit 0.67.0: bedient diese Zeile nur die Suche? Dann trägt sie in der gezeichneten Liste die Rolle `search-only` („für Suche genutzt, schreibt nicht“)
+   *  statt `skipped-model`/`standby` (`buildEndpointList` `isSearchOnly`; Vorrang `active` > `unreachable` > `search-only`). Fehlt die Option, bleibt die Liste
+   *  wie bisher. Die Verbindung selbst ändert nichts: das Wissen, welche Zeile nur sucht, bleibt beim Plugin. */
+  isSearchOnly?: (cfg: EndpointConfig) => boolean;
+  transports?: LlmConnectionTransports;
+  timeouts?: LlmConnectionTimeouts;
+  /** Sampling-Modus; je Aufruf überschreibbar. */
+  mode: ModeId;
+  /** Budget des Plugins (`max_tokens`); Funktion je Modus oder fester Wert. */
+  maxTokens?: number | ((mode: ModeId) => number | undefined);
+  /** Default `"result"`. */
+  truncated?: TruncatedPolicy;
+  /** Text einer Abweichung für die Notice. Default (seit 0.50.0): `deviationNotice` der Kit-Texte in
+   *  der Sprache `lang`; `null` schaltet die Notice ab. Bis 0.49.x gab es ohne ihn keine Notice. */
+  deviationMessage?: ((d: Deviation) => string) | null;
+  /** Sprache des Default-Notice-Texts; eine Funktion wird je Notice gefragt. Default `"en"`. */
+  lang?: "en" | "de" | (() => "en" | "de");
+  /** Zeigt im Anfrage-Abschnitt den Schalter „Stufenwahl im Chat“ (`levelPickerInChat`). Default `false`:
+   *  `true` nur, wenn das Plugin den Wert an ein frei eingebautes `buildThinkingControl` (`levelPicker`) reicht, sonst wirkt der Schalter nicht; mit der Modellzeile (`buildModelBar`) nie
+   *  (sie zeigt die Stufe immer als Dropdown). Seit 0.76.0 hält ein gespeichertes `true` den Schalter ohne diese Option nicht mehr am Leben (der Wert bleibt in den Daten). */
+  levelPicker?: boolean;
+  /** Antwort als Stream (Default `true`). `false` fragt eine volle Completion ab (`stream: false`), mit
+   *  `timeouts.nonStreamMs` als Frist; je Aufruf überschreibbar (`CompleteHandlers.stream`). Für Plugins,
+   *  die bisher ohne Stream fragten (transmute, lingotuner): ohne die Option liefen sie still auf dem
+   *  XHR-Stream, `requestUrl` wäre nur der Rückfall. */
+  stream?: boolean;
+  /** Wie `content` im Ergebnis restauriert wird (`chat-client` `restoreContent`): `"text"` (Default) oder `"json"` für
+   *  Konsumenten, die JSON aus `content` parsen (ein mehrzeiliger PEM bliebe sonst ein ungültiger JSON-String). Je Aufruf überschreibbar. */
+  restoreContent?: "text" | "json";
+  /** Wird nach jeder abgeschlossenen Auflösung gerufen (auch der internen aus Liste, Wahl und `invalidate`),
+   *  nicht bei einem gemerkten Ergebnis und nicht bei einem überholten parallelen Lauf. Für Plugin-eigene Zeilen
+   *  im Settings-Tab (Kontextlänge, Modelldetails), die einer Endpunkt-Änderung folgen sollen.
+   *  **Kreis:** ein Callback, der selbst `resolve()` auslöst (z. B. über eine Probe), läuft im Kreis — jede Auflösung ruft ihn wieder. Seit 0.70.1 meldet ein `resolve()`, das
+   *  SYNCHRON aus dem Rückruf kommt, nicht erneut (nur ein geändertes Ergebnis); ruft er es erst nach einem Warten, bleibt der Kreis.
+   *  Seit 0.70.0 gilt das nicht mehr für `models()`: es löst still auf und meldet nur eine Änderung (Adresse, Modell, Familie, Backend,
+   *  Grund). Trotzdem nur neu zeichnen, wenn sich das Ergebnis geändert hat (image-to-markdown: „nur bei geändertem Modell“). */
+  onResolved?: (result: EndpointSourceResult) => void;
+  /** Modi, die der Anfrage-Abschnitt in `renderSettings` zeigt (Default `[mode]`). */
+  modes?: ModeId[];
+  /** Schwärzung der gesendeten Nachrichten (Default an, nur Geheimnisse; `chat-client` Kopfkommentar):
+   *  `{ rules }` ersetzt den Regelsatz, `false` schaltet sie ab. Das Ergebnis meldet `redactions`;
+   *  `redactMessages(messages, rules)` liefert dieselbe Schwärzung für eine Vorschau, und
+   *  `strings.redactedNote(n)` die Hinweiszeile dazu („N Stellen geschwärzt“). */
+  redact?: false | { rules?: RedactRules };
+  /** Notice-Ausgabe der Sitzung (Default: Obsidian `Notice`). */
+  notice?: (text: string) => void;
+  clock?: ClockPort;
+}
+
+
+export interface NoEndpointResult {
+  ok: false;
+  kind: "no-endpoint";
+  /** Grund des Managers (`no-endpoint`, `disabled`, …) oder die Konfigurationsmeldung. */
+  detail: string;
+  /** Seit 0.63.0: `"transport-missing"`, wenn der Endpunkt einen Transport verlangt, den das Plugin nicht bereitstellt (Vertragsverletzung des
+   *  Managers oder fehlendes Opt-in) — dann nennt `transport` ihn. Kein Fehler des Kurzbefehls, auch wenn `transport` `"shortcuts"` ist, nur dort
+   *  ist es die fehlende Brücke. Text: `transportMissingText(strings, transport)`. */
+  reason?: "transport-missing";
+  transport?: "shortcuts" | "anthropic";
+  partial: string;
+  reasoning: string;
+  timing: ChatTiming;
+  /** Immer 0: vor dem Senden gab es nichts zu schwärzen. */
+  redactions?: number;
+}
+export type LlmResult = (ChatResult | NoEndpointResult) & {
+  /** Tatsachen für `checkResponse`; `null`, wenn keine Server-Antwort vorlag. */
+  facts: ResponseFacts | null;
+  deviations: Deviation[];
+  source: EndpointSourceResult;
+};
+
+export interface CompleteRequest {
+  messages?: readonly ChatWireMessage[];
+  /** Baut die Nachrichten aus der aufgelösten Quelle (Familie, gesendetes Modell) — Bildteile und
+   *  Prompts bleiben Sache des Plugins. */
+  buildMessages?: (source: EndpointSourceResult) => readonly ChatWireMessage[];
+}
+export interface CompleteHandlers {
+  onToken?: (text: string) => void;
+  onReasoning?: (text: string) => void;
+  /** Nimmt zurück, was `onToken` bisher geliefert hat: es war das Denken. Nur bei Gemma 4 (Familie aus der Quelle, sonst aus
+   *  dem Modellnamen), siehe `ChatRequest.onContentReset`. Der Konsument verwirft seinen gesammelten Antworttext
+   *  (`StableMarkdownWriter.resetContent()`). */
+  onContentReset?: () => void;
+  signal?: AbortSignal;
+  /** Überschreibt `createLlmConnection({ stream })` für diesen Aufruf. */
+  stream?: boolean;
+  /** Überschreibt `createLlmConnection({ restoreContent })` für diesen Aufruf. */
+  restoreContent?: "text" | "json";
+  /** Sendet für diesen Aufruf ein anderes Modell als das aufgelöste. Alias (`aliasOf`), Familie, Profil und `facts`
+   *  werden für dieses Modell bestimmt (Manager-Tabelle, sonst Namensrater); `result.source` nennt es. */
+  model?: string;
+  /** Überschreibt die Denkstufe aus den Settings für diesen Aufruf. */
+  thinking?: ThinkingLevel;
+  mode?: ModeId;
+  /** Felder, die über die Profil-Parameter gemischt werden (z. B. `stop`). */
+  overrides?: Record<string, unknown>;
+}
+
+export interface LlmConnection {
+  resolve(opts?: { force?: boolean }): Promise<EndpointSourceResult>;
+  invalidate(): void;
+  models(opts?: { force?: boolean }): Promise<ModelListResult>;
+  source(): RequestSectionState;
+  complete(req: CompleteRequest, handlers?: CompleteHandlers): Promise<LlmResult>;
+  /** Ohne `strings` gelten die englischen Default-Texte; `{ lang: "de" }` die deutschen, ein Teil-Bündel
+   *  überlagert den Default Feld für Feld (`LLM_CONNECTION_STRINGS_EN/DE`). */
+  renderSettings(containerEl: HTMLElement, strings?: LlmConnectionStrings | LlmConnectionStringsOverride): void;
+  /** Beim Schließen des Settings-Tabs rufen (`hide()`): verwirft die Modell-Listen des Tabs. */
+  hideSettings(): void;
+  /** Modellwahl eines Panels (Dropdown im Chat, Modellfeld im Panel). Mit Manager ändert sie nur `choice.model`;
+   *  ohne Manager schreibt sie das Modell der AKTIVEN lokalen Zeile (gefunden über `id`, nur ohne `id` über die URL) —
+   *  das globale Modell-Feld gibt es dafür nicht mehr. `""` leert die Wahl (Manager) bzw. die Zeile („Server wählt“).
+   *  Löst danach mit `force` neu auf (`onResolved` feuert; die Modell-Caches bleiben). Ohne aktiven Endpunkt: nichts.
+   *  Bis zum Ende gilt die Wahl schon in `modelInUse()` und als Default von `complete()` ohne `model`.
+   *  Origin: vault-rag/src/main.ts `applyChatModel`. */
+  setModel(model: string): Promise<void>;
+  /** Das Modell, das eine Anfrage jetzt mitschickt: die ausstehende Wahl von `setModel`, sonst `source().model`
+   *  (der Auswahlname; vor der ersten Auflösung `""`). Der Name auf dem Draht steht in `source().sentModel`.
+   *  Origin: vault-rag/src/main.ts `chatModelInUse`. */
+  modelInUse(): string;
+  readonly session: RequestSession;
+}
+
+const NEUTRAL_SOURCE = (): RequestSectionState => ({
+  family: null, familySource: "none", backend: "unknown", backendSource: "none", model: "", sentModel: "",
+});
+
+export function createLlmConnection(o: EmbeddingConnectionOptions): EmbeddingConnection;
+export function createLlmConnection(o: LlmConnectionOptions): LlmConnection;
+export function createLlmConnection(o: LlmConnectionOptions | EmbeddingConnectionOptions): LlmConnection | EmbeddingConnection {
+  if (o.capability === "embedding") return createEmbeddingConnection(o);
+  return createChatConnection(o);
+}
+
+function createChatConnection(o: LlmConnectionOptions): LlmConnection {
+  if (o.capability === "image") {
+    throw new Error(
+      `createLlmConnection: capability "${o.capability}" ist reserviert und noch nicht gebaut — vorgesehen ist eine zweite Verbindung je Fähigkeit `
+      + "(statt einer Verbindung mit zwei Listen). Bis dahin: die Endpunkt-Quelle direkt verdrahten (local-image-generator Bild).",
+    );
+  }
+  const clock = o.clock ?? realClock;
+
+  const plumbing = createEndpointPlumbing<LlmConnectionSettings>({
+    app: o.app, pluginId: o.pluginId, clock, getSettings: () => o.getSettings(), persist: (patch) => o.persist(patch),
+    ...(o.probe ? { probe: o.probe } : {}), ...(o.listModels ? { listModels: o.listModels } : {}),
+  });
+  const { persist, probeOf, listOf, clientFor } = plumbing;   // `plumbing.applyModel` gleich unten (setModel)
+  const policy: TruncatedPolicy = o.truncated ?? "result";
+  const fallback = o.transports?.fallback ?? "auto";
+  const langNow = (): "en" | "de" => (typeof o.lang === "function" ? o.lang() : o.lang) ?? "en";
+  const message = o.deviationMessage === null ? null
+    : (o.deviationMessage ?? ((d: Deviation) => resolveLlmConnectionStrings({ lang: langNow() }).deviationNotice(d)));
+  const session = createRequestSession({
+    message: message ?? (() => ""),
+    ...(message ? (o.notice ? { notice: o.notice } : {}) : { notice: () => {} }),
+  });
+  const backendProbe = createObsidianBackendProbe();
+  const backendOf = o.backendOf ?? ((cfg: EndpointConfig) => backendProbe(cfg.url, cfg.model ?? "", cfg.apiKey));
+  const modelCache = createModelListCache();
+  const settingsCache = createModelListCache();
+
+  /** Die Transport-Wahl, die `list()` und `resolve()` des Managers sehen: ohne Opt-in nur `http` (ältere Manager-Fassungen
+   *  ignorieren das Feld). */
+  /** Für `resolve()` und die Eintragswahl nur `anthropic` zusätzlich: ein Apple-Endpunkt wird nie automatisch gewählt,
+   *  nur über `choice` (Welle 13), und das bleibt so. */
+  const anthropicTransports = (): ("http" | "anthropic")[] | undefined => (o.transports?.anthropic ? ["http", "anthropic"] : undefined);
+  /** Nur bei `"explicit"`: der automatische Weg ohne Claude. Sonst `undefined`, dann gilt `anthropicTransports()` auch für „Automatisch“. */
+  const autoTransports = (): ("http" | "anthropic")[] | undefined => (o.transports?.anthropic === "explicit" ? ["http"] : undefined);
+  const optInTransports = (): ("http" | "shortcuts" | "anthropic")[] | undefined => {
+    const t = o.transports;
+    if (!t?.shortcuts && !t?.anthropic) return undefined;
+    return ["http", ...(t.shortcuts ? ["shortcuts" as const] : []), ...(t.anthropic ? ["anthropic" as const] : [])];
+  };
+
+  // ── Auflösung ──────────────────────────────────────────────────────────────────────────────
+  let pending: Promise<EndpointSourceResult> | null = null;
+  // Ruft der laufende Lauf `onResolved`? `resolve()` immer; `models()` löst still auf und meldet nur, wenn das Ergebnis neu ist (siehe `sameSource`).
+  // Ein `resolve()`, das einem stillen Lauf beitritt, hebt den Wunsch auf `true`, sonst verlöre es seinen Rückruf.
+  let pendingNotify = false;
+  // Läuft gerade der synchrone Teil von `onResolved`? (Wiedereintrittssperre in `resolveInternal`.)
+  let inOnResolved = false;
+  let last: EndpointSourceResult | null = null;
+  // Was `source()` zeigt: die letzte abgeschlossene Auflösung, auch nach `invalidate()` bis die neue da ist.
+  let shown: EndpointSourceResult | null = null;
+  // Seit dem letzten `invalidate()` abgeschlossen? Steuert die Auflösung beim Zeichnen der Einstellungen (ein „kein Endpunkt“
+  // wird nicht gemerkt, löst aber auch keine Endlosschleife aus).
+  let freshSinceInvalidate = false;
+  let lastManagerEntry: string | undefined;
+
+  async function resolveNow(): Promise<EndpointSourceResult> {
+    const s = o.getSettings();
+    const manager = findEndpointManager(o.app);
+    const local = o.managerOnly || manager
+      ? []
+      : prepareLocalEndpoints({
+        app: o.app, pluginId: o.pluginId, list: s.endpoints,
+        persist: (list) => persist({ endpoints: list }),
+      });
+    const r = await resolveEndpointSource({
+      manager, local, capability: o.capability, caller: o.caller,
+      ...(anthropicTransports() ? { transports: anthropicTransports() } : {}),
+      ...(autoTransports() ? { autoTransports: autoTransports() } : {}),
+      ...(manager && s.choice ? { choice: s.choice } : {}),
+      backendOf,
+    }, async (cfg) => (o.managerOnly ? false : probeOf(cfg)));
+    lastManagerEntry = manager ? managerEntryId(manager, s.choice) : undefined;
+    return r;
+  }
+
+  function managerEntryId(api: LlmEndpointManagerApi, choice: EndpointChoice | undefined): string | undefined {
+    const entries = api.list({ capability: o.capability, ...(anthropicTransports() ? { transports: anthropicTransports() } : {}) });
+    if (choice?.endpointId && entries.some((e) => e.id === choice.endpointId)) return choice.endpointId;
+    // „Automatisch“: der erste Eintrag der automatischen Liste (bei `"explicit"` ohne Claude), derselbe, den `resolve()` nimmt.
+    const auto = autoTransports() ? api.list({ capability: o.capability, transports: autoTransports() }) : entries;
+    return auto[0]?.id;
+  }
+
+  /** Dieselbe Quelle für die Anzeige? Was ein Konsument in `onResolved` neu zeichnet (Modell, Familie, Backend, Endpunkt, Grund), nichts darüber hinaus. */
+  function sameSource(a: EndpointSourceResult | null, b: EndpointSourceResult): boolean {
+    return a !== null && a.kind === b.kind && a.config?.url === b.config?.url && a.config?.id === b.config?.id && a.model === b.model
+      && a.sentModel === b.sentModel && a.family === b.family && a.backend === b.backend && a.reason === b.reason && a.transport === b.transport;
+  }
+
+  /** `quiet`: nur `models()`. Ein stiller Lauf ruft `onResolved` bei einem Ergebnis, das sich vom zuletzt gezeigten nicht unterscheidet, nicht. */
+  function resolveInternal(opts: { force?: boolean } | undefined, quiet: boolean): Promise<EndpointSourceResult> {
+    // Wiedereintrittssperre (0.70.1): ein `resolve()`, das SYNCHRON aus dem eigenen `onResolved`-Rückruf kommt (auch mittelbar über synchrone Aufrufer), löst auf, meldet aber
+    // nur ein geändertes Ergebnis, wie `models()`. Ohne sie lief ein Rückruf, der `resolve()` rief, im Kreis (Renderer 101 % CPU, kuroset-w27 am settings-assistant). Nicht
+    // gedeckt: ein Rückruf, der `resolve()` erst nach einem Warten ruft (E/A, Timer): dort ist der Aufrufer dran (Kopfkommentar, MIGRATION § 0.70.0).
+    if (inOnResolved) quiet = true;
+    const manager = findEndpointManager(o.app);
+    // Der Manager kann jederzeit deaktiviert werden: seine Quelle wird nie gemerkt.
+    if (!opts?.force && !manager && last !== null && last.kind !== "manager") return Promise.resolve(last);
+    if (!opts?.force && pending !== null) {
+      if (!quiet) pendingNotify = true;
+      return pending;
+    }
+    pendingNotify = !quiet;
+    // Gemerkt wird nur ein Treffer: „kein Endpunkt“ (Server beim Start aus) klebt sonst bis zur nächsten Listenänderung.
+    const p = resolveNow().then((r) => {
+      if (pending === p) {
+        pending = null;
+        const notify = pendingNotify || !sameSource(shown, r);
+        pendingNotify = false;
+        last = r.config !== null ? r : null;
+        shown = r;
+        freshSinceInvalidate = true;
+        if (notify) {
+          inOnResolved = true;
+          try { o.onResolved?.(r); } catch { /* ein Fehler im UI-Callback darf die Auflösung nicht scheitern lassen */ } finally { inOnResolved = false; }
+        }
+      }
+      return r;
+    },
+      (e: unknown) => { if (pending === p) pending = null; throw e; });
+    pending = p;
+    return p;
+  }
+  const resolve = (opts?: { force?: boolean }): Promise<EndpointSourceResult> => resolveInternal(opts, false);
+  // `pending` hält die Auflösung nur, solange sie läuft; danach bewahrt `last` die lokale.
+  function invalidate(): void { pending = null; last = null; client = null; freshSinceInvalidate = false; modelCache.clear(); settingsCache.clear(); }
+
+  // ── Modellliste ────────────────────────────────────────────────────────────────────────────
+  async function models(opts?: { force?: boolean }): Promise<ModelListResult> {
+    const r = await resolveInternal(undefined, true);
+    if (r.kind === "manager") {
+      const api = findEndpointManager(o.app);
+      const id = lastManagerEntry;
+      if (!api || !id) return { models: [], reachable: false };
+      try {
+        const list = await api.models(id, opts?.force ? { force: true } : undefined);
+        return "error" in list ? { models: [], reachable: false } : { models: list, reachable: true };
+      } catch { return { models: [], reachable: false }; }
+    }
+    if (!r.config) return { models: [], reachable: false };
+    const key = normalizeEndpoint(r.config.url);
+    if (opts?.force) modelCache.invalidate(key);
+    const cfg = r.config;
+    return modelCache.load(key, { listModels: () => listOf(cfg), probe: async () => ({ reachable: await probeOf(cfg) }) });
+  }
+
+  // ── Anzeige ────────────────────────────────────────────────────────────────────────────────
+  function source(): RequestSectionState {
+    const r = shown;
+    if (!r) return NEUTRAL_SOURCE();
+    return {
+      family: r.family, familySource: r.familySource, backend: r.backend, backendSource: r.backendSource,
+      model: r.model, sentModel: r.sentModel,
+      ...(r.displayFamily ? { displayFamily: r.displayFamily } : {}),
+      ...(r.defaultModel ? { defaultModel: r.defaultModel } : {}),
+      ...(r.transport ? { transport: r.transport } : {}),
+    };
+  }
+
+  // ── Modellwahl eines Panels ────────────────────────────────────────────────────────────────
+  let pendingModel: string | null = null;
+
+  async function setModel(m: string): Promise<void> {
+    pendingModel = m;
+    try { await plumbing.applyModel(m, resolve); }
+    finally { if (pendingModel === m) pendingModel = null; }
+  }
+
+  const modelInUse = (): string => pendingModel ?? source().model;
+
+  // ── Anfrage ────────────────────────────────────────────────────────────────────────────────
+  let client: { key: string; chat: ChatClient } | null = null;
+  let anthropicState: AnthropicState | null = null;
+  function chatClientFor(src: EndpointSourceResult): ChatClient {
+    const cfg = src.config as EndpointConfig;
+    const key = `${normalizeEndpoint(cfg.url)}\n${cfg.apiKey ?? ""}\n${src.transport ?? "http"}\n${src.shortcut?.name ?? ""}`;
+    if (client && client.key === key) return client.chat;
+    const t = o.transports ?? {};
+    const shortcuts = typeof t.shortcuts === "function" ? (src.shortcut ? t.shortcuts(src.shortcut) : undefined) : t.shortcuts;
+    const http = t.http ?? xhrSseTransport;
+    const httpFallback = fallback === "auto" ? (t.httpFallback ?? requestUrlTransport) : undefined;
+    let anthropic: { primary: SseTransport; fallback?: SseTransport } | undefined;
+    if (t.anthropic === true || t.anthropic === "explicit") {
+      // Zustand (Denkblöcke je Werkzeug-Id, Modell-Liste) teilen sich Stream und Rückfall; er lebt so lange wie die Verbindung.
+      const state = anthropicState ??= createAnthropicState();
+      anthropic = {
+        primary: createAnthropicChatTransport({ http, state, clock }),
+        ...(httpFallback ? { fallback: createAnthropicChatTransport({ http: httpFallback, state, clock }) } : {}),
+      };
+    } else if (t.anthropic) anthropic = { primary: t.anthropic };
+    const choice = transportFor(src, {
+      http,
+      ...(httpFallback ? { httpFallback } : {}),
+      ...(shortcuts ? { shortcuts } : {}),
+      ...(anthropic ? { anthropic } : {}),
+    });
+    const to = o.timeouts ?? {};
+    // Ein Kurzbefehl braucht seine eigene Frist (+10 s Luft), sonst bricht der Client vor ihm ab.
+    const floor = src.shortcut ? src.shortcut.timeoutMs + 10_000 : 0;
+    const chat = createChatClient({
+      transport: choice.primary,
+      ...(choice.fallback ? { fallbackTransport: choice.fallback } : {}),
+      clock,
+      ...(o.redact !== undefined ? { redact: o.redact } : {}),
+      idleTimeoutMs: to.idleMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+      firstChunkTimeoutMs: Math.max(to.firstChunkMs ?? JIT_FIRST_CHUNK_TIMEOUT_MS, floor),
+      ...(to.toolIdleMs !== undefined ? { toolCallIdleTimeoutMs: to.toolIdleMs } : {}),
+      ...(to.nonStreamMs !== undefined || floor > 0 ? { nonStreamTimeoutMs: Math.max(to.nonStreamMs ?? 0, floor) } : {}),
+    });
+    client = { key, chat };
+    return chat;
+  }
+
+  function maxTokensFor(mode: ModeId): number | undefined {
+    return typeof o.maxTokens === "function" ? o.maxTokens(mode) : o.maxTokens;
+  }
+
+  async function complete(req: CompleteRequest, h: CompleteHandlers = {}): Promise<LlmResult> {
+    const resolved0 = await resolve();
+    // Anderes Modell je Aufruf: Alias und Familie für DIESES Modell (Manager-Tabelle, sonst Name).
+    let src = resolved0;
+    const wanted = h.model !== undefined && h.model !== "" ? h.model : (pendingModel ?? "");
+    if (wanted !== "") {
+      const d = describeModel(wanted, resolved0.models);
+      const { displayFamily: _drop, ...rest } = resolved0;
+      src = { ...rest, model: wanted, family: d.family, familySource: d.familySource, sentModel: d.sentModel, ...(d.displayFamily ? { displayFamily: d.displayFamily } : {}) };
+    }
+    const fail = (kind: "no-endpoint", detail: string, extra: Pick<NoEndpointResult, "reason" | "transport"> = {}): LlmResult => {
+      const now = clock.now();
+      return { ok: false, kind, detail, ...extra, partial: "", reasoning: "", timing: { startedAt: now, endedAt: now }, redactions: 0, facts: null, deviations: [], source: src };
+    };
+    if (!src.config) return fail("no-endpoint", src.reason ?? "no-endpoint");
+
+    let chat: ChatClient;
+    try { chat = chatClientFor(src); }
+    catch (e) {
+      if (e instanceof TransportMissingError) return fail("no-endpoint", e.message, { reason: "transport-missing", transport: e.transport });
+      return fail("no-endpoint", e instanceof Error ? e.message : String(e));
+    }
+
+    const mode = h.mode ?? o.mode;
+    const settings = o.getSettings().request ?? DEFAULT_REQUEST_SETTINGS;
+    const thinking = h.thinking ?? thinkingFor(settings, mode);
+    const famKey: FamilyKey = src.family ?? "unknown";
+    const budget = maxTokensFor(mode);
+    const resolved = resolveRequestParams({
+      family: src.family, mode, backend: src.backend, thinking,
+      // Das Modell, das auf den Draht geht: mit ihm klemmt code-kit die Stufe auf die des Modells (max auf Opus 4.5 geht als high raus), und der Abschnitt „Anfrage“ zeigt dasselbe.
+      ...((src.sentModel || src.model) !== "" ? { model: src.sentModel || src.model } : {}),
+      ...(budget !== undefined ? { maxTokens: budget } : {}),
+      overrides: settings.overrides[mode]?.[famKey] ?? {},
+    });
+    // Werte je Aufruf, die das Profil nicht annimmt (Claude: temperature), gehen nicht raus und werden gemeldet.
+    const call = splitCallOverrides(h.overrides, { family: src.family, backend: src.backend });
+    const params: Record<string, unknown> = { ...resolved.params, ...call.kept };
+    const dropped = overrideDroppedDeviation(call.dropped);
+    const dropNotice: Deviation[] = dropped ? [dropped] : [];
+    session.recordRequest(params);
+    session.report(dropNotice);
+
+    const messages = req.messages ?? req.buildMessages?.(src) ?? [];
+    const wantStream = h.stream ?? o.stream;
+    const raw = await chat.complete({
+      endpoint: src.config, model: src.sentModel || src.model, messages, params,
+      ...(wantStream !== undefined ? { stream: wantStream } : {}),
+      ...((h.restoreContent ?? o.restoreContent) !== undefined ? { restoreContent: h.restoreContent ?? o.restoreContent } : {}),
+      ...(h.signal ? { signal: h.signal } : {}),
+      ...(h.onToken ? { onToken: h.onToken } : {}),
+      ...(h.onReasoning ? { onReasoning: h.onReasoning } : {}),
+      ...(h.onContentReset ? { onContentReset: h.onContentReset } : {}),
+      // Die Familie der Quelle (Manager-Tabelle oder Namensrater) entscheidet; ohne sie rät der Client am Modellnamen.
+      ...(src.family !== null ? { thinkChannel: src.family === "gemma4" } : {}),
+    });
+
+    const facts = responseFactsOf(raw);
+    const checked = facts ? checkResponse({ family: src.family, thinking, backend: src.backend }, facts) : [];
+    session.report(checked);
+    const deviations = [...dropNotice, ...checked];
+
+    const mapped = mapTruncated(raw, policy);
+    const result: ChatResult = mapped === raw ? raw : {
+      ok: true, content: mapped.ok ? mapped.content : "", reasoning: mapped.reasoning, toolCalls: [],
+      finishReason: "length", truncated: true, streamed: true, timing: raw.timing,
+      ...(raw.redactions !== undefined ? { redactions: raw.redactions } : {}),
+    };
+    return { ...result, facts, deviations, source: src };
+  }
+
+  // ── Settings ───────────────────────────────────────────────────────────────────────────────
+  function renderSettings(containerEl: HTMLElement, input?: LlmConnectionStrings | LlmConnectionStringsOverride): void {
+    const strings = resolveLlmConnectionStrings(input);
+    const rerender = (): void => { containerEl.empty(); renderSettings(containerEl, input); };
+    // Bei managerOnly gibt es keine lokale Liste: der Kit-Default-Text ohne diesen Satz (ein eigener Text des Konsumenten bleibt).
+    const isKitDefault = (t: string): boolean => t === LLM_CONNECTION_STRINGS_EN.endpointSource.managedDesc || t === LLM_CONNECTION_STRINGS_DE.endpointSource.managedDesc;
+    const sourceStrings = o.managerOnly && isKitDefault(strings.endpointSource.managedDesc)
+      ? { ...strings.endpointSource, managedDesc: strings.managedDescManagerOnly }
+      : strings.endpointSource;
+    // Noch nie aufgelöst (Tab als Erstes geöffnet): im Hintergrund auflösen und einmal neu zeichnen.
+    if (!freshSinceInvalidate && pending === null) void resolve().then(rerender).catch(() => { /* source() bleibt neutral */ });
+    let saved: Promise<void> = Promise.resolve();
+    buildEndpointSourceSection({
+      app: o.app, containerEl, capability: o.capability, caller: o.caller, pluginId: o.pluginId,
+      ...(optInTransports() ? { transports: optInTransports() } : {}),
+      ...(autoTransports() ? { autoTransports: autoTransports() } : {}),
+      choice: () => o.getSettings().choice ?? {},
+      setChoice: async (c) => { await persist({ choice: c }); invalidate(); },
+      local: () => (o.managerOnly ? [] : o.getSettings().endpoints),
+      strings: sourceStrings,
+      renderLocalList: () => {
+        // Manager-only: es gibt keine lokale Liste, nur den Hinweis; `endpoints` wird nie geschrieben.
+        if (o.managerOnly) { new Setting(containerEl).setDesc(strings.noManager); return; }
+        buildEndpointList({
+          containerEl, label: strings.listLabel, desc: strings.listDesc, placeholder: strings.listPlaceholder,
+          strings: strings.endpointList, cache: settingsCache,
+          get: () => o.getSettings().endpoints,
+          set: (eps) => { saved = persist({ endpoints: eps }); },
+          active: () => shown?.config?.url ?? null,
+          clientFor,
+          save: () => saved,
+          reconnect: async () => { invalidate(); await resolve().catch(() => undefined); },
+          rerender, app: o.app, pluginId: o.pluginId,
+          ...(o.contextLength === false ? {} : { modelContext: plumbing.modelContext }),
+          ...(o.isSearchOnly ? { isSearchOnly: o.isSearchOnly } : {}),
+        });
+      },
+      rerender,
+    });
+    buildRequestSection({
+      containerEl, modes: o.modes ?? [o.mode],
+      state: source,
+      settings: () => o.getSettings().request ?? DEFAULT_REQUEST_SETTINGS,
+      save: (s) => persist({ request: s }),
+      maxTokens: maxTokensFor,
+      session, strings: strings.request, rerender,
+      openManager: () => { openEndpointManagerSettings(o.app); },
+      loadedModels: () => {
+        const cfg = (shown ?? last)?.config;
+        if (!cfg) return Promise.resolve(null);
+        return (o.loadedModels ?? ((c: EndpointConfig) => fetchLoadedModelsAt(c.url, c.apiKey, { timers: clock })))(cfg);
+      },
+      ...(o.levelPicker !== undefined ? { levelPicker: o.levelPicker } : {}),
+    });
+  }
+
+  return {
+    resolve, invalidate, models, source, complete, renderSettings, setModel, modelInUse,
+    hideSettings: () => { settingsCache.clear(); plumbing.modelContext.clear(); },
+    session,
+  };
+}

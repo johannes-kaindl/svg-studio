@@ -1,17 +1,27 @@
 import { getLanguage, Notice, Plugin, type TFile } from "obsidian";
 import { DEFAULT_SETTINGS, loadSettings, type SvgStudioSettings } from "./core/settings";
-import { initStrings, t } from "./i18n/strings";
+import { getLang, initStrings, t } from "./i18n/strings";
+import type { SvgSession } from "./core/session";
 import { installEmbedButtons } from "./obsidian/embed-button";
 import { BLOCK_LANG, fileTarget, registerFileMenu, targetFromContext } from "./obsidian/entry";
-import { SvgStudioView } from "./obsidian/panel-view";
+import { SvgStudioView } from "./obsidian/panel/view";
+import { readTargetText } from "./obsidian/read-target";
 import { renderSvgBlock, VIEW_TYPE_SVG_STUDIO } from "./obsidian/render-block";
 import { SvgStudioSettingTab } from "./obsidian/settings-tab";
 import type { Target } from "./vendor/kit/panel-session";
 import { pickLang } from "./vendor/kit/i18n";
 import { checkSvg } from "./vendor/kit/svg-guard";
+import { onLevelFor, thinkingFor, withThinkingLevel, type ThinkingLevel } from "./vendor/kit/sampling-profiles";
+import { findEndpointManager, onEndpointManagerChanged } from "./vendor/kit-obsidian/endpoint-source";
+import { confirmAction } from "./vendor/kit-obsidian/confirm";
+import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
 
 export default class SvgStudioPlugin extends Plugin {
   settings: SvgStudioSettings = DEFAULT_SETTINGS;
+  /** Die LLM-Anbindung (Endpunkt-Quelle, Modelle, Anfragen, Einstellungs-Abschnitt). */
+  llm!: LlmConnection;
+  /** Die Sitzung eines geschlossenen Panels, deren Runden der Nutzer behalten wollte. */
+  private stashed: SvgSession | null = null;
 
   async onload(): Promise<void> {
     // Sprache zuerst, vor dem ersten Befehl und Tab (UI-STANDARD § i18n).
@@ -19,7 +29,66 @@ export default class SvgStudioPlugin extends Plugin {
     const { settings } = loadSettings(await this.loadData());
     this.settings = settings;
 
-    this.registerView(VIEW_TYPE_SVG_STUDIO, (leaf) => new SvgStudioView(leaf));
+    // Sampling wie in der Messung (Plan 2, Entscheidung 2): Modus `transform` (Temperatur 0,2, Denken aus als Vorgabe), `max_tokens` 16384.
+    this.llm = createLlmConnection({
+      app: this.app,
+      pluginId: this.manifest.id,
+      caller: "svg-studio",
+      capability: "chat",
+      mode: "transform",
+      maxTokens: 16384,
+      lang: () => getLang(),
+      getSettings: () => ({ endpoints: this.settings.llm.endpoints, choice: this.settings.llm.choice, request: this.settings.llm.request }),
+      // Patch ZUERST übernehmen, dann speichern: die Verbindung prüft das (Kit MIGRATION 0.49.0).
+      persist: (patch) => {
+        if (patch.endpoints !== undefined) this.settings.llm.endpoints = patch.endpoints;
+        if (patch.choice !== undefined) this.settings.llm.choice = patch.choice;
+        if (patch.request !== undefined) this.settings.llm.request = patch.request;
+        // Modell, Endpunkt oder Denkstufe haben sich geändert (auch im Einstellungen-Tab): die Modellzeile des Panels zieht nach.
+        this.refreshPanels();
+        return this.saveSettings();
+      },
+    });
+    // Der Manager kommt, geht oder wechselt den Endpunkt: frisch auflösen, die Modellzeile eines offenen Panels lädt ihre Liste neu.
+    this.register(onEndpointManagerChanged(this.app, () => {
+      this.llm.invalidate();
+      void this.llm.resolve().catch(() => undefined).then(() => { for (const v of this.panels()) v.reloadModels(); });
+    }));
+
+    this.registerView(VIEW_TYPE_SVG_STUDIO, (leaf) => new SvgStudioView(leaf, {
+      app: this.app,
+      llm: this.llm,
+      thinking: {
+        family: () => this.llm.source().family,
+        backend: () => this.llm.source().backend,
+        current: () => thinkingFor(this.settings.llm.request, "transform"),
+        onLevel: () => onLevelFor(this.settings.llm.request, "transform"),
+        levelPicker: () => this.settings.llm.request.levelPickerInChat,
+        // Dieselbe Schreibregel wie die Einstellungen (Kit `withThinkingLevel`).
+        setLevel: async (level: ThinkingLevel) => {
+          this.settings.llm.request = withThinkingLevel(this.settings.llm.request, "transform", level);
+          await this.saveSettings();
+          this.refreshPanels();
+        },
+      },
+      thinkingOn: () => thinkingFor(this.settings.llm.request, "transform") !== "off",
+      readTargetText: (target) => readTargetText(this.app, target),
+      // Übernehmen wird mit C4 verdrahtet (Schreibweg über `panel-accept` und `block-writer`).
+      accept: () => Promise.resolve({ ok: false, message: t("panel.acceptSoon") }),
+      openSettings: () => {
+        // Interne API: fehlt sie, sagt eine Notice, wo die Einstellungen stehen, statt zu werfen.
+        const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+        if (setting === undefined) {
+          new Notice(t("panel.settingsFallback"));
+          return;
+        }
+        setting.open();
+        setting.openTabById(this.manifest.id);
+      },
+      confirm: (message, labels) => confirmAction(this.app, { message, confirmLabel: labels.confirm, cancelLabel: labels.cancel }),
+      managerPresent: () => findEndpointManager(this.app) !== null,
+      stash: { take: () => { const s = this.stashed; this.stashed = null; return s; }, put: (s) => { this.stashed = s; } },
+    }));
     this.addSettingTab(new SvgStudioSettingTab(this.app, this));
 
     this.addCommand({ id: "new-svg", name: t("cmd.new"), callback: () => { void this.openPanel({ kind: "new" }); } });
@@ -65,6 +134,14 @@ export default class SvgStudioPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  private panels(): SvgStudioView[] {
+    return this.app.workspace.getLeavesOfType(VIEW_TYPE_SVG_STUDIO).flatMap((leaf) => (leaf.view instanceof SvgStudioView ? [leaf.view] : []));
+  }
+
+  private refreshPanels(): void {
+    for (const v of this.panels()) v.refreshModelBar();
   }
 
   /** Das Panel öffnen (vorhandenes Blatt oder neues in der rechten Seitenleiste) und auf das Ziel setzen. */

@@ -26,4 +26,8 @@ export function installObsidianDom(win: AnyWin = globalThis): void {
   el.empty = function (this: AnyWin): void { this.replaceChildren(); };
   el.addClass = function (this: AnyWin, ...c: string[]): void { this.classList.add(...c); };
   el.removeClass = function (this: AnyWin, ...c: string[]): void { this.classList.remove(...c); };
+  el.toggleClass = function (this: AnyWin, c: string, on?: boolean): void { this.classList.toggle(c, on); };
+  el.hasClass = function (this: AnyWin, c: string): boolean { return this.classList.contains(c); };
+  el.setText = function (this: AnyWin, text: string): void { this.textContent = text; };
+  el.setAttr = function (this: AnyWin, k: string, v: string): void { this.setAttribute(k, v); };
 }

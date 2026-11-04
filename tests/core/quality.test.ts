@@ -40,7 +40,7 @@ describe("MEASUREMENTS", () => {
     const row = (model: string, task: string) => MEASUREMENTS.find((m) => m.model.startsWith(model) && m.task === task)!;
     for (const model of ["qwen/qwen3.8-27b", "google/gemma-4-e4b"]) {
       expect([row(model, "create").good, row(model, "create").of]).toEqual([e(model).guard, e(model).n]);
-      expect(row(model, "create").extra).toBe(`Grundrisse ${e(model).grundrisseMasstreu} von 3`);
+      expect(row(model, "create").extra).toBe(`plans:${e(model).grundrisseMasstreu}/3`);
       expect([row(model, "refine").good, row(model, "refine").of]).toEqual([v(model).erfuellt, v(model).n]);
     }
     // Die Zahlen der Messnote nach der Korrektur der Auswertung vom 2026-11-04.
@@ -61,7 +61,7 @@ describe("MEASUREMENTS", () => {
 
 describe("svgQualityLine", () => {
   it("gemessenes Modell mit Zusatz", () => {
-    expect(svgQualityLine("google/gemma-4-e4b", "create", o)).toEqual({ measured: true, text: "Gemessen: 9 von 10, Grundrisse 2 von 3 (google/gemma-4-e4b)." });
+    expect(svgQualityLine("google/gemma-4-e4b", "create", o)).toEqual({ measured: true, text: "Gemessen: 9 von 10, plans:2/3 (google/gemma-4-e4b)." });
   });
   it("ungemessenes Modell bekommt die Bezugszahl von gemma, nur für dieselbe Aufgabe", () => {
     expect(SMALL_MODEL).toBe("google/gemma-4-e4b");
@@ -76,7 +76,7 @@ describe("svgQualityLine", () => {
 describe("svgQualityLine mit Denken", () => {
   it("thinking: true → Zusatz an gemessener und an Bezugszeile, nicht an 'nicht gemessen'", () => {
     const t = { ...o, thinking: true };
-    expect(svgQualityLine("qwen/qwen3.8-27b", "create", t).text).toBe(`Gemessen: 10 von 10, Grundrisse 3 von 3 (qwen/qwen3.8-27b). ${NOTE}`);
+    expect(svgQualityLine("qwen/qwen3.8-27b", "create", t).text).toBe(`Gemessen: 10 von 10, plans:3/3 (qwen/qwen3.8-27b). ${NOTE}`);
     expect(svgQualityLine("meta/llama-9", "create", t).text).toContain(NOTE);
     expect(svgQualityLine("x", "create", { ...t, family: "claude" }).text).toBe("Für dieses Modell nicht gemessen.");
   });

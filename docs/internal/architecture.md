@@ -5,8 +5,8 @@ Modul-Layout und Datenfluss. Das Warum steht in `docs/internal/decisions.md`, di
 ## Schichten
 
 - `src/core/**` ist obsidian-, DOM- und node-frei (`npm run check:pure`). Hier liegt der Fachkern; er rechnet auf dem SVG-**Text**, nicht auf einem DOM.
-- `src/main.ts` verdrahtet Befehle, den ```svg-studio-Block, die Einbettungsknöpfe, das Kontextmenü und die Einstellungen; das Panel ist eine Hülle (Inhalt und Schreibwege kommen mit Plan 2, C2 bis C4).
-- `src/vendor/kit/` trägt die Kit-Module aus code-kit 0.52.1 (`svg-guard`, `safe-markdown`, `answer-retry`, `llm-answer`, `think-splitter`, `sha256`, `data-url`, `slug`; `fences`, `panel-session`, `rounds`, `run-slot` aus 0.54.0, `measured-quality` aus 0.55.0) und obsidian-kit 0.79.1 (`block-writer`, `fence-scan`, `plugin-id`); `src/vendor/kit-obsidian/` die Obsidian-Schicht (`status-indicator`, `choice-modal`, `write-ports`, `help-setting`, `settings_walker`, `confirm`, `segmented-control`, `panel-accept`, `review-list`, `redline`, `file-snapshot`); `tests/vendor/kit/` die Test-Helfer (`kit-css`, `linear-probe`, `window-timers`). Vendort über `tools/sync-kit.sh` (Wrapper auf `tools/kit-sync`) mit Herkunfts-Header, nie von Hand.
+- `src/main.ts` verdrahtet Befehle, den ```svg-studio-Block, die Einbettungsknöpfe, das Kontextmenü und die Einstellungen; das Panel hat Gerüst, Modellzeile und Lauf mit Rückfrage (C2); Vorschau im Shadow Root, Übernehmen und Prüfliste folgen mit C3, C4, D1.
+- `src/vendor/kit/` trägt die Kit-Module aus code-kit 0.52.1 (`svg-guard`, `safe-markdown`, `answer-retry`, `llm-answer`, `think-splitter`, `sha256`, `data-url`, `slug`; `fences`, `panel-session`, `rounds`, `run-slot` aus 0.54.0, `measured-quality` aus 0.55.0) und obsidian-kit 0.79.1 (`block-writer`, `fence-scan`, `plugin-id`); `src/vendor/kit-obsidian/` die Obsidian-Schicht (`status-indicator`, `choice-modal`, `write-ports`, `help-setting`, `settings_walker`, `confirm`, `segmented-control`, `panel-accept`, `review-list`, `redline`, `file-snapshot`; seit C2 `llm-connection` samt Hülle, `model-bar`, `thinking-control`, `stream-area`, `version-list`, `request-section`, `chat-host`; die code-kit-Teile der Verbindung mit eigenem Pin 0.55.0); `tests/vendor/kit/` die Test-Helfer (`kit-css`, `linear-probe`, `window-timers`). Vendort über `tools/sync-kit.sh` (Wrapper auf `tools/kit-sync`) mit Herkunfts-Header, nie von Hand.
 
 ## Module in `src/core/`
 
@@ -28,7 +28,12 @@ Geplant mit Plan 2: `fields.ts` (Zahlenfelder).
 - `render-block.ts` — `renderSvgBlock`: Block als `<img>` mit Data-URL nach `checkSvg`; abgelehnt → Liste der Probleme und Knöpfe Reparieren/Bearbeiten; nie Markup aus dem Quelltext im DOM. `VIEW_TYPE_SVG_STUDIO`.
 - `embed-button.ts` — Knopf an `.internal-embed.image-embed` mit `.svg`-Ziel; ein Beobachter je Fenster (`window-open`/`window-close`), Rücknahme beim Entladen.
 - `entry.ts` — `targetFromContext` (aktive `.svg`, Block oder Einbettung am Cursor im Quellmodus), `registerFileMenu`.
-- `panel-view.ts` — das Panel als Hülle (Ziel halten); `settings-tab.ts` — zweigleisig deklarativ (Hilfe-Zeile zuerst).
+- `settings-tab.ts` — zweigleisig deklarativ (Hilfe-Zeile zuerst, dann „Übernehmen als“, dann der Abschnitt „Sprachmodell“ der Kit-Verbindung).
+- `llm-ask.ts` — `askFor`: die Brücke von `LlmConnection.complete` zu `askUntilValid` (wirft `LlmAskError` mit Art `aborted`/`no-endpoint`/`error`). K5 passt nicht (auf `RepairResult` zugeschnitten), deshalb hier.
+- `read-target.ts` — der Text des Ziels jetzt (Datei über den Vault, Block über `readBlockText` mit Fingerabdruck).
+- `panel/shell.ts` — der **formatneutrale** Panel-Kern (K9-Nähte, ein Test hält ihn frei von `core/`-Importen): Kopf mit Zielzeile, Kit-Modellzeile (`model-bar` mit Denkstufe), Messzeile, Prompt, Kit-Antwortbereich (`stream-area`) mit Status (`status-indicator`) und Abbruch, Vorschau- und Änderungsplatz, Rundenliste (`version-list`), Übernehmen/Verwerfen; hält die `PanelSession` und den Lauf (`run-slot`: genau ein Lauf, Senden gesperrt). Alles Formatgebundene kommt als `PanelSlots` herein.
+- `panel/slots.ts` — die SVG-Slots (Sitzung, Beschriftung der Runden, Messzeile, Lauf, Vorschau als `<img>`; die Prüfliste ist ein Platzhalter bis D1). `panel/run.ts` — der Lauf: Erzeugen und Verfeinern mit `askUntilValid` (`maxRetries: 2`, `stopOnTruncated: true`, `RETRY_INSTRUCTION`), abgeschnitten und ungültig = genau eine Anfrage und die Meldung „zu groß“, Elemente ohne `id` = keine Anfrage. `panel/view.ts` — die `ItemView`; ein Schließen mit offenen Runden fragt per Bestätigung, „Behalten“ merkt die Sitzung im Plugin (Obsidian lässt das Schließen eines Blatts nicht verhindern).
+- Die LLM-Anbindung (`createLlmConnection`, Modus `transform`, `max_tokens` 16384) wird in `main.ts` gebaut; die Daten (`settings.llm`: lokale Endpunkt-Zeilen, Wahl, Anfrage-Einstellungen) liest `core/settings.ts` mit den Kit-Prüfern.
 
 ## Messlabor
 

@@ -14,13 +14,23 @@
         { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "rounds", "ref": "0.54.0" }, { "name": "run-slot", "ref": "0.54.0" }, { "name": "rotation", "ref": "0.54.0" }]
     },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["block-writer", "fence-scan", "plugin-id"],
-      "rewrite": [["../vendor/code-kit/pure/", "./"]]
+      "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure", "ref": "0.55.0",
+      "modules": ["anthropic-wire", "backend-probe", "capabilities", "embeddings-client", "endpoint", "endpoint_config", "endpoint_diagnostics", "error_body", "model-choice", "model-context",
+        "model-list-cache", "reasoning", "redact", "sampling-profiles", "secrets", "sse", "timeout"]
+    },
+    { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "ref": "0.55.0", "modules": ["clipboard"] },
+    {
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure",
+      "modules": ["block-writer", "fence-scan", "plugin-id", "endpoint-source", "endpoint-secret-hook", "override-guard"],
+      "rewrite": [["../vendor/code-kit/pure/", "./"], ["../vendor/code-kit/web/", "./"], ["../pure/", "./"]]
     },
     {
       "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "from": "src/obsidian",
-      "modules": ["status-indicator", "choice-modal", "write-ports", "help-setting", "settings_walker", "folder-suggest", "confirm", "segmented-control", "panel-accept", "review-list", "redline", "file-snapshot"],
-      "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"]]
+      "modules": ["status-indicator", "choice-modal", "write-ports", "help-setting", "settings_walker", "folder-suggest", "confirm", "segmented-control", "panel-accept", "review-list", "redline", "file-snapshot",
+        "llm-connection", "llm-connection-strings", "endpoint-source", "request-section", "model-bar", "model-bar-strings", "thinking-control", "stream-area", "version-list", "chat-host",
+        "endpoint-list", "endpoint-secrets", "secrets", "shortcuts-bridge", "request-session", "model-picker", "collapsible", "clipboard", "clock", "backend-probe", "endpoint-plumbing",
+        "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport", "chat-client", "chat-transport"],
+      "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
     },
     {
       "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing",

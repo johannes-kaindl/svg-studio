@@ -43,3 +43,17 @@ describe("Oberflächentexte", () => {
     for (const k of used) expect(STRINGS.en, k).toHaveProperty(k);
   });
 });
+
+describe("Messzeile ist einsprachig", () => {
+  it("der Zusatz 'plans:2/3' erscheint in der Sprache der Oberfläche, nie als deutscher Rest im englischen Satz", async () => {
+    const { qualityTexts } = await import("../src/i18n/strings");
+    const { MEASUREMENTS } = await import("../src/core/quality");
+    const row = MEASUREMENTS.find((m) => m.model.startsWith("google") && m.task === "create")!;
+    initStrings("en");
+    expect(qualityTexts().measured(row)).toContain("floor plans 2 of 3");
+    expect(qualityTexts().measured(row)).not.toMatch(/Grundrisse|plans:/);
+    initStrings("de");
+    expect(qualityTexts().measured(row)).toContain("Grundrisse 2 von 3");
+    initStrings("en");
+  });
+});

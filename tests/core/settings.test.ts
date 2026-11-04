@@ -33,9 +33,32 @@ describe("loadSettings", () => {
     expect(loadSettings({ background: { hex: "#12345" } }).settings.background.hex).toBeNull();
   });
 
-  it("llm: Wahl und Anfrage werden gelesen, Müll fällt weg", () => {
-    expect(loadSettings({ llm: { choice: { endpoint: "e1", model: "m" }, request: { a: 1 } } }).settings.llm).toEqual({ choice: { endpoint: "e1", model: "m" }, request: { a: 1 } });
-    expect(loadSettings({ llm: { choice: { endpoint: 5, model: 6 }, request: [] } }).settings.llm).toEqual({ choice: { endpoint: null, model: "" }, request: {} });
+  it("llm: Zeilen, Wahl und Anfrage werden gelesen", () => {
+    const { settings, dropped } = loadSettings({
+      llm: {
+        endpoints: [{ url: "http://127.0.0.1:1234/v1", model: "qwen/qwen3.8-27b", id: "a" }, "http://localhost:11434"],
+        choice: { endpointId: "e1", model: "m" },
+        request: { thinking: { transform: "high" } },
+      },
+    });
+    expect(settings.llm.endpoints.map((e) => e.url)).toEqual(["http://127.0.0.1:1234/v1", "http://localhost:11434"]);
+    expect(settings.llm.choice).toEqual({ endpointId: "e1", model: "m" });
+    expect(settings.llm.request.thinking.transform).toBe("high");
+    expect(dropped).toEqual([]);
+  });
+
+  it("llm: Müll fällt weg, ohne zu werfen, und meldet sich", () => {
+    const { settings, dropped } = loadSettings({ llm: { endpoints: [5, null, { url: 7 }, { model: "x" }], choice: { endpointId: 5, model: 6 }, request: [], alt: 1 } });
+    expect(settings.llm.endpoints).toEqual([]);
+    expect(settings.llm.choice).toEqual({});
+    expect(settings.llm.request).toEqual(DEFAULT_SETTINGS.llm.request);
+    expect(dropped).toContain("llm.alt");
+  });
+
+  it("llm: Schlüssel gehören nicht in die Daten, der Klartext-Schlüssel einer Zeile wird vom Kit migriert, nicht verdoppelt", () => {
+    const { settings } = loadSettings({ llm: { endpoints: [{ url: "http://x/v1", apiKey: "geheim" }] } });
+    expect(settings.llm.endpoints).toHaveLength(1);
+    expect(settings.llm.endpoints[0]!.url).toBe("http://x/v1");
   });
 
   it("verändert die Vorgaben nicht", () => {
