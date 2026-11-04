@@ -26,4 +26,11 @@ describe("eigene Regeln", () => {
   it("die Knöpfe sind auf Touch-Geräten sichtbar", () => {
     expect(own).toMatch(/\.is-mobile \.svg-studio-block > \.svg-studio-edit[\s\S]*?opacity:\s*1/);
   });
+  it("die Knöpfe an Block und Einbettung sind am Handy mindestens 44 × 44 (40 + 4 aus Theme-Größen, Plan M2)", () => {
+    const rule = own.replace(/\/\*[\s\S]*?\*\//g, "").match(/\.is-mobile \.svg-studio-block > \.svg-studio-edit,\s*\.is-mobile \.internal-embed > \.svg-studio-embed-button\s*\{([^}]*)\}/);
+    expect(rule, "Regel für Block- und Einbettungsknopf unter .is-mobile").not.toBeNull();
+    const body = rule![1]!;
+    expect(body).toMatch(/min-width:\s*calc\(var\(--size-4-10\)\s*\+\s*var\(--size-4-1\)\)/);
+    expect(body).toMatch(/min-height:\s*calc\(var\(--size-4-10\)\s*\+\s*var\(--size-4-1\)\)/);
+  });
 });

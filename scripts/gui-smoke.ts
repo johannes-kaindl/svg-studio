@@ -972,13 +972,16 @@ async function punktRandfaelle(): Promise<void> {
     stub.antworten([ANTWORT_ERZEUGEN]);
     await frage(PROMPT_ERZEUGEN);
     await cdp.evaluate(VERZOEGERE(2500));
+    let dialogGekommen = false;
     try {
       await klick(`document.querySelector(".svg-studio-accept")`);
       await sleep(500);
       await cdp.evaluate(`for (const l of app.workspace.getLeavesOfType(${q(VIEW_TYPE)})) l.detach(); return true;`);
-      const d = await warteDialog(5000);
-      if (d === null) throw new Vorbedingung("Der Schließen-Dialog kam nicht (Runden schon weg?)");
-      await dialogKlick(/keep/i);
+      // Zulässig sind zwei Ausgänge: der Dialog kommt (alte Runden noch da) und „Behalten“ wird gewählt, oder Schließen wartet das Schreiben ab und fragt nicht mehr
+      // (Runden dann leer). Falsch ist nur die zweite Datei danach.
+      const d = await warteDialog(4000);
+      dialogGekommen = d !== null;
+      if (d !== null) await dialogKlick(/keep/i);
       await sleep(3500);
     } finally {
       await cdp.evaluate(`delete app.vault.create; return true;`);
@@ -993,7 +996,7 @@ async function punktRandfaelle(): Promise<void> {
     }
     const zweite = await anhaenge();
     record("rest10a-behalten-waehrend-uebernehmen", erste.length === 1 && zweite.length === 1,
-      `nach dem ersten Übernehmen (während des Schreibens „Behalten“): ${erste.length} Datei ${q(erste)} · neues Panel zeigt ${s?.rounds ?? "?"} gemerkte Runde(n) · nach erneutem Übernehmen ${zweite.length} Dateien ${q(zweite)} (erwartet: genau eine)`);
+      `nach dem ersten Übernehmen (während des Schreibens „Behalten“): ${erste.length} Datei ${q(erste)} · Schließen-Dialog ${dialogGekommen ? "kam (Keep gewählt)" : "kam nicht (Schließen wartete das Schreiben ab)"} · neues Panel zeigt ${s?.rounds ?? "?"} Runde(n) · nach erneutem Übernehmen ${zweite.length} Dateien ${q(zweite)} (erwartet: genau eine)`);
   });
   await lauf("rest10b-angebotenes-ziel-waehrend-uebernehmen", async () => {
     await raeume();

@@ -286,15 +286,15 @@ describe("Übernehmen: bestehende Datei", () => {
 });
 
 describe("Übernehmen im Panel: Sperren und Zustand danach", () => {
-  function panel(o: { session: SvgSession; setup: ReturnType<typeof acceptSetup>; hang?: boolean; reason?: () => string | null }) {
+  function panel(o: { session: SvgSession; setup: ReturnType<typeof acceptSetup>; hang?: boolean; reason?: () => string | null; gate?: Promise<void>; confirm?: () => Promise<boolean> }) {
     const { llm } = fakeLlm([o.hang === true ? () => new Promise(() => undefined) : answer(NEW_SVG)]);
     const root = document.body.createDiv({ cls: "view-content" }).createDiv();
     const slots = svgSlots({ llm, readTargetText: async () => null, thinkingOn: () => false, background: { get: () => ({ on: true, tone: "light", hex: "#ffffff" }), set: () => {} } });
-    const accept = vi.fn((s: SvgSession) => acceptSvgSession(o.setup.env, s, { ...O, firstPromptLine: "Ein Mond" }));
+    const accept = vi.fn(async (s: SvgSession) => { if (o.gate !== undefined) await o.gate; return acceptSvgSession(o.setup.env, s, { ...O, firstPromptLine: "Ein Mond" }); });
     const deps: PanelDeps<SvgSession> = {
       app: {} as never, llm,
       thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
-      readTargetText: async () => null, accept, openSettings: () => {}, confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
+      readTargetText: async () => null, accept, openSettings: () => {}, confirm: o.confirm ?? (() => Promise.resolve(true)), managerPresent: () => false, strings: panelStrings(),
       ...(o.reason !== undefined ? { acceptBlockedReason: o.reason } : {}),
     };
     const shell = buildPanelShell(root, deps, slots, o.session);
@@ -355,6 +355,68 @@ describe("Übernehmen im Panel: Sperren und Zustand danach", () => {
     await p.shell.settled();
     expect(p.shell.session().rounds.rounds).toHaveLength(1);
     expect(p.shell.session().target).toEqual({ kind: "new" });
+  });
+
+  it("Schließen („Behalten“) während Übernehmen schreibt: das Panel wartet das Schreiben ab und merkt die FRISCHE Sitzung, nicht die alten Runden (C5, Rest 10a)", async () => {
+    const setup = acceptSetup({ "n.md": "" });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const confirm = vi.fn(async () => false); // „Behalten“
+    const p = panel({ session: newSession(), setup, gate, confirm });
+    p.btn.click();
+    let closed: boolean | null = null;
+    const closing = p.shell.requestClose().then((v) => { closed = v; });
+    await Promise.resolve();
+    expect(closed).toBeNull(); // wartet auf das Ende des Schreibens
+    release();
+    await closing;
+    const stash = p.shell.session();
+    expect(stash.rounds.rounds).toHaveLength(0);
+    expect(stash.target).toMatchObject({ kind: "file", path: "Anhänge/ein-mond.svg" });
+    expect(confirm).not.toHaveBeenCalled(); // nichts Offenes mehr zu verwerfen
+    expect(Object.keys(setup.store).filter((k) => k.endsWith(".svg"))).toEqual(["Anhänge/ein-mond.svg"]);
+  });
+
+  it("scheitert das Schreiben, bleiben die Runden und „Behalten“ merkt sie (die Frage kommt wie sonst)", async () => {
+    const setup = acceptSetup({}, { acceptAs: "block", noView: true });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const confirm = vi.fn(async () => false);
+    const p = panel({ session: newSession(), setup, gate, confirm });
+    p.btn.click();
+    const closing = p.shell.requestClose();
+    release();
+    expect(await closing).toBe(false);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(p.shell.session().rounds.rounds).toHaveLength(1);
+  });
+
+  it("ein während des Schreibens angebotenes Ziel gilt nach dem Erfolg (C5, Rest 10b); ohne Angebot ist das Ergebnis das neue Ziel", async () => {
+    const setup = acceptSetup({ "n.md": "" });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const p = panel({ session: newSession(), setup, gate });
+    p.btn.click();
+    p.shell.setTarget({ kind: "file", path: "Andere/plan.svg", label: "plan.svg" });
+    release();
+    await p.shell.settled();
+    expect(p.shell.session().target).toEqual({ kind: "file", path: "Andere/plan.svg", label: "plan.svg" });
+    expect(p.shell.session().rounds.rounds).toHaveLength(0);
+    expect(p.root.querySelector(".svg-studio-target")!.textContent).toBe("Edit: plan.svg");
+    expect(Object.keys(setup.store).filter((k) => k.endsWith(".svg"))).toEqual(["Anhänge/ein-mond.svg"]); // geschrieben wurde trotzdem
+  });
+
+  it("ein angebotenes Ziel bleibt auch nach einem gescheiterten Schreiben angeboten (Kopf: „festgehalten“)", async () => {
+    const setup = acceptSetup({}, { acceptAs: "block", noView: true });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const p = panel({ session: newSession(), setup, gate });
+    p.btn.click();
+    p.shell.setTarget({ kind: "file", path: "Andere/plan.svg", label: "plan.svg" });
+    release();
+    await p.shell.settled();
+    expect(p.shell.session().target).toEqual({ kind: "new" });
+    expect(p.root.querySelector(".svg-studio-target")!.textContent).toBe("Target kept: New SVG — discard to switch");
   });
 
   it("acceptBlockedReason: Knopf aus, Grund sichtbar; refreshAccept nimmt ihn zurück", () => {

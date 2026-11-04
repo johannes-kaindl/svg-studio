@@ -300,6 +300,9 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
       r.guard(() => {
         if (res.ok) {
           session = res.session;
+          // Die Runde und die Vorschau zeigen das Ergebnis; der rohe Quelltext der Antwort schöbe die Vorschau nur nach unten. Bei Misserfolg bleibt er stehen (kein Ergebnis, der Nutzer sieht, was kam).
+          area.resetContent();
+          area.setReasoningOpen(false);
           setStatus("ok", res.message);
         } else if (res.kind === "aborted") {
           setStatus("idle", st.aborted);
@@ -355,7 +358,8 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
         if (outcome.ok) {
           // Das geschriebene Ziel trägt den neuen Text: ohne `retarget` bliebe der Fingerabdruck des Blocks veraltet.
           // Während des Schreibens sind Ziel und Runden gesperrt (`applying`): das Ziel ist noch das, das übernommen wurde.
-          session = slots.fresh(outcome.retarget ?? session.target);
+          // Ein während des Schreibens angebotenes Ziel gilt jetzt (der Nutzer hat es gewählt); das Ergebnis des Übernehmens ist nur dann das neue Ziel, wenn nichts angeboten wurde.
+          session = slots.fresh(offered ?? outcome.retarget ?? session.target);
           kept = false;
           offered = null;
           setStatus("ok", outcome.message);
@@ -515,6 +519,9 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     settled: () => pending,
     async requestClose() {
       slot.abort();
+      // Schreibt Übernehmen noch, ist die Sitzung gleich eine andere (Runden leer, Ziel die neue Datei): erst abwarten, sonst merkte „Behalten“ die alten Runden, und ein
+      // erneutes Übernehmen legte eine zweite Datei an.
+      if (applying) await pending;
       const n = roundCount();
       if (n === 0) return true;
       return deps.confirm(st.closeConfirm(n), { confirm: st.confirmDiscard, cancel: st.confirmKeep });

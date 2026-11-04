@@ -80,12 +80,35 @@ describe("Lauf: Erzeugen mit Rückfrage", () => {
     expect(seen.start).toBe("Asking qwen/qwen3.8-27b… This can take minutes with local models.");
     expect(seen.attempt2).toMatch(/^Attempt 2 of 3: answer invalid \(Der Bereiniger lehnt ab/);
     expect(seen.tail2).toBe("");
-    expect(tail(s.root)).toBe(SVG_OK);
+    // Bei Erfolg zeigen Runde und Vorschau das Ergebnis; der rohe Quelltext der Antwort bleibt nicht stehen (C5: er schob die Vorschau nach unten).
+    expect(tail(s.root)).toBe("");
     expect(label(s.root)).toMatch(/^Done/);
     // Die Rückfrage trägt die schlechte Antwort und die Regeln.
     const second = s.requests[1]!.messages!.map((m) => m.content).join("\n");
     expect(second).toContain(WITH_COMMENT);
     expect(second).toContain("Nicht erlaubt sind Kommentare");
+  });
+
+  it("bei Erfolg wird der Antwortbereich geleert und das Denken eingeklappt; bei Misserfolg bleiben Rohtext und Denken (C5)", async () => {
+    const think: Responder = (h, r) => { h.onReasoning?.("ich überlege"); return answer(SVG_OK)(h, r); };
+    const s = setup([think]);
+    await send(s, "ein Mond");
+    expect(tail(s.root)).toBe("");
+    const det = s.root.querySelector<HTMLDetailsElement>("details.okit-stream-reasoning");
+    expect(det).not.toBeNull();
+    expect(det!.open).toBe(false);
+    const bad = setup([(h, r) => { h.onReasoning?.("ich überlege"); return answer("Tut mir leid.")(h, r); }]);
+    await send(bad, "ein Mond");
+    expect(tail(bad.root)).toBe("Tut mir leid.");
+    expect(bad.root.querySelector<HTMLDetailsElement>("details.okit-stream-reasoning")!.open).toBe(true);
+  });
+
+  it("auch nach dem Verfeinern steht der Quelltext nicht mehr im Antwortbereich", async () => {
+    const changed = BASE.replace(`r="40"`, `r="60"`);
+    const s = setup([answer(changed)], { target: FILE, text: BASE });
+    await send(s, "größer");
+    expect(s.shell.session().rounds.rounds).toHaveLength(1);
+    expect(tail(s.root)).toBe("");
   });
 
   it("auf Deutsch lautet der Hinweis beim Start 'Das kann bei lokalen Modellen Minuten dauern.'", async () => {

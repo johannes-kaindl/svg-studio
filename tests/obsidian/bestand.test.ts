@@ -301,3 +301,38 @@ describe("Reparatur: Anzeige (Review C4, S3)", () => {
     expect(status(s.root)).not.toMatch(/simpler|applied to the image/);
   });
 });
+
+describe("Karte „Reparieren“: Befunde als Liste, gekürzt (C5)", () => {
+  const MANY = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">${"<script>x</script>".repeat(8)}<a id="a"/><image id="i"/></svg>`;
+  const items = (root: HTMLElement): string[] => [...root.querySelectorAll(".svg-studio-notice-list li")].map((li) => li.textContent ?? "");
+
+  it("zehn Befunde: die ersten fünf stehen als Liste, dann „… and 5 more“; der Knopf steht außerhalb der Liste", async () => {
+    const s = setup(MANY);
+    await shown(s.root);
+    const li = items(s.root);
+    expect(li).toHaveLength(6);
+    expect(li[0]).toMatch(/^forbidden-element: /);
+    expect(li[5]).toBe("… and 5 more");
+    expect(s.root.querySelector(".svg-studio-notice-list")!.closest(".svg-studio-notice-text")!.textContent).toContain("This SVG can't be used as it is:");
+    expect(button(s.root, "Repair")!.closest("ul")).toBeNull();
+  });
+
+  it("auf Deutsch: „… und 5 weitere“", async () => {
+    initStrings("de");
+    const s = setup(MANY);
+    await shown(s.root);
+    expect(items(s.root).at(-1)).toBe("… und 5 weitere");
+  });
+
+  it("genau fünf Befunde: keine Kürzung; ein einzelnes Parserproblem bleibt ein Satz ohne Liste", async () => {
+    const five = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">${"<script>x</script>".repeat(5)}</svg>`;
+    const a = setup(five);
+    await shown(a.root);
+    expect(items(a.root)).toHaveLength(5);
+    expect(items(a.root).join("|")).not.toContain("more");
+    const b = setup(BROKEN);
+    const n = await shown(b.root);
+    expect(items(b.root)).toHaveLength(0);
+    expect(n.textContent).toContain("This SVG can't be used as it is: Das SVG ist nicht wohlgeformt");
+  });
+});

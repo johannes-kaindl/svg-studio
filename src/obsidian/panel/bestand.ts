@@ -49,19 +49,30 @@ export interface BestandActions {
   cleanup: () => void;
 }
 
-/** Je Befund eine Karte mit Text und Knopf. Ohne Befund bleibt der Host leer. */
+/** Wie viele Befunde des Bereinigers die Karte einzeln nennt; der Rest steht als „… und n weitere“ (eine Inkscape-Datei hat leicht ein Dutzend, das drückte den Knopf an den Rand). */
+const LISTED = 5;
+
+/** Je Befund eine Karte mit Text und Knopf (der Knopf in eigener Zeile unter dem Text). Ohne Befund bleibt der Host leer. */
 export function renderBestandNotice(host: HTMLElement, b: BestandProblems, a: BestandActions, busy: boolean): void {
-  const card = (text: string, label: string, hint: string, onClick: () => void): void => {
+  const card = (fill: (box: HTMLElement) => void, label: string, hint: string, onClick: () => void): void => {
     const el = host.createDiv({ cls: "svg-studio-notice", attr: { role: "group" } });
-    el.createDiv({ cls: "svg-studio-notice-text", text });
+    fill(el.createDiv({ cls: "svg-studio-notice-text" }));
     const btn = el.createEl("button", { cls: "svg-studio-notice-button", text: label, attr: { type: "button", title: hint } });
     btn.disabled = busy;
     btn.addEventListener("click", onClick);
   };
+  const plain = (text: string) => (box: HTMLElement): void => { box.setText(text); };
   // In der Reihenfolge, in der die Schritte gehen: Namen zuerst („Editor-Angaben entfernen“ scheitert an Elementen ohne id), dann die Editor-Angaben, dann die Reparatur.
-  if (b.unnamed > 0) card(t("bestand.unnamed", b.unnamed), t("bestand.names"), t("bestand.names.hint"), a.names);
-  if (b.editorMetadata) card(t("bestand.editor"), t("bestand.cleanup"), t("bestand.cleanup.hint"), a.cleanup);
-  if (b.parse !== null || b.guard.length > 0) {
-    card(t("bestand.unusable", b.parse ?? b.guard.map((p) => `${p.code}: ${p.detail}`).join("; ")), t("bestand.repair"), t("bestand.repair.hint"), a.repair);
+  if (b.unnamed > 0) card(plain(t("bestand.unnamed", b.unnamed)), t("bestand.names"), t("bestand.names.hint"), a.names);
+  if (b.editorMetadata) card(plain(t("bestand.editor")), t("bestand.cleanup"), t("bestand.cleanup.hint"), a.cleanup);
+  if (b.parse !== null) {
+    card(plain(t("bestand.unusable", b.parse)), t("bestand.repair"), t("bestand.repair.hint"), a.repair);
+  } else if (b.guard.length > 0) {
+    card((box) => {
+      box.createDiv({ text: t("bestand.unusableHead") });
+      const list = box.createEl("ul", { cls: "svg-studio-notice-list" });
+      for (const p of b.guard.slice(0, LISTED)) list.createEl("li", { text: `${p.code}: ${p.detail}` });
+      if (b.guard.length > LISTED) list.createEl("li", { text: t("bestand.more", b.guard.length - LISTED) });
+    }, t("bestand.repair"), t("bestand.repair.hint"), a.repair);
   }
 }
