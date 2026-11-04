@@ -73,3 +73,11 @@ describe("doppelte ids und Syntaxbefunde", () => {
     expect(ensureUnit(dup, "cm")).toBe(`<svg viewBox="0 0 1 1" data-unit="cm"><rect id="a"/><rect id="a"/></svg>`);
   });
 });
+
+describe("ensureUnit: Einheit mit Steuerzeichen", () => {
+  it("lässt den Text unverändert, statt zu werfen", () => {
+    const t = `<svg viewBox="0 0 1 1"/>`;
+    expect(ensureUnit(t, "c\u0001m")).toBe(t);
+    expect(ensureUnit(t, "cm")).toBe(`<svg viewBox="0 0 1 1" data-unit="cm"/>`);
+  });
+});

@@ -9,7 +9,8 @@ export interface AttrSpan {
   name: string;
   /** Wert ohne Anführungszeichen, unverändert. */
   raw: string;
-  /** Wert mit aufgelösten Entities. */
+  /** Wert wie ein XML-Parser ihn sieht: wörtliches CRLF, CR, LF und TAB im Rohwert werden je EIN Leerzeichen (Attributwert-Normalisierung),
+   *  danach werden Entities aufgelöst (`&#10;` bleibt ein Zeilenumbruch). */
   value: string;
   quote: '"' | "'";
   /** Offset des ersten Zeichens des Attributnamens. */
@@ -55,6 +56,13 @@ const ENTITY_NAME = /^[A-Za-z_:][A-Za-z0-9_.:-]*$/;
 const MAX_NAMED_ENTITY_LEN = 40;
 /** Längste Entity-Schreibweise, die wir auflösen (`&#x10FFFF;` = 8 Zeichen zwischen & und ;). */
 const MAX_ENTITY_LEN = 9;
+
+const LITERAL_BREAK = /\r\n|[\r\n\t]/g;
+
+/** XML-Attributwert-Normalisierung vor dem Auflösen der Entities: wörtliche Umbrüche und Tabs werden je ein Leerzeichen. */
+function normalizeLiteralBreaks(raw: string): string {
+  return raw.replace(LITERAL_BREAK, " ");
+}
 
 /** Löst &amp; &lt; &gt; &quot; &apos; &#n; &#xn; auf; alles andere bleibt wörtlich stehen. */
 function decodeEntities(raw: string): string {
@@ -121,9 +129,15 @@ type TagRead =
   | { ok: true; rawName: string; attrs: AttrSpan[]; openEnd: number; selfClosing: boolean }
   | { ok: false; resume: number };
 
-export function scanElements(text: string): { elements: SvgElement[]; issues: ScanIssue[] } {
+export function scanElements(text: string): {
+  elements: SvgElement[];
+  issues: ScanIssue[];
+  /** Spannen der Kommentare `<!-- … -->` (nicht die in CDATA, Attributen oder Verarbeitungsanweisungen). */
+  comments: Array<{ start: number; end: number }>;
+} {
   const elements: SvgElement[] = [];
   const issues: ScanIssue[] = [];
+  const comments: Array<{ start: number; end: number }> = [];
   const stack: Open[] = [];
   // Zählt offene Elemente je Namen: ein Schließ-Tag ohne offenes Gegenstück kostet O(1) statt eines Stapelabstiegs.
   const openCount = new Map<string, number>();
@@ -237,7 +251,7 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
         if (raw.includes("<")) issue(k + 1, `Attribut ${name}: rohes "<" im Wert`);
         checkEntities(k + 1, close);
         seen.add(name);
-        attrs.push({ name, raw, value: decodeEntities(raw), quote, start: nameStart, valueStart: k + 1, valueEnd: close });
+        attrs.push({ name, raw, value: decodeEntities(normalizeLiteralBreaks(raw)), quote, start: nameStart, valueStart: k + 1, valueEnd: close });
         i = close + 1;
         const after = text.charCodeAt(i);
         if (i < n && !isWs(after) && after !== 0x2f && after !== 0x3e) issue(i, `Attribut ${name}: kein Leerraum vor dem nächsten Attribut`);
@@ -269,6 +283,7 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
         issue(lt, "Kommentar nicht geschlossen");
         break;
       }
+      comments.push({ start: lt, end: e + 3 });
       pos = e + 3;
       continue;
     }
@@ -388,7 +403,7 @@ export function scanElements(text: string): { elements: SvgElement[]; issues: Sc
     open.el.closeStart = n;
     open.el.end = n;
   }
-  return { elements, issues };
+  return { elements, issues, comments };
 }
 
 /** Dekodierter Wert des ersten Attributs mit diesem Namen (mit Präfix), sonst `null`. */

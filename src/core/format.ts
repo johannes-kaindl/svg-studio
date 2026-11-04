@@ -42,11 +42,17 @@ export function assignMissingIds(text: string): { text: string; assigned: string
   return assigned.length === 0 ? { text, assigned } : { text: applySpans(text, spans), assigned };
 }
 
-/** Setzt `data-unit` an der Wurzel, wenn es fehlt; sonst (oder bei Syntaxbefunden im Text) bleibt der Text unverändert. */
+/** Setzt `data-unit` an der Wurzel, wenn es fehlt; sonst (bei Syntaxbefunden im Text oder einer Einheit mit Steuerzeichen, die XML nicht darstellt) bleibt der Text unverändert. */
 export function ensureUnit(text: string, unit: string): string {
   const scan = scanElements(text);
   if (scan.issues.some((i) => i.kind === "syntax")) return text;
   const root = scan.elements.find((e) => e.key === "#wurzel");
   if (root === undefined || root.attrs.some((a) => a.name === "data-unit")) return text;
-  return applySpans(text, [attrAppendSpan(text, root, "data-unit", unit)]);
+  try {
+    return applySpans(text, [attrAppendSpan(text, root, "data-unit", unit)]);
+  } catch (e) {
+    // `attrAppendSpan` wirft bei einem Steuerzeichen, das XML nicht darstellt: dann bleibt der Text, wie er ist.
+    if (e instanceof RangeError) return text;
+    throw e;
+  }
 }

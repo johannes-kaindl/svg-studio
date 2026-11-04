@@ -1,8 +1,13 @@
 // Änderungsliste auf SVG-Text anwenden (Spec § 4.1). Pure.
-// - Jede Änderung wird zuerst als Spannen-Ersetzung `{ from, to, insert }` gegen den AUSGANGSTEXT berechnet;
+// - Jede Änderung wird zuerst als Spannen-Ersetzung `{ from, to, Ersatz }` gegen den AUSGANGSTEXT berechnet;
 //   alle Schlüssel (`id`, `parent`, `after`) beziehen sich auf diesen Text, nie auf Zwischenstände.
-//   Überlappende Spannen scheitern, sonst wird von hinten nach vorn angewendet: alles Übrige bleibt BYTE-GLEICH
+//   Überlappende Spannen scheitern, sonst wird von vorn nach hinten zusammengesetzt: alles Übrige bleibt BYTE-GLEICH
 //   (Einrückung, Kommentare, Leerzeilen, BOM, Zeilenenden).
+// - Verschobene Elemente (`move`) wandern als „Scheibe“: Besitzer einer Spanne ist das innerste verschobene Element, das sie
+//   umschließt (ohne seine eigene Entfern-Spanne); sonst gehört sie „oben“ (dem Text). Die Scheibe eines verschobenen Elements ist
+//   sein Ausgangstext mit den Spannen, die es besitzt; sie wird dort eingesetzt, wohin das `move` zeigt. So gelten `change`, `add`,
+//   `remove` und `move` auf Nachkommen am neuen Ort. Das Ergebnis ist eine Stückliste aus kopierten Originalstücken und neuem Text;
+//   aus ihr kommt auch die Abbildung Ausgangs-Offset → Ergebnis-Offset, mit der der Wächter jede Positionsfrage beantwortet.
 // - Round-Trip-Wächter: das Ergebnis wird neu gescannt; keine Syntaxbefunde, passende Elementzahl, jeder gesetzte
 //   Attributwert kommt dekodiert genau so an, jedes eingefügte Element hängt am gemeinten Elternknoten, und jedes
 //   weder entfernte noch verschobene Originalelement behält seinen Elternknoten. Neue doppelte ids scheitern.
@@ -21,25 +26,28 @@
 //   Mehrere Einfügungen hinter DENSELBEN Anker behalten die Listenreihenfolge.
 // - Ein neues Element um bestehende zu wickeln („in eine neue Gruppe“) ist in einer Liste nicht ausdrückbar:
 //   dafür erst die Gruppe einfügen, dann in einer zweiten Liste die Kinder hineinverschieben.
-// - `change` und `move` auf dasselbe Element sind erlaubt (die Attribute gelten am neuen Ort); `change` auf
-//   einen Nachkommen eines verschobenen Elements, `remove` eines Elternknotens mit `move` eines Kindes sind es nicht.
+// - `change` und `move` auf dasselbe Element sind erlaubt (die Attribute gelten am neuen Ort). `change`, `add`, `remove` und `move` auf einen Nachkommen eines verschobenen Elements gelten am neuen Ort;
+//   `remove` eines Elternknotens mit `move` eines Kindes ist es nicht. Zwei `move`, die sich gegenseitig ineinanderschieben, scheitern.
+// - `remove` mit `expect` (kanonische Form des Elements im Ausgang, `canonNode`): weicht das Element im Text ab, scheitert die Liste
+//   („hat sich seit der Runde geändert“). Nötig für `style`, `title`, `desc`, deren Schlüssel von der Position abhängt, und für jede Runde, die auf einem älteren Stand aufbaut.
 // - Entfernt die Liste ein Element samt Nachkommen, darf sie dessen Nachkommen zusätzlich entfernen (zählt einmal).
 // - Attributwerte dürfen keine Steuerzeichen außer Tab/LF/CR enthalten; diese drei werden als `&#9;`/`&#10;`/`&#13;`
 //   geschrieben (ein wörtlicher Zeilenumbruch würde vom XML-Parser zu einem Leerzeichen normalisiert).
 // - Der Schreibweg (Plan 2) prüft das Ergebnis vor dem Schreiben per DOMParser auf Wohlgeformtheit (nicht den ganzen svg-guard).
+import { canonNode, canonTreeOf } from "./canon";
 import { attr, scanElements, type SvgElement } from "./elements";
 
 export type SvgChange =
   | { op: "change"; id: string; attrs: Record<string, string | null> }
   | { op: "add"; parent: string | null; after: string | null; markup: string }
-  | { op: "remove"; id: string }
+  | { op: "remove"; id: string; expect?: string }
   | { op: "move"; id: string; parent: string | null; after: string | null };
 // id/parent/after sind Element-Schlüssel (SvgElement.key), auch #wurzel oder #style-1.
 // parent null = #wurzel; after null = als erstes Kind.
 
 export type ApplyResult = { ok: true; text: string } | { ok: false; problems: string[] };
 
-/** Ersetzt `text.slice(from, to)` durch `insert`; `from === to` ist eine reine Einfügung. */
+/** Ersetzt `text.slice(from, to)` durch `insert`; `from === to` ist eine reine Einfügung. (Für Formatierer, die nur Attributspannen setzen.) */
 export interface TextSpan {
   from: number;
   to: number;
@@ -102,27 +110,31 @@ export function applySpans(text: string, spans: readonly TextSpan[]): string {
   return out + text.slice(last);
 }
 
-const lineStartOf = (text: string, pos: number): number => (pos === 0 ? 0 : text.lastIndexOf("\n", pos - 1) + 1);
-
-/** Einrückung vor `pos`, wenn davor auf der Zeile nur Leerzeichen/Tabs stehen, sonst `null`. */
+/** Einrückung vor `pos`, wenn davor auf der Zeile nur Leerzeichen/Tabs stehen, sonst `null`. Läuft rückwärts nur über den Leerraum (kein Suchen bis zum Zeilenanfang: eine einzeilige Datei bliebe sonst quadratisch). */
 function leadingIndent(text: string, pos: number): string | null {
-  const s = text.slice(lineStartOf(text, pos), pos);
-  for (let i = 0; i < s.length; i++) if (s[i] !== " " && s[i] !== "\t") return null;
-  return s;
+  let i = pos;
+  while (i > 0) {
+    const c = text.charCodeAt(i - 1);
+    if (c === 0x0a) break;
+    if (c !== 0x20 && c !== 0x09) return null;
+    i--;
+  }
+  return text.slice(i, pos);
 }
 
 /** Entfernt-Spanne: steht das Element allein auf seinen Zeilen, geht die ganze Zeile mit, sonst nur die Spanne. */
 function removalSpan(text: string, el: SvgElement): { from: number; to: number } {
   const lead = leadingIndent(text, el.start);
   if (lead !== null) {
-    const nl = text.indexOf("\n", el.end);
-    const stop = nl < 0 ? text.length : nl;
-    let blank = true;
-    for (let i = el.end; i < stop; i++) {
+    // Vorwärts nur über Leerraum bis zum Zeilenende; das erste andere Zeichen heißt „nicht allein auf der Zeile“.
+    let i = el.end;
+    while (i < text.length) {
       const c = text.charCodeAt(i);
-      if (c !== 0x20 && c !== 0x09 && c !== 0x0d) blank = false;
+      if (c !== 0x20 && c !== 0x09 && c !== 0x0d) break;
+      i++;
     }
-    if (blank) return { from: el.start - lead.length, to: nl < 0 ? text.length : nl + 1 };
+    if (i >= text.length) return { from: el.start - lead.length, to: text.length };
+    if (text.charCodeAt(i) === 0x0a) return { from: el.start - lead.length, to: i + 1 };
   }
   return { from: el.start, to: el.end };
 }
@@ -130,20 +142,28 @@ function removalSpan(text: string, el: SvgElement): { from: number; to: number }
 /** Wo und womit eingefügt wird. `selfClose`: der Elternknoten ist selbstschließend und wird zu `<p>…</p>`. */
 type Spot = { pos: number; lead: string; trail: string } | { selfClose: true };
 
-interface Inserted {
-  /** Offset des eingefügten Elements innerhalb von `insert`. */
-  offset: number;
+export interface Inserted {
   parent: SvgElement;
   after: SvgElement | null;
   /** Bei `move` das Element im Ausgangstext, sonst `null` (frisches Markup). */
   source: SvgElement | null;
+  /** Wer an dieser Stelle im Ergebnis stehen muss: lokaler Tag und id nach der Liste (`null` ohne id). */
+  tag: string;
+  id: string | null;
 }
 
-interface Planned extends TextSpan {
+/** Ein Stück des Ersatzes einer Spanne: neuer Text oder die Scheibe eines verschobenen Elements. `mark` merkt, wo das Element im Ergebnis beginnt. */
+type Part = { text: string; mark?: Inserted } | { slice: SvgElement; mark: Inserted };
+
+interface Planned {
+  from: number;
+  to: number;
   /** Nummer der Änderung in der Liste (ab 1), für Meldungen. */
   op: number;
-  inserted?: Inserted[];
+  parts: Part[];
 }
+
+const text1 = (t: string): Part[] => [{ text: t }];
 
 export function applyChanges(text: string, changes: readonly SvgChange[]): ApplyResult {
   const scan = scanElements(text);
@@ -167,6 +187,19 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
       else kids.set(e.parentKey, [e]);
     }
   }
+  const parentOf = parentMap(elements);
+  const starts = elements.map((e) => e.start);
+  /** Erster Index mit `start >= pos`. */
+  const lowerBound = (pos: number): number => {
+    let lo = 0;
+    let hi = starts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid] < pos) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
   const resolve = (label: string, key: string | null, asParent: boolean): SvgElement | null => {
     const k = key === null && asParent ? ROOT_KEY : key;
     if (k !== null && k.startsWith("@")) {
@@ -221,13 +254,16 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
       const a = hits[0];
       const op = ops[name];
       if (a === undefined) {
-        if (value !== null) list.push({ ...attrAppendSpan(text, el, name, value), op });
+        if (value !== null) {
+          const sp = attrAppendSpan(text, el, name, value);
+          list.push({ from: sp.from, to: sp.to, parts: text1(sp.insert), op });
+        }
       } else if (value === null) {
         let from = a.start;
         while (from > el.start && isWs(text.charCodeAt(from - 1))) from--;
-        list.push({ from, to: a.valueEnd + 1, insert: "", op });
+        list.push({ from, to: a.valueEnd + 1, parts: [], op });
       } else if (a.value !== value) {
-        list.push({ from: a.valueStart, to: a.valueEnd, insert: escapeAttrValue(value, a.quote), op });
+        list.push({ from: a.valueStart, to: a.valueEnd, parts: text1(escapeAttrValue(value, a.quote)), op });
       }
     }
     attrSpans.set(el, list);
@@ -235,11 +271,12 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
 
   // 2. Strukturänderungen in Listenreihenfolge (die Reihenfolge bestimmt bei gleichem Anker die Einfügereihenfolge).
   const spans: Planned[] = [];
+  const insertedList: Inserted[] = [];
   const removed = new Map<SvgElement, number>();
   const movedEls = new Map<SvgElement, number>();
   const anchors: { op: number; after: SvgElement }[] = [];
   // Kinder, die in einen selbstschließenden Elternknoten kommen, werden zu EINER Ersetzung gesammelt.
-  const selfFill = new Map<SvgElement, { bodies: string[]; inserted: Inserted[]; op: number }>();
+  const selfFill = new Map<SvgElement, { bodies: Part[]; op: number }>();
   let countDelta = 0;
   const unit = (indent: string): string => (indent.includes("\t") ? "\t" : "  ");
   const within = (inner: SvgElement, outer: SvgElement): boolean => inner.start >= outer.start && inner.end <= outer.end;
@@ -267,38 +304,45 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
     return { pos: parent.openEnd, lead: "", trail: "" };
   };
 
-  /** Plant das Einfügen von `body` (ein Element) hinter `after` bzw. als erstes Kind von `parent`.
+  /** Plant das Einfügen eines Elements hinter `after` bzw. als erstes Kind von `parent`: frisches Markup (`body` ein Text) oder die Scheibe von `source`.
    *  `reindent`: Folgezeilen von frischem Markup bekommen die Einrückung des Ankers (relative Einrückung bleibt). */
   const plantInsert = (
     label: string,
     op: number,
     parent: SvgElement,
     after: SvgElement | null,
-    body: string,
+    body: string | null,
     source: SvgElement | null,
     reindent: boolean,
+    ident: { tag: string; id: string | null },
   ): void => {
     const spot = spotFor(label, parent, after);
     if (spot === null) return;
+    const mark: Inserted = { parent, after: "selfClose" in spot ? null : after, source, tag: ident.tag, id: ident.id };
+    insertedList.push(mark);
     if ("selfClose" in spot) {
-      const fill = selfFill.get(parent) ?? { bodies: [], inserted: [], op };
-      fill.inserted.push({ offset: 1 + fill.bodies.reduce((n, b) => n + b.length, 0), parent, after: null, source });
-      fill.bodies.push(body);
+      const fill = selfFill.get(parent) ?? { bodies: [], op };
+      fill.bodies.push(source !== null ? { slice: source, mark } : { text: body ?? "", mark });
       selfFill.set(parent, fill);
       return;
     }
     const ind = spot.lead.slice(eol.length);
-    const text2 = reindent && ind !== "" ? body.split(eol).join(eol + ind) : body;
-    spans.push({
-      from: spot.pos,
-      to: spot.pos,
-      insert: spot.lead + text2 + spot.trail,
-      op,
-      inserted: [{ offset: spot.lead.length, parent, after, source }],
-    });
+    const parts: Part[] = [{ text: spot.lead }];
+    if (source !== null) parts.push({ slice: source, mark });
+    else parts.push({ text: reindent && ind !== "" ? (body ?? "").split(eol).join(eol + ind) : (body ?? ""), mark });
+    if (spot.trail !== "") parts.push({ text: spot.trail });
+    spans.push({ from: spot.pos, to: spot.pos, op, parts });
   };
 
-  const countWithin = (el: SvgElement): number => elements.filter((e) => within(e, el)).length;
+  /** Anzahl der Elemente im Bereich von `el` (samt ihm). */
+  const countWithin = (el: SvgElement): number => lowerBound(el.end) - lowerBound(el.start);
+  /** Ein Vorfahre von `el` (nicht `el` selbst), den eine Entfernung erfasst. */
+  const removedAncestor = (el: SvgElement): SvgElement | null => {
+    for (let a = parentOf.get(el) ?? null; a !== null; a = parentOf.get(a) ?? null) if (removed.has(a)) return a;
+    return null;
+  };
+  let canonTree: ReturnType<typeof canonTreeOf> | undefined;
+  const indexOfEl = new Map<SvgElement, number>();
 
   changes.forEach((c, i) => {
     const label = opLabel(i, c);
@@ -328,13 +372,27 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
       }
       countDelta += ms.elements.length;
       if (after !== null) anchors.push({ op, after });
-      plantInsert(label, op, parent, after, markup, null, true);
+      plantInsert(label, op, parent, after, markup, null, true, { tag: tops[0].tag, id: tops[0].id });
     } else if (c.op === "remove") {
       const el = resolve(label, c.id, false);
       if (el === null) return;
       if (el.key === ROOT_KEY) {
         problems.push(`${label}: "${ROOT_KEY}" lässt sich nicht entfernen`);
         return;
+      }
+      if (c.expect === undefined && (el.key === "#title" || el.key === "#desc" || el.key.startsWith("#style-"))) {
+        problems.push(`${label}: "${el.key}" hängt von seiner Stelle im Text ab; remove braucht dafür expect (kanonische Form des Elements)`);
+        return;
+      }
+      if (c.expect !== undefined) {
+        if (canonTree === undefined) {
+          canonTree = canonTreeOf(text, scan);
+          elements.forEach((e, k) => indexOfEl.set(e, k));
+        }
+        if (canonTree === null || canonNode(canonTree, indexOfEl.get(el) ?? -1) !== c.expect) {
+          problems.push(`${label}: "${el.key}" hat sich seit der Runde geändert`);
+          return;
+        }
       }
       if (!removed.has(el)) removed.set(el, op);
     } else if (c.op === "move") {
@@ -356,31 +414,29 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
       }
       if (!movedEls.has(el)) movedEls.set(el, op);
       if (after !== null) anchors.push({ op, after });
-      // Die Attribute des Elements gelten am neuen Ort: sie werden in die verschobene Kopie eingearbeitet.
-      const own = attrSpans.get(el) ?? [];
-      const slice = applySpans(
-        text.slice(el.start, el.end),
-        own.map((a) => ({ from: a.from - el.start, to: a.to - el.start, insert: a.insert })),
-      );
       const r = removalSpan(text, el);
-      spans.push({ from: r.from, to: r.to, insert: "", op });
-      plantInsert(label, op, parent, after, slice, el, false);
+      spans.push({ from: r.from, to: r.to, parts: [], op });
+      const newId = merged.get(el)?.attrs.id;
+      plantInsert(label, op, parent, after, null, el, false, { tag: el.tag, id: newId === undefined ? el.id : newId === "" ? null : newId });
     }
   });
 
   // Entfernungen: ein Element im entfernten Elternknoten wird mit ihm entfernt (zählt einmal).
   for (const [el, op] of removed) {
-    const outer = [...removed.keys()].find((o) => o !== el && within(el, o));
-    if (outer !== undefined) continue;
+    if (removedAncestor(el) !== null) continue;
     const r = removalSpan(text, el);
-    spans.push({ from: r.from, to: r.to, insert: "", op });
+    spans.push({ from: r.from, to: r.to, parts: [], op });
     countDelta -= countWithin(el);
   }
   for (const [m, mop] of movedEls) {
-    for (const [r, rop] of removed) {
-      if (within(m, r)) {
-        problems.push(`Änderung ${rop} (remove) entfernt "${r.key}" samt "${m.key}", das Änderung ${mop} (move) herausnehmen will`);
-      }
+    for (let a: SvgElement | null = m; a !== null; a = parentOf.get(a) ?? null) {
+      const rop = removed.get(a);
+      if (rop === undefined) continue;
+      problems.push(
+        a === m
+          ? `Änderung ${Math.min(rop, mop)} und ${Math.max(rop, mop)}: "${m.key}" soll verschoben und entfernt werden`
+          : `Änderung ${rop} (remove) entfernt "${a.key}" samt "${m.key}", das Änderung ${mop} (move) herausnehmen will`,
+      );
     }
   }
   // Anker: ein entferntes oder verschobenes Element ist keiner.
@@ -392,38 +448,136 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
       problems.push(`Änderung ${Math.min(op, other)} und ${Math.max(op, other)}: "${after.key}" wird ${rop !== undefined ? "entfernt" : "verschoben"} und kann nicht Anker (after) sein`);
     }
   }
-  // Attributspannen (verschobene Elemente haben ihre schon in der Kopie).
-  for (const [el, list] of attrSpans) if (!movedEls.has(el)) spans.push(...list);
+  // Attributspannen (die eines verschobenen Elements gehören ihm und wandern mit).
+  for (const list of attrSpans.values()) spans.push(...list);
   for (const [parent, fill] of selfFill) {
     spans.push({
       from: parent.openEnd - 2,
       to: parent.openEnd,
-      insert: `>${fill.bodies.join("")}</${rawTagName(text, parent)}>`,
+      parts: [{ text: ">" }, ...fill.bodies, { text: `</${rawTagName(text, parent)}>` }],
       op: fill.op,
-      inserted: fill.inserted,
     });
   }
   if (problems.length > 0) return { ok: false, problems: [...new Set(problems)] };
 
-  // Überlappung: nach Anfang sortiert darf eine Spanne erst dort beginnen, wo die bisherigen enden.
-  spans.sort((a, b) => a.from - b.from || a.to - b.to);
-  let widest: Planned | null = null;
-  for (const s of spans) {
-    if (widest !== null && s.from < widest.to) {
-      problems.push(
-        widest.op === s.op
-          ? `Änderung ${s.op}: das Ziel überschneidet das Element selbst`
-          : `Änderung ${Math.min(widest.op, s.op)} und ${Math.max(widest.op, s.op)} überlappen sich: dasselbe Stück Text würde zweimal geändert`,
-      );
+  // 3. Besitzer jeder Spanne: das innerste verschobene Element, das sie umschließt (reine Einfügung: echt im Inneren), ohne seine
+  //    eigene Entfern-Spanne; sonst „oben“ (null).
+  //    Nur Elemente, die VOR der Spanne beginnen (`start < from`) kommen als Besitzer in Frage: eine Spanne, die genau an `m.start` beginnt,
+  //    liegt vor `m` (eine Einfügestelle) oder ist `m`s eigene Entfern-Spanne, nie in `m`.
+  const ownerOf = (s: Planned): SvgElement | null => {
+    if (movedEls.size === 0) return null;
+    const idx = lowerBound(s.from) - 1;
+    for (let e: SvgElement | null = idx >= 0 ? elements[idx] : null; e !== null; e = parentOf.get(e) ?? null) {
+      if (movedEls.has(e) && (s.from === s.to ? s.from < e.end : s.to <= e.end)) return e;
     }
-    if (widest === null || s.to > widest.to) widest = s;
+    return null;
+  };
+  const owned = new Map<SvgElement | null, Planned[]>();
+  for (const s of spans) {
+    const o = ownerOf(s);
+    const l = owned.get(o);
+    if (l) l.push(s);
+    else owned.set(o, [s]);
+  }
+
+  // Überlappung je Besitzer: nach Anfang sortiert darf eine Spanne erst dort beginnen, wo die bisherigen enden.
+  for (const list of owned.values()) {
+    list.sort((a, b) => a.from - b.from || a.to - b.to);
+    let widest: Planned | null = null;
+    for (const s of list) {
+      if (widest !== null && s.from < widest.to) {
+        problems.push(
+          widest.op === s.op
+            ? `Änderung ${s.op}: das Ziel überschneidet das Element selbst`
+            : `Änderung ${Math.min(widest.op, s.op)} und ${Math.max(widest.op, s.op)} überlappen sich: dasselbe Stück Text würde zweimal geändert`,
+        );
+      }
+      if (widest === null || s.to > widest.to) widest = s;
+    }
   }
   if (problems.length > 0) return { ok: false, problems: [...new Set(problems)] };
 
-  const out = applySpans(text, spans);
+  // 4. Zusammensetzen als Stückliste: kopierte Originalstücke (mit ihrem Ergebnis-Offset) und neuer Text.
+  const chunks: string[] = [];
+  let len = 0;
+  const origPieces: { from: number; to: number; at: number }[] = [];
+  const startOf = new Map<Inserted, number>();
+  const emitted = new Set<SvgElement>();
+  const emitText = (t: string): void => {
+    if (t === "") return;
+    chunks.push(t);
+    len += t.length;
+  };
+  const emitOrig = (from: number, to: number): void => {
+    if (to <= from) return;
+    origPieces.push({ from, to, at: len });
+    emitText(text.slice(from, to));
+  };
+  const emitRange = (from: number, to: number, owner: SvgElement | null): void => {
+    let last = from;
+    for (const s of owned.get(owner) ?? []) {
+      emitOrig(last, s.from);
+      for (const part of s.parts) {
+        if (part.mark !== undefined) startOf.set(part.mark, len);
+        if ("slice" in part) emitSlice(part.slice);
+        else emitText(part.text);
+      }
+      last = s.to;
+    }
+    emitOrig(last, to);
+  };
+  const emitSlice = (m: SvgElement): void => {
+    if (emitted.has(m)) return;
+    emitted.add(m);
+    emitRange(m.start, m.end, m);
+  };
+  try {
+    emitRange(0, text.length, null);
+  } catch (e) {
+    if (e instanceof RangeError) return { ok: false, problems: ["Die Verschiebungen sind zu tief ineinander verschachtelt"] };
+    throw e;
+  }
+  if (emitted.size < movedEls.size) {
+    // Ein verschobenes Element, das nie eingesetzt wurde, steckt in einem Kreis: jedes sitzt in der Scheibe eines anderen, das selbst nicht einsetzbar ist.
+    const holder = new Map<SvgElement, SvgElement | null>();
+    for (const [o, list] of owned) for (const s of list) for (const part of s.parts) if ("slice" in part) holder.set(part.slice, o);
+    const loose = [...movedEls.keys()].find((m) => !emitted.has(m));
+    const path: SvgElement[] = [];
+    const seenAt = new Map<SvgElement, number>();
+    for (let m: SvgElement | null | undefined = loose; m !== undefined && m !== null && !seenAt.has(m); m = holder.get(m)) {
+      seenAt.set(m, path.length);
+      path.push(m);
+    }
+    const last = holder.get(path[path.length - 1]);
+    const cycle = last !== undefined && last !== null && seenAt.has(last) ? path.slice(seenAt.get(last)) : path;
+    const ops = [...new Set(cycle.map((m) => movedEls.get(m) ?? 0))].sort((a, b) => a - b);
+    const names = ops.length <= 2 ? ops.join(" und ") : `${ops.slice(0, -1).join(", ")} und ${ops[ops.length - 1]}`;
+    return { ok: false, problems: [`Änderung ${names} verschieben sich gegenseitig ineinander`] };
+  }
+  const out = chunks.join("");
+
+  origPieces.sort((a, b) => a.from - b.from);
+  const mapOffset = (off: number): number | undefined => {
+    let lo = 0;
+    let hi = origPieces.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (origPieces[mid].from <= off) lo = mid + 1;
+      else hi = mid;
+    }
+    const pc = lo > 0 ? origPieces[lo - 1] : undefined;
+    return pc !== undefined && off < pc.to ? pc.at + (off - pc.from) : undefined;
+  };
+
   const wantAttrs = new Map<SvgElement, Record<string, string | null>>();
   for (const [el, m] of merged) wantAttrs.set(el, m.attrs);
-  const guard = roundTripProblems(out, spans, wantAttrs, elements.length + countDelta, {
+  const insertedAt: { start: number; ins: Inserted }[] = [];
+  for (const ins of insertedList) {
+    const start = startOf.get(ins);
+    if (start === undefined) return { ok: false, problems: [`Eingefügtes Element unter "${ins.parent.key}" wurde nicht in das Ergebnis geschrieben`] };
+    insertedAt.push({ start, ins });
+  }
+  const guard = roundTripProblems(out, mapOffset, insertedAt, wantAttrs, elements.length + countDelta, {
     elements,
     removed: new Set(removed.keys()),
     moved: new Set(movedEls.keys()),
@@ -454,11 +608,13 @@ function duplicateIds(elements: readonly SvgElement[]): Map<string, number> {
 
 /**
  * Round-Trip-Wächter: liest das Ergebnis neu und prüft, dass es sagt, was die Liste gemeint hat.
- * Nur für Tests exportiert.
+ * `mapOffset` bildet einen Ausgangs-Offset auf den Ergebnis-Offset ab (nur für kopierte Originalstücke, sonst `undefined`);
+ * `inserted` nennt die Ergebnis-Offsets der eingefügten und verschobenen Elemente. Nur für Tests exportiert.
  */
 export function roundTripProblems(
   out: string,
-  spans: readonly Planned[],
+  mapOffset: (orig: number) => number | undefined,
+  inserted: ReadonlyArray<{ start: number; ins: Inserted }>,
   merged: ReadonlyMap<SvgElement, Record<string, string | null>>,
   expectedCount: number,
   originals: { elements: readonly SvgElement[]; removed: ReadonlySet<SvgElement>; moved: ReadonlySet<SvgElement> },
@@ -478,21 +634,22 @@ export function roundTripProblems(
   const atStart = new Map<number, SvgElement>();
   for (const e of res.elements) atStart.set(e.start, e);
   const parentNowOf = parentMap(res.elements);
-  // Ausgangs-Offset in Ergebnis-Offset umrechnen: jede Spanne, die davor endet, verschiebt ihn.
-  const mapOffset = (s: number): number => spans.reduce((o, sp) => (sp.to <= s ? o + sp.insert.length - (sp.to - sp.from) : o), s);
-
-  // Eingefügte Elemente: Start im Ergebnis = Ausgangs-Start der Spanne + Verschiebung durch frühere Spannen + Offset im Einfügetext.
-  const planned: { start: number; ins: Inserted }[] = [];
-  let shift = 0;
-  for (const sp of spans) {
-    for (const ins of sp.inserted ?? []) planned.push({ start: sp.from + shift + ins.offset, ins });
-    shift += sp.insert.length - (sp.to - sp.from);
+  const kidsNow = new Map<SvgElement | null, SvgElement[]>();
+  const posInParent = new Map<SvgElement, number>();
+  for (const e of res.elements) {
+    const p = parentNowOf.get(e) ?? null;
+    const l = kidsNow.get(p);
+    if (l) l.push(e);
+    else kidsNow.set(p, [e]);
+    posInParent.set(e, (l ?? kidsNow.get(p)!).length - 1);
   }
-  const movedStart = new Map<SvgElement, number>();
-  for (const p of planned) if (p.ins.source !== null) movedStart.set(p.ins.source, p.start);
+  const nowAt = (orig: number): SvgElement | undefined => {
+    const m = mapOffset(orig);
+    return m === undefined ? undefined : atStart.get(m);
+  };
 
   for (const [el, attrs] of merged) {
-    const now = atStart.get(movedStart.get(el) ?? mapOffset(el.start));
+    const now = nowAt(el.start);
     if (now === undefined) {
       problems.push(`Element "${el.key}" fehlt im Ergebnis`);
       continue;
@@ -505,10 +662,12 @@ export function roundTripProblems(
     }
   }
 
-  const insertedStarts = new Set(planned.map((p) => p.start));
-  for (const { start, ins } of planned) {
+  // Eingefügte und verschobene Elemente in Listenreihenfolge: richtiger Ort (Elternknoten, Vorgänger) und richtiger Inhalt (Tag, id).
+  // Vorgänger ist das gemeinte `after` oder, hinter demselben Anker, das zuletzt eingefügte Element derselben Gruppe (Listenreihenfolge).
+  const lastOfGroup = new Map<SvgElement, Map<SvgElement | null, SvgElement>>();
+  for (const { start, ins } of inserted) {
     const now = atStart.get(start);
-    const parentNow = atStart.get(mapOffset(ins.parent.start));
+    const parentNow = nowAt(ins.parent.start);
     if (now === undefined || parentNow === undefined) {
       problems.push(`Eingefügtes Element unter "${ins.parent.key}" fehlt im Ergebnis`);
       continue;
@@ -517,29 +676,35 @@ export function roundTripProblems(
       problems.push(`Eingefügtes Element "${now.key}" hängt nicht unter "${ins.parent.key}"`);
       continue;
     }
-    // Davor darf nur das gemeinte `after` stehen oder ein anderes in derselben Liste eingefügtes Element.
-    const sibs = res.elements.filter((e) => parentNowOf.get(e) === parentNow);
-    const prev = sibs[sibs.indexOf(now) - 1];
-    const wanted = ins.after === null ? undefined : atStart.get(mapOffset(ins.after.start));
-    const fine = prev === undefined ? ins.after === null : prev === wanted || insertedStarts.has(prev.start);
-    if (!fine) problems.push(`Eingefügtes Element "${now.key}" steht nicht hinter "${ins.after?.key ?? "dem Anfang"}"`);
+    if (now.tag !== ins.tag || now.id !== ins.id) {
+      problems.push(`An der Stelle von "${ins.id ?? ins.tag}" steht im Ergebnis "${now.id ?? now.tag}" statt des gemeinten Elements`);
+      continue;
+    }
+    const group = lastOfGroup.get(ins.parent) ?? new Map<SvgElement | null, SvgElement>();
+    lastOfGroup.set(ins.parent, group);
+    const wanted = group.get(ins.after) ?? (ins.after === null ? undefined : nowAt(ins.after.start));
+    const prev = (kidsNow.get(parentNow) ?? [])[(posInParent.get(now) ?? 0) - 1];
+    if (prev !== wanted) problems.push(`Eingefügtes Element "${now.key}" steht nicht hinter "${ins.after?.key ?? "dem Anfang"}"`);
+    group.set(ins.after, now);
   }
 
-  // Jedes Originalelement, das weder entfernt noch verschoben wurde (auch nicht über einen Vorfahren), behält seinen Elternknoten.
+  // Jedes Originalelement, das weder entfernt noch verschoben wurde (auch nicht über einen entfernten Vorfahren), behält seinen Elternknoten.
+  // Nachkommen eines verschobenen Elements gehören dazu: sie wandern mit ihrem Elternknoten, ihr Elternknoten bleibt derselbe.
   const parentWas = parentMap(originals.elements);
   const gone = new Set<SvgElement>();
   for (const e of originals.elements) {
     const parent = parentWas.get(e) ?? null;
-    if (originals.removed.has(e) || originals.moved.has(e) || (parent !== null && gone.has(parent))) {
+    if (originals.removed.has(e) || (parent !== null && gone.has(parent))) {
       gone.add(e);
       continue;
     }
-    const now = atStart.get(mapOffset(e.start));
+    if (originals.moved.has(e)) continue;
+    const now = nowAt(e.start);
     if (now === undefined) {
       problems.push(`Element "${e.key}" fehlt im Ergebnis`);
       continue;
     }
-    const wantParent = parent === null ? null : (atStart.get(mapOffset(parent.start)) ?? null);
+    const wantParent = parent === null ? null : (nowAt(parent.start) ?? null);
     if ((parentNowOf.get(now) ?? null) !== wantParent) {
       problems.push(`Element "${e.key}" hätte im Ergebnis einen anderen Elternknoten als vorher (erwartet "${parent?.key ?? "keinen"}")`);
     }

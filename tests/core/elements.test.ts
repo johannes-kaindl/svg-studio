@@ -204,3 +204,32 @@ describe("scanElements", () => {
     expect(syntaxIssues(`<svg><text id="a">&amp;&lt;&gt;&quot;&apos;&#65;&#x42;</text></svg>`)).toEqual([]);
   });
 });
+
+describe("scanElements: Attributwerte nach XML-Normalisierung und Kommentare", () => {
+  const val = (text: string, name: string): string | undefined => scanElements(text).elements[0]?.attrs.find((a) => a.name === name)?.value;
+
+  it("wörtliche Zeilenumbrüche und Tabs im Wert werden je ein Leerzeichen", () => {
+    expect(val(`<path d="M0 0\n  L1 1"/>`, "d")).toBe("M0 0   L1 1");
+    expect(val(`<path d="a\r\nb"/>`, "d")).toBe("a b");
+    expect(val(`<path d="a\rb"/>`, "d")).toBe("a b");
+    expect(val(`<path d="a\tb"/>`, "d")).toBe("a b");
+  });
+
+  it("Zeichenreferenzen für Zeilenumbruch bleiben Zeilenumbrüche", () => {
+    expect(val(`<path d="a&#10;b"/>`, "d")).toBe("a\nb");
+    expect(val(`<path d="a&#9;b&#13;c"/>`, "d")).toBe("a\tb\rc");
+  });
+
+  it("raw bleibt unverändert", () => {
+    const a = scanElements(`<path d="a\nb"/>`).elements[0]!.attrs[0]!;
+    expect(a.raw).toBe("a\nb");
+    expect(a.value).toBe("a b");
+  });
+
+  it("comments liefert die Spanne von <!-- x -->, nicht die in CDATA", () => {
+    const text = `<svg><!-- x --><style><![CDATA[ <!-- ]]></style></svg>`;
+    const { comments, issues } = scanElements(text);
+    expect(issues).toEqual([]);
+    expect(comments).toEqual([{ start: text.indexOf("<!--"), end: text.indexOf("-->") + 3 }]);
+  });
+});
