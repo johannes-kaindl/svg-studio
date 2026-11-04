@@ -12,7 +12,9 @@ interface Aus {
 }
 const aus = JSON.parse(readFileSync(new URL("../fixtures/lab/auswertung-2026-11-02.json", import.meta.url), "utf8")) as Aus;
 
+const NOTE = "Gemessen mit Denken aus; mit Denken bis 50-mal länger (n = 1).";
 const texts: QualityTexts = {
+  thinkingNote: NOTE,
   measured: (m) => `Gemessen: ${m.good} von ${m.of}${m.extra ? `, ${m.extra}` : ""} (${m.model}).`,
   notMeasured: "Für dieses Modell nicht gemessen.",
   smallReference: (ref, short) => `Nicht gemessen; das kleine Modell ${short} schaffte ${ref.good} von ${ref.of}.`,
@@ -20,7 +22,7 @@ const texts: QualityTexts = {
   failureOwn: (m) => `Im Test: ${m.good} von ${m.of}.`,
   failureBest: (m) => `Am besten gemessen: ${m.model}.`,
 };
-const o = { family: null, texts };
+const o = { family: null, thinking: false, texts };
 
 describe("MEASUREMENTS", () => {
   it("vier Zeilen im Modus transform, gemessen am 2026-11-02", () => {
@@ -68,6 +70,18 @@ describe("svgQualityLine", () => {
   });
   it("Familie claude → nicht gemessen, auch bei bekanntem Namen", () => {
     expect(svgQualityLine("qwen/qwen3.8-27b", "create", { ...o, family: "claude" })).toEqual({ measured: false, text: "Für dieses Modell nicht gemessen." });
+  });
+});
+
+describe("svgQualityLine mit Denken", () => {
+  it("thinking: true → Zusatz an gemessener und an Bezugszeile, nicht an 'nicht gemessen'", () => {
+    const t = { ...o, thinking: true };
+    expect(svgQualityLine("qwen/qwen3.8-27b", "create", t).text).toBe(`Gemessen: 10 von 10, Grundrisse 3 von 3 (qwen/qwen3.8-27b). ${NOTE}`);
+    expect(svgQualityLine("meta/llama-9", "create", t).text).toContain(NOTE);
+    expect(svgQualityLine("x", "create", { ...t, family: "claude" }).text).toBe("Für dieses Modell nicht gemessen.");
+  });
+  it("ohne Denken kein Zusatz", () => {
+    expect(svgQualityLine("qwen/qwen3.8-27b", "create", o).text).not.toContain(NOTE);
   });
 });
 

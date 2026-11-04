@@ -1,4 +1,4 @@
-// vendored from code-kit@0.54.0, src/ts/pure/measured-quality.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.55.0, src/ts/pure/measured-quality.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Origin: obsidian-plugins `3d-codeblocks/src/core/shapes/quality.ts` (`findMeasurement`, `qualityLine`, `failureHint`, `smallReference`, `best`;
 // the table `MEASUREMENTS` and the English sentences stay with the carrier), 2026-10; widened for svg-studio's table (model aliases, an extra
 // field, any task and mode string).
@@ -42,6 +42,9 @@ export interface QualityTexts {
   failureOwn(m: Measurement): string;
   /** Appended after `failureBase` when another model measured better ("A larger model may do better — measured best: …"). */
   failureBest(top: Measurement): string;
+  /** Appended to the measured line and to the reference line (never to `notMeasured`) when `QualityOptions.thinking` is on: the numbers were measured with thinking
+   *  off ("measured with thinking off; with thinking up to 50 times longer"). Empty or missing: nothing is appended. */
+  thinkingNote?: string;
 }
 
 export interface QualityOptions {
@@ -52,11 +55,16 @@ export interface QualityOptions {
   family?: string | null;
   /** Families the table says nothing about (cloud models): they get the plain sentences, with no pointer to a local model. The family wins over a model name that is in the table. */
   unmeasuredFamilies?: readonly string[];
+  /** The panel runs with thinking ON while the table was measured with it off: `texts.thinkingNote` is appended to the measured and the reference line.
+   *  A structure instead of a text comparison on the caller's side; the family rule still wins (`unmeasuredFamilies` gets the plain sentence). */
+  thinking?: boolean;
 }
 
 const fold = (s: string): string => s.trim().toLowerCase();
 
 const isUnmeasured = (o: QualityOptions): boolean => o.family != null && (o.unmeasuredFamilies ?? []).includes(o.family);
+
+const withThinkingNote = (line: string, o: QualityOptions): string => (o.thinking === true && o.texts.thinkingNote ? `${line} ${o.texts.thinkingNote}` : line);
 
 /** The row of a model for a task: by name or alias, ignoring case and surrounding blanks; never a guess from a similar name or another task. */
 export function findMeasurement(model: string, task: string, table: readonly Measurement[]): Measurement | null {
@@ -71,12 +79,12 @@ export function qualityLine(model: string, task: string, table: readonly Measure
   const none = { measured: false, text: o.texts.notMeasured };
   if (isUnmeasured(o)) return none;
   const m = findMeasurement(model, task, table);
-  if (m !== null) return { measured: true, text: o.texts.measured(m) };
+  if (m !== null) return { measured: true, text: withThinkingNote(o.texts.measured(m), o) };
   if (o.smallModel === undefined) return none;
   const small = fold(o.smallModel);
   const ref = table.find((x) => x.task === task && fold(x.model) === small);
   if (ref === undefined) return none;
-  return { measured: false, text: o.texts.smallReference(ref, ref.model.slice(ref.model.lastIndexOf("/") + 1)) };
+  return { measured: false, text: withThinkingNote(o.texts.smallReference(ref, ref.model.slice(ref.model.lastIndexOf("/") + 1)), o) };
 }
 
 /** The best measured row of a task: highest `good / of`, a tie goes to the name that sorts first (deterministic). Rows with `of <= 0` measured nothing. */

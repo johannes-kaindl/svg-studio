@@ -25,9 +25,9 @@ export const SMALL_MODEL = "google/gemma-4-e4b";
 /** Familien, über die die Tabelle nichts sagt (Cloud-Modelle). */
 const UNMEASURED_FAMILIES = ["claude"] as const;
 
-export function svgQualityLine(model: string, task: "create" | "refine", o: { family: string | null; texts: QualityTexts }): { measured: boolean; text: string } {
-  // Der Vorbehalt „gemessen mit Denken aus“ (Plan 2, Entscheidung 3) kommt mit dem Kit: Gegenleser 2026-11-04, Zielort code-kit `measured-quality` (`QualityOptions.thinking`).
-  return qualityLine(model, task, MEASUREMENTS, { texts: o.texts, smallModel: SMALL_MODEL, family: o.family, unmeasuredFamilies: UNMEASURED_FAMILIES });
+export function svgQualityLine(model: string, task: "create" | "refine", o: { family: string | null; thinking: boolean; texts: QualityTexts }): { measured: boolean; text: string } {
+  // Gemessen wurde mit Denken aus: ist es an, hängt der Kit-Baustein `texts.thinkingNote` an (Plan 2, Entscheidung 3).
+  return qualityLine(model, task, MEASUREMENTS, { texts: o.texts, smallModel: SMALL_MODEL, family: o.family, thinking: o.thinking, unmeasuredFamilies: UNMEASURED_FAMILIES });
 }
 
 export function svgFailureHint(model: string, task: "create" | "refine", o: { family: string | null; texts: QualityTexts }): string {
