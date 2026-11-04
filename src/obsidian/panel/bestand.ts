@@ -54,9 +54,10 @@ const LISTED = 5;
 
 /** Je Befund eine Karte mit Text und Knopf (der Knopf in eigener Zeile unter dem Text). Ohne Befund bleibt der Host leer. */
 export function renderBestandNotice(host: HTMLElement, b: BestandProblems, a: BestandActions, busy: boolean): void {
-  const card = (fill: (box: HTMLElement) => void, label: string, hint: string, onClick: () => void): void => {
+  const card = (fill: (box: HTMLElement) => void, label: string, hint: string, onClick: (() => void) | null): void => {
     const el = host.createDiv({ cls: "svg-studio-notice", attr: { role: "group" } });
     fill(el.createDiv({ cls: "svg-studio-notice-text" }));
+    if (onClick === null) return;
     const btn = el.createEl("button", { cls: "svg-studio-notice-button", text: label, attr: { type: "button", title: hint } });
     btn.disabled = busy;
     btn.addEventListener("click", onClick);
@@ -68,11 +69,13 @@ export function renderBestandNotice(host: HTMLElement, b: BestandProblems, a: Be
   if (b.parse !== null) {
     card(plain(t("bestand.unusable", problemText({ code: "text-unreadable", params: [b.parse.message, b.parse.offset] }))), t("bestand.repair"), t("bestand.repair.hint"), a.repair);
   } else if (b.guard.length > 0) {
+    // Ein SVG über der Größengrenze ginge ganz ans Modell (über 1 MB) und käme nicht zurück: keine Reparatur anbieten (Opus-Gesamtreview 2026-11-05, Befund 9).
+    const tooBig = b.guard.some((p) => p.code === "too-large" || p.code === "too-many-elements");
     card((box) => {
       box.createDiv({ text: t("bestand.unusableHead") });
       const list = box.createEl("ul", { cls: "svg-studio-notice-list" });
       for (const p of b.guard.slice(0, LISTED)) list.createEl("li", { text: `${p.code}: ${p.detail}` });
       if (b.guard.length > LISTED) list.createEl("li", { text: t("bestand.more", b.guard.length - LISTED) });
-    }, t("bestand.repair"), t("bestand.repair.hint"), a.repair);
+    }, t("bestand.repair"), t("bestand.repair.hint"), tooBig ? null : a.repair);
   }
 }

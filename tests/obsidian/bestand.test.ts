@@ -342,3 +342,23 @@ describe("Karte „Reparieren“: Befunde als Liste, gekürzt (C5)", () => {
     expect(n.textContent).toContain("This SVG can't be used as it is: The text is not readable:");
   });
 });
+
+// Opus-Gesamtreview 2026-11-05, Befund 9: „Reparieren“ wurde auch bei einem SVG über der Größengrenze angeboten und hätte über 1 MB ans Modell geschickt.
+describe("renderBestandNotice: keine Reparatur für zu große SVGs", () => {
+  const actions = { repair: vi.fn(), names: vi.fn(), cleanup: vi.fn() };
+  it("too-large und too-many-elements: die Karte nennt den Befund, bietet aber keinen Reparaturknopf", async () => {
+    const { renderBestandNotice } = await import("../../src/obsidian/panel/bestand");
+    for (const code of ["too-large", "too-many-elements"] as const) {
+      const host = document.createElement("div");
+      renderBestandNotice(host, { parse: null, guard: [{ code, detail: "zu groß" }], unnamed: 0, editorMetadata: false }, actions, false);
+      expect(host.textContent).toContain(code);
+      expect(host.querySelector("button")).toBeNull();
+    }
+  });
+  it("ein anderer Befund (parse-error) behält den Knopf", async () => {
+    const { renderBestandNotice } = await import("../../src/obsidian/panel/bestand");
+    const host = document.createElement("div");
+    renderBestandNotice(host, { parse: null, guard: [{ code: "not-svg", detail: "x" }], unnamed: 0, editorMetadata: false }, actions, false);
+    expect(host.querySelector("button")).not.toBeNull();
+  });
+});

@@ -727,7 +727,9 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
 .svg-studio-stage-wrap {
   position: relative;
   contain: paint;
-  overflow: hidden;
+  /* Höhe und Scrollen sitzen am Wrapper im Licht-DOM: das SVG kann `:host { max-height: none !important }` setzen, den Wrapper erreicht es nicht (Opus-Gesamtreview 2026-11-05, Befund 7). */
+  max-height: 24em;
+  overflow: auto;
   border-radius: var(--radius-s);
 }
 
@@ -735,8 +737,6 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
   padding: var(--size-4-2);
-  max-height: 24em;
-  overflow: auto;
 }
 
 .svg-studio-preview-head {
@@ -865,7 +865,7 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
   min-width: 0;
 }
 
-.svg-studio-compare-cell .svg-studio-stage {
+.svg-studio-compare-cell .svg-studio-stage-wrap {
   max-height: 10em;
 }
 
