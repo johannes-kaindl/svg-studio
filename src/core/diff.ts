@@ -51,6 +51,34 @@ function uniqueKeys(els: readonly SvgElement[]): string[] {
   });
 }
 
+/**
+ * Stile (`#style-n`) werden über ihren Inhalt gepaart, nicht über die Stelle (Opus-Gesamtreview 2026-11-05): ein vorn eingefügter oder entfernter Stil
+ * verschöbe sonst die Nummern, und eine Teilannahme verlöre den Stil, den Ausgang und Antwort beide tragen. Erst gleiche kanonische Form (in Reihenfolge),
+ * dann die übrigen in Reihenfolge (ein geänderter Stil); was übrig bleibt, ist neu oder entfernt. Ändert `aToB` an Ort und Stelle.
+ */
+function pairStyles(A: CanonTree, B: CanonTree, aToB: number[]): void {
+  const styles = (t: CanonTree): number[] => t.elements.flatMap((e, i) => (e.key.startsWith("#style-") ? [i] : []));
+  const as = styles(A);
+  const bs = styles(B);
+  if (as.length === 0 && bs.length === 0) return;
+  for (const a of as) aToB[a] = -1;
+  const usedB = new Set<number>();
+  const rest: number[] = [];
+  for (const a of as) {
+    const form = canonNode(A, a);
+    const b = bs.find((x) => !usedB.has(x) && canonNode(B, x) === form);
+    if (b === undefined) rest.push(a);
+    else {
+      usedB.add(b);
+      aToB[a] = b;
+    }
+  }
+  const freeB = bs.filter((x) => !usedB.has(x));
+  rest.forEach((a, i) => {
+    if (i < freeB.length) aToB[a] = freeB[i];
+  });
+}
+
 /** Längste wachsende Teilfolge: die Indizes in `seq`, die bleiben (O(n log n)). */
 function lisKeep(seq: readonly number[]): Set<number> {
   const tails: number[] = [];
@@ -95,6 +123,7 @@ export function diffSvg(baseText: string, answerText: string): DiffResult {
   const bIdx = new Map(bk.map((k, i) => [k, i]));
   const aToB: number[] = ak.map((k) => bIdx.get(k) ?? -1);
   const bToA: number[] = bk.map(() => -1);
+  pairStyles(A, B, aToB);
   aToB.forEach((b, a) => {
     if (b >= 0) bToA[b] = a;
   });

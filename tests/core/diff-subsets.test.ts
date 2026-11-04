@@ -84,3 +84,36 @@ describe("diffSvg: Befunde des Reviews einzeln", () => {
     expect(d).toEqual({ decomposable: false, why: "Antwort nicht lesbar: mehr als ein Wurzelelement" });
   });
 });
+
+// Opus-Gesamtreview 2026-11-05, Befund 1: `<style>` wurde über die Stelle (`#style-n`) gepaart, nicht über den Inhalt. Ein vorn eingefügter oder entfernter Stil
+// verschob die Paarung: eine Teilannahme verlor den Stil, den Ausgang und Antwort beide tragen, oder doppelte ihn.
+describe("diffSvg: Stile werden über ihren Inhalt gepaart", () => {
+  const styleTexts = (text: string): string[] => scanElements(text).elements.filter((e) => e.tag === "style").map((e) => text.slice(e.openEnd, e.closeStart));
+  const countOf = (xs: string[], x: string): number => xs.filter((y) => y === x).length;
+  const CASES_STYLE: Array<[string, string, string]> = [
+    ["neuer Stil vor dem alten", S(`<rect id="r" class="a"/><style>.a{fill:red}</style>`), S(`<style>.b{fill:blue}</style><rect id="r" class="a"/><style>.a{fill:red}</style>`)],
+    ["erster von zwei Stilen entfernt", S(`<style>.a{fill:red}</style><rect id="r" class="b"/><style>.b{fill:blue}</style>`), S(`<rect id="r" class="b"/><style>.b{fill:blue}</style>`)],
+    ["Stile vertauscht", S(`<style>.a{fill:red}</style><rect id="r"/><style>.b{fill:blue}</style>`), S(`<style>.b{fill:blue}</style><rect id="r"/><style>.a{fill:red}</style>`)],
+    ["ein Stil geändert, einer bleibt", S(`<style>.a{fill:red}</style><style>.b{fill:blue}</style>`), S(`<style>.a{fill:green}</style><style>.b{fill:blue}</style>`)],
+  ];
+  it.each(CASES_STYLE)("%s: keine Teilmenge verliert oder verdoppelt einen Stil, den beide Seiten tragen", (_n, base, answer) => {
+    const d = diffSvg(base, answer);
+    if (!d.decomposable) return; // „ganzes Bild“ ist sicher
+    const bs = styleTexts(base);
+    const as = styleTexts(answer);
+    const both = bs.filter((x) => as.includes(x));
+    for (let mask = 0; mask < 1 << d.entries.length; mask++) {
+      const accepted = new Set(d.entries.flatMap((_, i) => ((mask >> i) & 1 ? [i] : [])));
+      const r = applyChanges(base, changesFor(d.entries, accepted));
+      expect(r.ok, `Teilmenge ${[...accepted].join(",")}`).toBe(true);
+      if (!r.ok) continue;
+      const got = styleTexts(r.text);
+      for (const x of new Set(both)) {
+        expect(countOf(got, x), `Teilmenge ${[...accepted].join(",")}: „${x}“`).toBeGreaterThanOrEqual(Math.min(countOf(bs, x), countOf(as, x)));
+        expect(countOf(got, x), `Teilmenge ${[...accepted].join(",")}: „${x}“ doppelt`).toBeLessThanOrEqual(Math.max(countOf(bs, x), countOf(as, x)));
+      }
+    }
+    const all = applyChanges(base, changesFor(d.entries, new Set(d.entries.keys())));
+    expect(all.ok && canonDocument(all.text)).toBe(canonDocument(answer));
+  });
+});
