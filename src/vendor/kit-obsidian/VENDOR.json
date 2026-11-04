@@ -1,6 +1,6 @@
 {
   "source": "obsidian-kit",
-  "version": "0.78.0",
-  "sha": "c5961de",
-  "vendored": "status-indicator.ts, choice-modal.ts, write-ports.ts"
+  "version": "0.79.1",
+  "sha": "07238d3",
+  "vendored": "status-indicator.ts, choice-modal.ts, write-ports.ts, help-setting.ts, settings_walker.ts, folder-suggest.ts, confirm.ts, segmented-control.ts, panel-accept.ts, review-list.ts, redline.ts, file-snapshot.ts"
 }

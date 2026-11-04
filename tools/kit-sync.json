@@ -1,6 +1,6 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.78.0" },
+    "obsidian-kit": { "ref": "0.79.1" },
     "code-kit": { "ref": "0.52.1" }
   },
   "targets": [
@@ -10,21 +10,21 @@
     },
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure",
-      "modules": ["safe-markdown", "answer-retry", "llm-answer", "think-splitter", "sha256", "data-url", "slug", { "name": "measured-quality", "ref": "0.55.0" },
-        { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "rounds", "ref": "0.54.0" }, { "name": "run-slot", "ref": "0.54.0" }]
+      "modules": ["safe-markdown", "i18n", "answer-retry", "llm-answer", "think-splitter", "sha256", "data-url", "slug", { "name": "measured-quality", "ref": "0.55.0" },
+        { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "rounds", "ref": "0.54.0" }, { "name": "run-slot", "ref": "0.54.0" }, { "name": "rotation", "ref": "0.54.0" }]
     },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["block-writer"],
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["block-writer", "fence-scan", "plugin-id"],
       "rewrite": [["../vendor/code-kit/pure/", "./"]]
     },
     {
       "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "from": "src/obsidian",
-      "modules": ["status-indicator", "choice-modal", "write-ports"],
+      "modules": ["status-indicator", "choice-modal", "write-ports", "help-setting", "settings_walker", "folder-suggest", "confirm", "segmented-control", "panel-accept", "review-list", "redline", "file-snapshot"],
       "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"]]
     },
     {
       "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing",
-      "modules": ["kit-css", "linear-probe", "window-timers"]
+      "modules": ["kit-css", "linear-probe", "window-timers", "obsidian-mock"]
     }
   ]
 }

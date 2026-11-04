@@ -5,8 +5,8 @@ Modul-Layout und Datenfluss. Das Warum steht in `docs/internal/decisions.md`, di
 ## Schichten
 
 - `src/core/**` ist obsidian-, DOM- und node-frei (`npm run check:pure`). Hier liegt der Fachkern; er rechnet auf dem SVG-**Text**, nicht auf einem DOM.
-- `src/main.ts` ist heute ein leeres Plugin-Gerüst. Rendern, Panel und Schreibwege kommen mit Plan 2 (Inkremente 2 bis 5 der Spec).
-- `src/vendor/kit/` trägt die Kit-Module aus code-kit 0.52.1 (`svg-guard`, `safe-markdown`, `answer-retry`, `llm-answer`, `think-splitter`, `sha256`, `data-url`, `slug`; `fences`, `panel-session`, `rounds`, `run-slot` aus 0.54.0, `measured-quality` aus 0.55.0) und obsidian-kit 0.78.0 (`block-writer`); `src/vendor/kit-obsidian/` die Obsidian-Schicht (`status-indicator`, `choice-modal`, `write-ports`); `tests/vendor/kit/` die Test-Helfer (`kit-css`, `linear-probe`, `window-timers`). Vendort über `tools/sync-kit.sh` (Wrapper auf `tools/kit-sync`) mit Herkunfts-Header, nie von Hand.
+- `src/main.ts` verdrahtet Befehle, den ```svg-studio-Block, die Einbettungsknöpfe, das Kontextmenü und die Einstellungen; das Panel ist eine Hülle (Inhalt und Schreibwege kommen mit Plan 2, C2 bis C4).
+- `src/vendor/kit/` trägt die Kit-Module aus code-kit 0.52.1 (`svg-guard`, `safe-markdown`, `answer-retry`, `llm-answer`, `think-splitter`, `sha256`, `data-url`, `slug`; `fences`, `panel-session`, `rounds`, `run-slot` aus 0.54.0, `measured-quality` aus 0.55.0) und obsidian-kit 0.79.1 (`block-writer`, `fence-scan`, `plugin-id`); `src/vendor/kit-obsidian/` die Obsidian-Schicht (`status-indicator`, `choice-modal`, `write-ports`, `help-setting`, `settings_walker`, `confirm`, `segmented-control`, `panel-accept`, `review-list`, `redline`, `file-snapshot`); `tests/vendor/kit/` die Test-Helfer (`kit-css`, `linear-probe`, `window-timers`). Vendort über `tools/sync-kit.sh` (Wrapper auf `tools/kit-sync`) mit Herkunfts-Header, nie von Hand.
 
 ## Module in `src/core/`
 
@@ -22,6 +22,13 @@ Modul-Layout und Datenfluss. Das Warum steht in `docs/internal/decisions.md`, di
 - `editor-metadata.ts` — `stripEditorMetadata(text)`: Änderungsliste, die `sodipodi:`/`inkscape:`-Elemente und -Attribute, ein `metadata` mit RDF und ungebrauchte `xmlns:`-Deklarationen entfernt (E4 a); Elemente ohne id → „erst Namen vergeben“.
 
 Geplant mit Plan 2: `fields.ts` (Zahlenfelder).
+
+## Obsidian-Schicht `src/obsidian/`
+
+- `render-block.ts` — `renderSvgBlock`: Block als `<img>` mit Data-URL nach `checkSvg`; abgelehnt → Liste der Probleme und Knöpfe Reparieren/Bearbeiten; nie Markup aus dem Quelltext im DOM. `VIEW_TYPE_SVG_STUDIO`.
+- `embed-button.ts` — Knopf an `.internal-embed.image-embed` mit `.svg`-Ziel; ein Beobachter je Fenster (`window-open`/`window-close`), Rücknahme beim Entladen.
+- `entry.ts` — `targetFromContext` (aktive `.svg`, Block oder Einbettung am Cursor im Quellmodus), `registerFileMenu`.
+- `panel-view.ts` — das Panel als Hülle (Ziel halten); `settings-tab.ts` — zweigleisig deklarativ (Hilfe-Zeile zuerst).
 
 ## Messlabor
 

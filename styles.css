@@ -1,0 +1,287 @@
+/* SVG Studio — styles.css.
+ * Die Blöcke "Kit" sind wortgleiche Kopien der `*_CSS`-Konstanten aus dem vendorten Kit (Kit-Vertrag, `.claude/rules/store-css.md`); nicht von Hand ändern. */
+
+/* Kit: REDLINE_CSS (redline.ts) */
+.okit-redline {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--line-height-normal);
+}
+
+.okit-redline-del {
+  text-decoration: line-through;
+  color: var(--color-orange);
+}
+
+.okit-redline-ins {
+  text-decoration: underline;
+  color: var(--color-blue);
+}
+
+.okit-redline-del[data-author="0"],
+.okit-redline-ins[data-author="0"] { color: var(--color-blue); }
+.okit-redline-del[data-author="1"],
+.okit-redline-ins[data-author="1"] { color: var(--color-orange); }
+.okit-redline-del[data-author="2"],
+.okit-redline-ins[data-author="2"] { color: var(--color-purple); }
+.okit-redline-del[data-author="3"],
+.okit-redline-ins[data-author="3"] { color: var(--color-cyan); }
+.okit-redline-del[data-author="4"],
+.okit-redline-ins[data-author="4"] { color: var(--color-yellow); }
+.okit-redline-del[data-author="5"],
+.okit-redline-ins[data-author="5"] { color: var(--color-pink); }
+
+/* Kit: REVIEW_LIST_CSS (review-list.ts) */
+.okit-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.okit-review[aria-busy="true"] {
+  cursor: progress;
+}
+
+.okit-review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+}
+
+.okit-review-count {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.okit-review-bulk,
+.okit-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-3);
+}
+
+.okit-review-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.okit-review-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2);
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+
+.okit-review-card.is-resolved {
+  color: var(--text-faint);
+}
+
+.okit-review-card.is-accepted {
+  border-color: var(--interactive-accent);
+}
+
+.okit-review-card.is-rejected {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.okit-review-decided {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  color: var(--text-muted);
+}
+
+.okit-review-card.is-accepted .okit-review-decided {
+  color: var(--text-accent);
+}
+
+.okit-review-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-3);
+  cursor: pointer;
+  border-radius: var(--radius-s);
+}
+
+.okit-review-main:focus-visible {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.okit-review-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.okit-review-stale {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-warning);
+}
+
+.okit-review-anchor {
+  padding-inline-start: var(--size-4-2);
+  border-inline-start: 2px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  overflow-wrap: anywhere;
+}
+
+.okit-review-orphan {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.okit-review-thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+}
+
+.okit-review-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--font-ui-small);
+}
+
+.okit-review-summary {
+  font-size: var(--font-ui-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.okit-review-actions button {
+  flex: 1 1 auto;
+  min-height: var(--input-height);
+}
+
+.okit-review-empty {
+  padding: var(--size-4-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okit-review-card[data-author="0"] { border-inline-start: 3px solid var(--color-blue); }
+.okit-review-card[data-author="1"] { border-inline-start: 3px solid var(--color-orange); }
+.okit-review-card[data-author="2"] { border-inline-start: 3px solid var(--color-purple); }
+.okit-review-card[data-author="3"] { border-inline-start: 3px solid var(--color-cyan); }
+.okit-review-card[data-author="4"] { border-inline-start: 3px solid var(--color-yellow); }
+.okit-review-card[data-author="5"] { border-inline-start: 3px solid var(--color-pink); }
+
+/* Kit: SEGMENTED_CONTROL_CSS (segmented-control.ts) */
+.okit-segmented {
+  display: inline-flex; flex-wrap: nowrap; align-items: stretch;
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s);
+  background: var(--background-secondary); overflow: hidden;
+}
+.okit-segmented-btn {
+  flex: 0 0 auto; margin: 0; padding: var(--size-2-1) var(--size-4-2);
+  border: 0; border-radius: 0; box-shadow: none;
+  background: transparent; color: var(--text-muted);
+  font-size: var(--font-ui-small); cursor: var(--cursor);
+}
+.okit-segmented-btn + .okit-segmented-btn { border-inline-start: 1px solid var(--background-modifier-border); }
+.okit-segmented-btn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+/* Der gewählte Knopf unterscheidet sich im Schnitt UND durch die Fläche, nicht nur durch Farbe (WCAG 1.4.1). */
+.okit-segmented-btn.is-active {
+  background: var(--background-primary); color: var(--text-normal); font-weight: var(--font-semibold);
+  box-shadow: inset 0 -2px 0 var(--interactive-accent);
+}
+.okit-segmented-btn:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: -2px; }
+.okit-segmented-btn:disabled { color: var(--text-faint); cursor: not-allowed; }
+
+/* Kit: STATUS_INDICATOR_CSS (status-indicator.ts) */
+.okit-status { display: flex; gap: var(--size-2-2); align-items: center; font-size: var(--font-ui-small); color: var(--text-muted); }
+.okit-status-icon { display: inline-flex; align-items: center; }
+.okit-status-icon svg { width: 14px; height: 14px; }
+.okit-status.is-ok .okit-status-icon { color: var(--text-success); }
+.okit-status.is-error .okit-status-icon { color: var(--text-error); }
+.okit-status.is-warning .okit-status-icon { color: var(--text-warning); }
+.okit-status.is-checking .okit-status-icon svg { animation: okit-status-spin 1.2s linear infinite; }
+@keyframes okit-status-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .okit-status.is-checking .okit-status-icon svg { animation: none; } }
+
+/* ── SVG Studio ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+/* Nur Theme-Variablen, keine festen Farben. */
+
+.svg-studio-block {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.svg-studio-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.svg-studio-block > .svg-studio-edit,
+.internal-embed > .svg-studio-embed-button {
+  position: absolute;
+  top: var(--size-4-1);
+  right: var(--size-4-1);
+  opacity: 0;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  transition: opacity 0.15s ease;
+}
+
+.svg-studio-block:hover > .svg-studio-edit,
+.svg-studio-block:focus-within > .svg-studio-edit,
+.internal-embed:hover > .svg-studio-embed-button,
+.internal-embed:focus-within > .svg-studio-embed-button,
+.svg-studio-edit:focus-visible,
+.svg-studio-embed-button:focus-visible {
+  opacity: 1;
+}
+
+.internal-embed.image-embed {
+  position: relative;
+}
+
+.is-mobile .svg-studio-block > .svg-studio-edit,
+.is-mobile .internal-embed > .svg-studio-embed-button {
+  opacity: 1;
+}
+
+.svg-studio-error {
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-error);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.svg-studio-error-head {
+  margin: 0 0 var(--size-4-1);
+  color: var(--text-error);
+}
+
+.svg-studio-error ul {
+  margin: 0 0 var(--size-4-2);
+  padding-left: var(--size-4-5);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.svg-studio-error-actions {
+  display: flex;
+  gap: var(--size-4-2);
+}
+
+.svg-studio-panel .svg-studio-target {
+  font-weight: var(--font-semibold);
+  margin-bottom: var(--size-4-2);
+}
+
+.svg-studio-panel .svg-studio-soon {
+  color: var(--text-muted);
+}
