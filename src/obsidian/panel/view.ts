@@ -5,6 +5,7 @@ import type { SvgSession } from "../../core/session";
 import { panelStrings, t } from "../../i18n/strings";
 import type { Target } from "../../vendor/kit/panel-session";
 import { VIEW_TYPE_SVG_STUDIO } from "../render-block";
+import { commentDialog } from "./comment-dialog";
 import { buildPanelShell, type PanelDeps, type PanelShell } from "./shell";
 import { svgSlots, type SvgSlotDeps } from "./slots";
 
@@ -60,7 +61,7 @@ export class SvgStudioView extends ItemView {
     this.contentEl.empty();
     this.contentEl.addClass("svg-studio-panel");
     const { thinkingOn, background, stash, ...rest } = this.deps;
-    const slots = svgSlots({ llm: this.deps.llm, readTargetText: this.deps.readTargetText, thinkingOn, background });
+    const slots = svgSlots({ llm: this.deps.llm, readTargetText: this.deps.readTargetText, thinkingOn, background, comment: commentDialog(this.app) });
     this.shell = buildPanelShell(this.contentEl, { ...rest, strings: panelStrings() }, slots, stash.take() ?? undefined);
     if (this.target !== null) this.shell.setTarget(this.target);
     return Promise.resolve();

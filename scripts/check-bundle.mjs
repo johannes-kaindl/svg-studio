@@ -1,7 +1,8 @@
 // Bundle-Groessenschranke: faengt versehentliche Zusatz-Deps ab. Schranke bewusst anheben, wenn eine Dependency gewollt ist.
 import { readFileSync, statSync } from "node:fs";
 
-const LIMIT_KB = 300;
+// 2026-11-05 von 300 auf 400 angehoben (gewollt): das Panel trägt die LLM-Verbindung, Modellzeile, Prüfliste, Texteingabe und Zahlenfelder aus dem Kit (main.js 297 KB bei Plan 2 D2).
+const LIMIT_KB = 400;
 const sizeKb = statSync("main.js").size / 1024;
 
 if (sizeKb > LIMIT_KB) {

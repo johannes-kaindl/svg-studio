@@ -11,7 +11,7 @@ import type { LlmConnection } from "../../vendor/kit-obsidian/llm-connection";
 import { renderPreviewView, type PreviewView, type PreviewViewDeps, type Selection } from "./preview-view";
 import { bestandProblems, renderBestandNotice, repairProblem } from "./bestand";
 import { renderFields } from "./fields-view";
-import { renderReview } from "./review";
+import { renderReview, type ReviewDeps } from "./review";
 import { runSvgPrompt, runSvgRepair } from "./run";
 import type { NoticeCtx, PanelSlots } from "./shell";
 
@@ -22,6 +22,8 @@ export interface SvgSlotDeps {
   thinkingOn: () => boolean;
   /** Hintergrund der Vorschau: lesen und speichern (nur die Vorschau, nie das SVG). */
   background: PreviewViewDeps["background"];
+  /** Der Kommentar-Dialog der Prüfliste (`promptText` des Kits, vom Panel mit der App verdrahtet); ohne ihn gibt es keine Kommentar-Taste. */
+  comment?: ReviewDeps["comment"];
 }
 
 export function freshSession(target: Target): SvgSession {
@@ -58,17 +60,21 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       if (text === null) return;
       view = renderPreviewView(host, text, { background: d.background, onSelectionChange: () => { paintFields?.(); } }, selection);
     },
-    renderFields(host, round, _session, ctx) {
+    canPreviewBase(text) {
+      const b = bestandProblems(text, checkSvg);
+      return b.parse === null && b.guard.length === 0;
+    },
+    renderFields(host, text, _session, ctx) {
       paintFields = () => {
         host.empty();
-        if (round === null) return;
+        if (text === null) return;
         if (selection.id === null || view === null) {
           host.createDiv({ cls: "svg-studio-fields-hint", text: t("fields.hint") });
           return;
         }
         const id = selection.id;
         renderFields(host, {
-          text: round.result,
+          text,
           id,
           center: () => {
             const box = view?.localBoxOf(id) ?? null;
@@ -78,7 +84,10 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
           focus,
           commit: (changes, label) => {
             if (ctx.busy()) return null;
-            const next = addHandChange(ctx.session(), changes, label);
+            // Ein Bestand ohne Runde: die erste Handänderung ist die erste Runde und setzt auf dem Text auf, den die Vorschau zeigte.
+            const now = ctx.session();
+            const from = now.rounds.rounds.length === 0 && now.startText === null ? { ...now, startText: text } : now;
+            const next = addHandChange(from, changes, label);
             if ("problem" in next) return next.problem;
             ctx.setSession(next);
             return null;
@@ -88,7 +97,7 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       paintFields();
     },
     renderChanges(host, round, session, ctx) {
-      renderReview(host, round, session, ctx, { background: d.background, jump: (id) => { view?.select(id); } });
+      renderReview(host, round, session, ctx, { background: d.background, jump: (id) => { view?.select(id); }, ...(d.comment === undefined ? {} : { comment: d.comment }) });
     },
     notices(host, ctx) {
       void renderNotices(host, ctx, d);

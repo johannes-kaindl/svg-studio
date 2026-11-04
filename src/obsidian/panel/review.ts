@@ -3,8 +3,9 @@
 // Vorschau zeigt danach das Ergebnis ohne den abgelehnten Eintrag. Karten einer Runde, auf der eine spätere aufbaut, sind gesperrt (`stale`).
 // Eine `whole`-Runde („nicht zerlegbar“, Reparatur eines unlesbaren Bestands) ist EINE Karte mit zwei kleinen Vorschauen Vorher/Nachher, ganz annehmbar oder ablehnbar.
 // Eine Regelrunde (Namen vergeben, Editor-Angaben entfernen) hat nichts zu entscheiden: sie zeigt ihre Änderungen als Redline-Zeilen.
-// Der Kommentar fehlt noch: das Kit hat keine Texteingabe für eine Karte (nur `askChoice` und `confirmAction`), und ein Eigenbau ohne Gate ist keiner; die Taste des
-// Kit-Bausteins ist deshalb ausgeblendet (`.svg-studio-review .okit-review-comment`), Rest-Task im Cockpit. Der Weg des Kommentars bis in die Anfrage steht (`feedbackOf`).
+// Der Kommentar (seit obsidian-kit 0.80.0): die Taste der Karte öffnet `promptText` (mehrzeilig, nicht leer), das Ergebnis wird `Decision.comment` des Eintrags (der Zustand,
+// angenommen oder abgelehnt, bleibt), die Karte zeigt ihn unter dem Redline, und `feedbackOf` reicht ihn in die nächste Verfeinern-Anfrage. Das Kit zeigt an einer Änderungskarte
+// keinen Kommentar, deshalb zeichnet dieses Modul ihn selbst. Eine Runde „ganzes Bild“ speichert nur den Zustand: dort entfällt die Taste.
 import { backgroundColor } from "../../core/background";
 import { describeEntry } from "../../core/diff-labels";
 import type { Problem } from "../../core/problem";
@@ -23,6 +24,8 @@ export interface ReviewDeps {
   background: PreviewViewDeps["background"];
   /** Die große Vorschau springt zu diesem Element (Klick auf den Kartenrumpf). */
   jump: (id: string) => void;
+  /** Fragt den Kommentartext (mit dem bisherigen als Vorbelegung); `null` heißt Abbruch. Fehlt die Funktion, gibt es keine Kommentar-Taste. */
+  comment?: (initial: string) => Promise<string | null>;
 }
 
 /** Die Texte des Kit-Bausteins in der Sprache des Plugins (nur hier gebraucht, deshalb nicht exportiert). */
@@ -89,12 +92,24 @@ export function renderReview(host: HTMLElement, round: SvgRound | null, session:
     decide(s, index, entry, { ...decisionOf(s.rounds.rounds[index] ?? round, entry), state });
   const fail = (p: Problem): void => { ctx.setStatus("error", t("review.failed", problemText(p))); };
 
+  /** Der Kommentar-Dialog; der Kit-Baustein hält die ganze Liste gesperrt, bis er sich schließt. Der Zustand der Karte bleibt, nur der Kommentar kommt dazu. */
+  const askComment = async (entry: number): Promise<void> => {
+    if (d.comment === undefined) return;
+    const text = await d.comment(decisionOf(ctx.session().rounds.rounds[index] ?? round, entry).comment ?? "");
+    if (text === null || ctx.busy()) return;
+    const now = ctx.session();
+    const next = decide(now, index, entry, { ...decisionOf(now.rounds.rounds[index] ?? round, entry), comment: text });
+    if ("problem" in next) fail(next.problem);
+    else ctx.setSession(next);
+  };
+
   const root = buildReviewList(host, {
     items,
     strings: reviewStrings(),
     onAction: (action, id) => {
       if (ctx.busy()) return;
       const entry = Number(id);
+      if (action === "comment") return askComment(entry);
       if (action === "jump") {
         const e = b.form === "list" ? b.entries[entry] : undefined;
         const target = e === undefined ? null : describeEntry(e, texts).jumpId;
@@ -120,6 +135,19 @@ export function renderReview(host: HTMLElement, round: SvgRound | null, session:
     onError: (e) => { ctx.setStatus("error", t("review.failed", e instanceof Error ? e.message : String(e))); },
   });
   root.addClass("svg-studio-review");
+  // Ohne Dialog, in einer Runde „ganzes Bild“ (sie hält nur den Zustand) und hinter einer späteren Runde (`decide` sperrt sie) gibt es keine Kommentar-Taste.
+  if (d.comment === undefined || b.form !== "list" || stale) for (const btn of Array.from(root.querySelectorAll(".okit-review-comment"))) btn.remove();
+  if (b.form === "list") {
+    b.decisions.forEach((dec, i) => {
+      const comment = dec.comment?.trim();
+      if (comment === undefined || comment === "") return;
+      const main = root.querySelector<HTMLElement>(`.okit-review-card[data-id="${i}"] .okit-review-main`);
+      if (main === null) return;
+      const line = main.createDiv({ cls: "svg-studio-card-comment" });
+      line.createSpan({ cls: "svg-studio-card-comment-label", text: `${t("review.commentLabel")}: ` });
+      line.createSpan({ text: comment });
+    });
+  }
   // Der Kit-Baustein sperrt gesperrte Karten, aber nicht „Alle …“: hinter einer späteren Runde gäbe es nur die Meldung „gesperrt“.
   if (stale) for (const btn of Array.from(root.querySelectorAll<HTMLButtonElement>(".okit-review-bulk button"))) btn.disabled = true;
   if (b.form === "whole" && before !== null) {

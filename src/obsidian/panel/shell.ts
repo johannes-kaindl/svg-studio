@@ -44,6 +44,8 @@ export interface PanelStrings {
   examples: readonly string[];
   previewOf(n: number): string;
   previewNone: string;
+  /** Überschrift der Vorschau, solange es noch keine Runde gibt und sie den Stand des Ziels zeigt. */
+  previewBase: string;
   unsupported(label: string): string;
   discardConfirm(n: number): string;
   closeConfirm(n: number): string;
@@ -104,6 +106,9 @@ export interface PanelSlots<R, S extends PanelSession<R> = PanelSession<R>> {
   /** Eine leere Sitzung für ein Ziel (beim Start, bei Verwerfen und Neu). */
   fresh(target: Target): S;
   renderPreview(host: HTMLElement, round: R | null, text: string | null): void;
+  /** Darf der Text des Ziels ohne Runde als Vorschau stehen (lesbar, vom Bereiniger angenommen)? Fehlt der Slot, zeigt das Panel ohne Runde keine Vorschau.
+   *  Ein Text, den die Antwort verneint, bekommt stattdessen die Hinweise von `notices` (Reparieren). */
+  canPreviewBase?(text: string): boolean;
   /** Die Änderungen der aktiven Runde (die Prüfliste); die Sitzung gibt den Ausgang, gegen den eine Regelrunde ihre Einträge zeigt, `ctx` lässt eine Entscheidung die Sitzung ersetzen. */
   renderChanges(host: HTMLElement, round: R | null, session: S, ctx: ChangesCtx<S>): void;
   roundLabel(round: R, index: number): string;
@@ -116,9 +121,9 @@ export interface PanelSlots<R, S extends PanelSession<R> = PanelSession<R>> {
   /** Hinweise zum Text, auf dem die Sitzung steht (Bestand: kaputt, ohne Namen, Editor-Angaben), mit Knöpfen, die über `ctx` eine Regelrunde setzen oder einen Lauf starten.
    *  Wird bei jedem Zeichnen mit leerem `host` gerufen; `ctx.current()` sagt, ob das Zeichnen noch gilt (der Slot darf asynchron lesen). */
   notices?(host: HTMLElement, ctx: NoticeCtx<S>): void;
-  /** Die Felder unter der Vorschau (Zahlenfelder des gewählten Elements). Wird nach jedem Zeichnen der Vorschau mit leerem `host` gerufen; eine Eingabe läuft über `ctx.setSession`
+  /** Die Felder unter der Vorschau (Zahlenfelder des gewählten Elements) für den Text, den die Vorschau zeigt (Ergebnis der aktiven Runde, ohne Runde der Stand des Ziels). Wird nach jedem Zeichnen der Vorschau mit leerem `host` gerufen; eine Eingabe läuft über `ctx.setSession`
    *  und ist in einem Lauf oder beim Übernehmen gesperrt (`ctx.busy()`). */
-  renderFields?(host: HTMLElement, round: R | null, session: S, ctx: ChangesCtx<S>): void;
+  renderFields?(host: HTMLElement, text: string | null, session: S, ctx: ChangesCtx<S>): void;
   extras?(host: HTMLElement): void;
   dispose?(): void;
 }
@@ -171,6 +176,9 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
   let applying = false;
   let pending: Promise<void> = Promise.resolve();
   let destroyed = false;
+  /** Ohne Runde: der Text des Ziels, den die Vorschau zeigt (nur wenn `canPreviewBase` ihn zulässt); sonst `null`. */
+  let baseShown: string | null = null;
+  let baseTicket = 0;
   const slot = createRunSlot();
 
   const panelEl = root.createDiv({ cls: "svg-studio-shell" });
@@ -444,7 +452,7 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     noEndpointEl.toggleClass("is-hidden", !noEndpoint);
     // Zwei getrennte Elemente; trifft beides zu, gewinnt „kein Endpunkt“.
     examplesEl.toggleClass("is-hidden", noEndpoint || running || n > 0 || session.target.kind !== "new");
-    previewWrap.toggleClass("is-hidden", n === 0);
+    previewWrap.toggleClass("is-hidden", n === 0 && baseShown === null);
   }
 
   function renderRounds(): void {
@@ -467,11 +475,54 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
 
   function renderPreview(): void {
     const round = activeRound();
-    previewCaption.setText(round === null ? st.previewNone : st.previewOf(session.rounds.active + 1));
+    if (round === null) {
+      renderBasePreview();
+      return;
+    }
+    baseTicket++;
+    baseShown = null;
+    previewCaption.setText(st.previewOf(session.rounds.active + 1));
     previewHost.empty();
-    slots.renderPreview(previewHost, round, round === null ? null : slots.roundText(round));
+    const text = slots.roundText(round);
+    slots.renderPreview(previewHost, round, text);
     fieldsHost.empty();
-    slots.renderFields?.(fieldsHost, round, session, changesCtx());
+    slots.renderFields?.(fieldsHost, text, session, changesCtx());
+  }
+
+  /** Ohne Runde zeigt die Vorschau den Stand des Ziels (lesen ist asynchron): ein Bestand, den `canPreviewBase` verneint, bleibt ohne Vorschau und zeigt die Hinweise (Reparieren). */
+  function renderBasePreview(): void {
+    const ticket = ++baseTicket;
+    const target = session.target;
+    if (slots.canPreviewBase === undefined || (target.kind !== "file" && target.kind !== "block")) {
+      clearBase();
+      return;
+    }
+    void deps.readTargetText(target).then(
+      (text) => {
+        if (destroyed || ticket !== baseTicket) return;
+        if (text === null || !slots.canPreviewBase?.(text)) {
+          clearBase();
+          return;
+        }
+        baseShown = text;
+        previewCaption.setText(st.previewBase);
+        previewHost.empty();
+        slots.renderPreview(previewHost, null, text);
+        fieldsHost.empty();
+        slots.renderFields?.(fieldsHost, text, session, changesCtx());
+        renderControls();
+      },
+      () => { if (!destroyed && ticket === baseTicket) clearBase(); },
+    );
+  }
+
+  function clearBase(): void {
+    baseShown = null;
+    previewCaption.setText(st.previewNone);
+    previewHost.empty();
+    fieldsHost.empty();
+    slots.renderPreview(previewHost, null, null);
+    renderControls();
   }
 
   function changesCtx(): ChangesCtx<S> {
@@ -539,6 +590,8 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
       }
       renderHeader();
       renderNotices();
+      // Ohne Runde zeigt die Vorschau den Stand des Ziels: ein anderes Ziel zeichnet sie neu.
+      if (roundCount() === 0) renderPreview();
     },
     session: () => session,
     running: () => slot.running(),

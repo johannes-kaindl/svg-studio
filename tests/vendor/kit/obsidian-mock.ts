@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.79.2, src/testing/obsidian-mock.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.80.0, src/testing/obsidian-mock.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Self-contained Obsidian test double for obsidian-kit.
 // - Zero external imports (NOT from "obsidian", NOT from "vitest").
 // - Consumed via vitest `resolve.alias` as a drop-in for `import ... from "obsidian"`,
@@ -121,7 +121,9 @@ export function makeFakeEl(tagName = "DIV"): any {
     /** Hängt sich beim Elternknoten aus, wie im echten DOM. Nötig für Kit-Module, die
      *  Zusatz-DOM in-place wieder wegnehmen (Drittanbieter-Icon der Endpunkt-Liste). */
     remove() { parent?.removeChild?.(el); },
-    focus() {},
+    /** Zählt die Aufrufe (`__focusCount`, `__selectCount`, 0.80.0): ein Dialog, der den Fokus ins Feld setzt oder die Vorbelegung markiert, ist so prüfbar. */
+    focus() { el.__focusCount = (el.__focusCount ?? 0) + 1; },
+    select() { el.__selectCount = (el.__selectCount ?? 0) + 1; },
     blur() {},
 
     createEl: (tag: string, o?: any) => makeChild(tag, o),

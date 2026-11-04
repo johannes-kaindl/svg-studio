@@ -36,20 +36,20 @@ const open = (startText: string | null): SvgSession => ({ target: startText === 
 const withRound = (): SvgSession => ok(addRound(open(BASE), { art: "prompt", instruction: "größer", basedOn: null, body: entriesOf(BASE, ANSWER) }));
 
 // ---- Ohne Shell: die Prüfliste mit einem Kontext, der die Sitzung hält ------------------------------------------------------------
-function harness(start: SvgSession, o: { busy?: boolean } = {}) {
+function harness(start: SvgSession, o: { busy?: boolean; busyNow?: () => boolean; comment?: (initial: string) => Promise<string | null> } = {}) {
   let session = start;
   const host = document.body.createDiv();
   const statuses: string[] = [];
   const jumps: string[] = [];
   const ctx: ChangesCtx<SvgSession> = {
-    busy: () => o.busy === true,
+    busy: () => o.busy === true || o.busyNow?.() === true,
     session: () => session,
     setSession: (s) => { session = s; draw(); },
     setStatus: (_p, text) => { statuses.push(text); },
   };
   function draw(): void {
     host.empty();
-    renderReview(host, activeRound(session.rounds), session, ctx, { background: BG, jump: (id) => { jumps.push(id); } });
+    renderReview(host, activeRound(session.rounds), session, ctx, { background: BG, jump: (id) => { jumps.push(id); }, ...(o.comment === undefined ? {} : { comment: o.comment }) });
   }
   draw();
   const cards = (): HTMLElement[] => [...host.querySelectorAll<HTMLElement>(".okit-review-card")];
@@ -117,10 +117,11 @@ describe("Prüfliste: Karten aus den Einträgen der aktiven Runde", () => {
     expect(h.session().rounds.rounds[0]!.result).toBe(ANSWER);
   });
 
-  it("die Taste „Kommentar“ des Bausteins ist ausgeblendet, bis das Kit eine Texteingabe hat (CSS-Klasse am Wurzelknoten)", () => {
-    const h = harness(withRound());
-    expect(h.host.querySelector(".okit-review")!.classList.contains("svg-studio-review")).toBe(true);
-    expect(h.host.querySelector(".svg-studio-review .okit-review-comment")).not.toBeNull();
+  it("ohne Kommentar-Dialog gibt es keine Kommentar-Taste, mit Dialog an jeder Karte (kein Ausblenden per CSS mehr)", () => {
+    expect(harness(withRound()).host.querySelector(".okit-review-comment")).toBeNull();
+    const h = harness(withRound(), { comment: () => Promise.resolve(null) });
+    expect(h.host.querySelectorAll(".okit-review-comment")).toHaveLength(2);
+    expect(h.host.querySelector(".okit-review-comment")!.textContent).toBe("Comment");
   });
 
   it("Klick auf den Kartenrumpf: die Vorschau springt zum Element; Wurzel, Stil und Titel springen nicht", () => {
@@ -132,6 +133,83 @@ describe("Prüfliste: Karten aus den Einträgen der aktiven Runde", () => {
     r.cards()[0]!.querySelector<HTMLElement>(".okit-review-main")!.click();
     expect(r.jumps).toEqual([]);
     expect(r.cards()[0]!.querySelector(".okit-redline")!.textContent).toContain("Canvas: viewBox");
+  });
+});
+
+describe("Prüfliste: Kommentar (obsidian-kit 0.80.0 promptText)", () => {
+  const flush = async (): Promise<void> => { await new Promise((r) => setTimeout(r, 0)); };
+
+  it("die Taste öffnet den Dialog mit leerer Vorbelegung; der Text wird Decision.comment, der Zustand bleibt angenommen, die Karte zeigt ihn", async () => {
+    const initials: string[] = [];
+    const h = harness(withRound(), { comment: (initial) => { initials.push(initial); return Promise.resolve("Die Tür war schon richtig\nbitte so lassen"); } });
+    h.click(h.cards()[1]!, "okit-review-comment");
+    await flush();
+    expect(initials).toEqual([""]);
+    expect(h.session().rounds.rounds[0]!.body).toMatchObject({ decisions: [{ state: "accepted" }, { state: "accepted", comment: "Die Tür war schon richtig\nbitte so lassen" }] });
+    expect(h.session().rounds.rounds[0]!.result).toBe(ANSWER); // angenommen bleibt angenommen
+    const line = h.cards()[1]!.querySelector(".svg-studio-card-comment")!;
+    expect(line.textContent).toBe("Comment: Die Tür war schon richtig\nbitte so lassen");
+    expect(h.cards()[0]!.querySelector(".svg-studio-card-comment")).toBeNull();
+    expect(h.cards()[1]!.classList.contains("is-accepted")).toBe(true);
+  });
+
+  it("ein Kommentar zu einem abgelehnten Eintrag lässt ihn abgelehnt; der bisherige Kommentar ist die Vorbelegung; Ablehnen danach behält den Kommentar", async () => {
+    const initials: string[] = [];
+    let answerWith: string | null = "erster";
+    const h = harness(withRound(), { comment: (initial) => { initials.push(initial); return Promise.resolve(answerWith); } });
+    h.click(h.cards()[0]!, "okit-review-reject");
+    h.click(h.cards()[0]!, "okit-review-comment");
+    await flush();
+    expect(h.session().rounds.rounds[0]!.body).toMatchObject({ decisions: [{ state: "rejected", comment: "erster" }, { state: "accepted" }] });
+    expect(h.session().rounds.rounds[0]!.result).toBe(BASE.replace(`x="80"`, `x="90"`));
+    answerWith = "zweiter";
+    h.click(h.cards()[0]!, "okit-review-comment");
+    await flush();
+    expect(initials).toEqual(["", "erster"]);
+    h.click(h.cards()[0]!, "okit-review-accept");
+    expect(h.session().rounds.rounds[0]!.body).toMatchObject({ decisions: [{ state: "accepted", comment: "zweiter" }, { state: "accepted" }] });
+  });
+
+  it("Abbruch (null) ändert nichts; mitten im Lauf (busy) auch nicht", async () => {
+    const h = harness(withRound(), { comment: () => Promise.resolve(null) });
+    const before = h.session();
+    h.click(h.cards()[0]!, "okit-review-comment");
+    await flush();
+    expect(h.session()).toBe(before);
+    let asked = 0;
+    const b = harness(withRound(), { busy: true, comment: () => { asked++; return Promise.resolve("x"); } });
+    b.click(b.cards()[0]!, "okit-review-comment");
+    await flush();
+    expect(asked).toBe(0);
+  });
+
+  it("läuft während des offenen Dialogs ein Lauf an, wird der Kommentar verworfen (kein Schreiben in die Sitzung)", async () => {
+    let busy = false;
+    const h = harness(withRound(), { busyNow: () => busy, comment: () => { busy = true; return Promise.resolve("zu spät"); } });
+    const before = h.session();
+    h.click(h.cards()[0]!, "okit-review-comment");
+    await flush();
+    expect(h.session()).toBe(before);
+  });
+
+  it("hinter einer späteren Runde und bei „ganzes Bild“ gibt es keine Taste", () => {
+    const comment = (): Promise<string | null> => Promise.resolve("x");
+    const first = withRound();
+    const two = ok(addRound(first, { art: "prompt", instruction: "mehr", basedOn: 0, body: entriesOf(ANSWER, ANSWER.replace(`r="60"`, `r="70"`)) }));
+    expect(harness({ ...two, rounds: selectRound(two.rounds, 0) }, { comment }).host.querySelector(".okit-review-comment")).toBeNull();
+    expect(harness(two, { comment }).host.querySelector(".okit-review-comment")).not.toBeNull();
+    const whole = ok(addRound(open(BASE), { art: "prompt", instruction: "neu", basedOn: null, body: { form: "whole", text: BASE.replace("40", "9"), decision: "accepted" } }));
+    expect(harness(whole, { comment }).host.querySelector(".okit-review-comment")).toBeNull();
+  });
+
+  it("ein abgelehnter Kern-Schritt zeigt den Grund im Status (Runde bekam hinter den Karten einen Nachfolger)", async () => {
+    const s = withRound();
+    const two = ok(addRound(s, { art: "prompt", instruction: "mehr", basedOn: 0, body: entriesOf(ANSWER, ANSWER.replace(`r="60"`, `r="70"`)) }));
+    const h = harness(s, { comment: () => Promise.resolve("x") });
+    h.swap({ ...two, rounds: selectRound(two.rounds, 0) });
+    h.click(h.cards()[0]!, "okit-review-comment");
+    await flush();
+    expect(h.statuses).toEqual(["That did not work: Another round builds on round 1; its decisions are locked."]);
   });
 });
 
@@ -234,11 +312,11 @@ describe("Prüfliste: Regelrunde", () => {
 // ---- Mit Shell: Ablehnen im Panel, Vorschau und nächste Anfrage ---------------------------------------------------------------------
 interface Setup { root: HTMLElement; shell: PanelShell<SvgSession>; requests: ReturnType<typeof fakeLlm>["requests"] }
 
-function setup(responders: Responder[]): Setup {
+function setup(responders: Responder[], comment?: (initial: string) => Promise<string | null>): Setup {
   const { llm, requests } = fakeLlm(responders);
   const root = document.body.createDiv({ cls: "view-content" }).createDiv();
   const read = vi.fn(async () => BASE);
-  const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG });
+  const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG, ...(comment === undefined ? {} : { comment }) });
   const deps: PanelDeps<SvgSession> = {
     app: {} as never, llm,
     thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
@@ -309,6 +387,22 @@ describe("Prüfliste im Panel", () => {
     await send(s, "und weiter");
     expect(s.requests[2]!.messages!.at(-1)!.content).not.toContain("Rückmeldung");
     expect(s.requests[2]!.messages!.at(-1)!.content).toBe(`Ausgangs-SVG:\n\n${s.shell.session().rounds.rounds[1]!.result}\n\nAnweisung: und weiter`);
+  });
+});
+
+describe("Kommentar-Taste im Panel", () => {
+  it("Taste, Dialog, Entscheidung, nächste Verfeinern-Anfrage: der Kommentar steht unter „Rückmeldung zur letzten Runde“", async () => {
+    const asked: string[] = [];
+    const s = setup([answer(ANSWER), answer(ANSWER.replace(`r="60"`, `r="70"`))], (initial) => { asked.push(initial); return Promise.resolve("Die Tür war schon richtig"); });
+    await send(s, "größer");
+    card(s, 1).querySelector<HTMLButtonElement>("button.okit-review-comment")!.click();
+    await vi.waitFor(() => { expect(card(s, 1).querySelector(".svg-studio-card-comment")).not.toBeNull(); });
+    expect(asked).toEqual([""]);
+    expect(card(s, 1).classList.contains("is-accepted")).toBe(true);
+    expect(s.shell.session().rounds.rounds[0]!.result).toBe(ANSWER);
+    await send(s, "noch größer");
+    const user = s.requests[1]!.messages!.at(-1)!.content;
+    expect(user.endsWith("Rückmeldung zur letzten Runde:\n- Rectangle tuer: x 80 → 90: Die Tür war schon richtig")).toBe(true);
   });
 });
 

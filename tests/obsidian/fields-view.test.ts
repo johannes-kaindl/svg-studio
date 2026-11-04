@@ -19,12 +19,12 @@ const BG = { get: () => ({ on: true, tone: "light" as const, hex: "#ffffff" }), 
 
 beforeEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); initStrings("de"); });
 
-interface Setup { root: HTMLElement; shell: PanelShell<SvgSession>; accept: ReturnType<typeof vi.fn>; releaseAccept: () => void }
+interface Setup { root: HTMLElement; shell: PanelShell<SvgSession>; accept: ReturnType<typeof vi.fn>; releaseAccept: () => void; read: ReturnType<typeof vi.fn> }
 
-function setup(responders: Responder[] = [answer(ANSWER)], o: { hangAccept?: boolean } = {}): Setup {
+function setup(responders: Responder[] = [answer(ANSWER)], o: { hangAccept?: boolean; text?: string | null; target?: Target } = {}): Setup {
   const { llm } = fakeLlm(responders);
   const root = document.body.createDiv({ cls: "view-content" }).createDiv();
-  const read = vi.fn(async () => BASE);
+  const read = vi.fn(async () => (o.text === undefined ? BASE : o.text));
   const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG });
   let release: () => void = () => undefined;
   const accept = vi.fn(() => (o.hangAccept === true ? new Promise<never>((res) => { release = () => { res({ ok: false, message: "x" } as never); }; }) : Promise.resolve({ ok: false as const, message: "x" })));
@@ -34,7 +34,7 @@ function setup(responders: Responder[] = [answer(ANSWER)], o: { hangAccept?: boo
     readTargetText: read, accept, openSettings: () => undefined,
     confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
   };
-  return { root, shell: buildPanelShell(root, deps, slots, freshSession(FILE)), accept, releaseAccept: () => { release(); } };
+  return { root, shell: buildPanelShell(root, deps, slots, freshSession(o.target ?? FILE)), accept, releaseAccept: () => { release(); }, read };
 }
 
 async function send(s: Setup, text: string): Promise<void> {
@@ -366,5 +366,159 @@ describe("Zahlenfelder im Panel: Gleichzeitigkeit (Review-Fokus 4)", () => {
     expect(s.accept).toHaveBeenCalledTimes(1);
     expect(rounds(s)).toHaveLength(1);
     expect(field(s, "r").disabled).toBe(false);
+  });
+});
+
+describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
+  const stage = (s: Setup): HTMLElement | null => s.root.querySelector<HTMLElement>(".svg-studio-preview-host .svg-studio-stage");
+  const wrapHidden = (s: Setup): boolean => s.root.querySelector(".svg-studio-preview")!.classList.contains("is-hidden");
+  const shown = async (s: Setup): Promise<void> => { await vi.waitFor(() => { expect(stage(s)).not.toBeNull(); }); };
+  const BROKEN = `<svg ${NS}><g id="a"><circle id="c" r="4"/></svg>`;
+
+  it("Ziel Datei, lesbares SVG, null Runden: Vorschau mit Überschrift, Reglern und Maßzeile; Klick wählt, die Felder stehen da", async () => {
+    const s = setup([answer(ANSWER)]);
+    await shown(s);
+    expect(rounds(s)).toHaveLength(0);
+    expect(wrapHidden(s)).toBe(false);
+    expect(s.root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Aktueller Stand");
+    expect(s.root.querySelector(".svg-studio-bg-bar")).not.toBeNull();
+    expect(s.root.querySelector(".svg-studio-measure")!.textContent).toBe("Fläche 100 × 100 Einheiten");
+    expect(s.root.querySelector(".svg-studio-fields-hint")).not.toBeNull();
+    clickEl(s, "mond");
+    expect(fieldNames(s)).toEqual(["cx", "cy", "r", "fill", "stroke", "stroke-width", "rotate"]);
+    expect(field(s, "r").value).toBe("40");
+    expect(s.root.querySelector<HTMLButtonElement>("button.svg-studio-accept")!.disabled).toBe(true); // nichts zu übernehmen
+    expect(s.root.querySelector(".svg-studio-notice")).toBeNull(); // sauberer Bestand: keine Karte
+  });
+
+  it("Enter am Bestand erzeugt die erste Runde: „Von Hand: mond r 60“, basedOn null, startText ist der gezeigte Stand; die Vorschau folgt, die Auswahl bleibt", async () => {
+    const s = setup([answer(ANSWER)]);
+    await shown(s);
+    clickEl(s, "mond");
+    enter(s, "r", "60");
+    expect(rounds(s)).toHaveLength(1);
+    expect(rounds(s)[0]).toMatchObject({ art: "hand", instruction: "Von Hand: mond r 60", basedOn: null });
+    expect(rounds(s)[0]!.result).toBe(BASE.replace(`r="40"`, `r="60"`));
+    expect(s.shell.session().startText).toBe(BASE);
+    expect(previewSvg(s).querySelector("#mond")!.getAttribute("r")).toBe("60");
+    expect(field(s, "r").value).toBe("60");
+    expect(s.root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
+    expect(s.root.querySelector<HTMLButtonElement>("button.svg-studio-accept")!.disabled).toBe(false);
+    enter(s, "cx", "5");
+    expect(rounds(s)).toHaveLength(1); // die zweite Änderung in derselben Runde
+    expect(rounds(s)[0]!.instruction).toBe("Von Hand: mond r 60, mond cx 5");
+    expect(s.accept).not.toHaveBeenCalled();
+  });
+
+  it("Ziel Block: ebenso", async () => {
+    const s = setup([answer(ANSWER)], { target: { kind: "block", path: "n.md", lineStart: 1, lineEnd: 9, label: "n.md", body: BASE } });
+    await shown(s);
+    clickEl(s, "tuer");
+    enter(s, "x", "81");
+    expect(rounds(s)[0]).toMatchObject({ art: "hand", basedOn: null });
+  });
+
+  it("unlesbarer Bestand: die Reparatur-Karte statt der Vorschau, keine Felder", async () => {
+    const s = setup([answer(ANSWER)], { text: BROKEN });
+    await vi.waitFor(() => { expect(s.root.querySelector(".svg-studio-notice")).not.toBeNull(); });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(stage(s)).toBeNull();
+    expect(wrapHidden(s)).toBe(true);
+    expect(s.root.querySelector(".svg-studio-fields")).toBeNull();
+    expect([...s.root.querySelectorAll(".svg-studio-notice button")].map((b) => b.textContent)).toEqual(["Reparieren"]);
+  });
+
+  it("vom Bereiniger abgelehnter Bestand: ebenso Karte statt Vorschau", async () => {
+    const s = setup([answer(ANSWER)], { text: `<svg ${NS}><script>x</script><circle id="c" r="4"/></svg>` });
+    await vi.waitFor(() => { expect(s.root.querySelector(".svg-studio-notice")).not.toBeNull(); });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(stage(s)).toBeNull();
+    expect(wrapHidden(s)).toBe(true);
+  });
+
+  it("neues Ziel: der Empty-State bleibt, keine Vorschau", async () => {
+    const s = setup([answer(ANSWER)], { target: { kind: "new" } });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(s.root.querySelector(".svg-studio-empty:not(.is-hidden)")).not.toBeNull();
+    expect(wrapHidden(s)).toBe(true);
+    expect(stage(s)).toBeNull();
+  });
+
+  it("Ziel weg (Text null) oder nicht unterstützt (other): keine Vorschau", async () => {
+    const gone = setup([answer(ANSWER)], { text: null });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(stage(gone)).toBeNull();
+    expect(wrapHidden(gone)).toBe(true);
+    const other = setup([answer(ANSWER)], { target: { kind: "other", label: "x.png" } });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(stage(other)).toBeNull();
+    expect(wrapHidden(other)).toBe(true);
+  });
+
+  it("Verwerfen der Runden führt zurück zur Vorschau des Bestands (nicht zum leeren Panel)", async () => {
+    const s = setup([answer(ANSWER)]);
+    await shown(s);
+    clickEl(s, "mond");
+    enter(s, "r", "60");
+    s.root.querySelector<HTMLButtonElement>("button.svg-studio-discard")!.click();
+    await vi.waitFor(() => { expect(rounds(s)).toHaveLength(0); expect(previewSvg(s).querySelector("#mond")!.getAttribute("r")).toBe("40"); });
+    expect(s.root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Aktueller Stand");
+  });
+
+  it("ein Verfeinern am Bestand mit Vorschau läuft wie bisher (die erste Runde baut auf dem Text des Ziels)", async () => {
+    const s = setup([answer(ANSWER)]);
+    await shown(s);
+    await send(s, "größer");
+    expect(rounds(s)).toHaveLength(1);
+    expect(rounds(s)[0]).toMatchObject({ art: "prompt", basedOn: null });
+    expect(s.root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
+  });
+
+  it("ein langsames Lesen des Bestands malt nicht über eine Runde, die inzwischen da ist", async () => {
+    let release!: (t: string) => void;
+    const slow = new Promise<string>((res) => { release = res; });
+    const { llm } = fakeLlm([answer(ANSWER)]);
+    const root = document.body.createDiv({ cls: "view-content" }).createDiv();
+    let calls = 0;
+    const read = vi.fn(() => (++calls <= 2 ? slow : Promise.resolve(BASE)));
+    const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG });
+    const deps: PanelDeps<SvgSession> = {
+      app: {} as never, llm,
+      thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
+      readTargetText: read, accept: () => Promise.resolve({ ok: false, message: "x" }), openSettings: () => undefined,
+      confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
+    };
+    const shell = buildPanelShell(root, deps, slots, freshSession(FILE));
+    root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!.value = "größer";
+    root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
+    await shell.settled();
+    expect(root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
+    release(BASE.replace("40", "99"));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
+    expect(root.querySelector<HTMLElement>(".svg-studio-stage")!.shadowRoot!.querySelector("#mond")!.getAttribute("r")).toBe("45");
+  });
+
+  it("ein langsames Lesen des alten Ziels malt nicht über das neue (Ticket)", async () => {
+    let release!: (t: string) => void;
+    const slow = new Promise<string>((res) => { release = res; });
+    const { llm } = fakeLlm([answer(ANSWER)]);
+    const root = document.body.createDiv({ cls: "view-content" }).createDiv();
+    const read = vi.fn((t: Target) => (t.kind === "file" && t.path === "a.svg" ? slow : Promise.resolve(BASE.replace("40", "11"))));
+    const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG });
+    const deps: PanelDeps<SvgSession> = {
+      app: {} as never, llm,
+      thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
+      readTargetText: read, accept: () => Promise.resolve({ ok: false, message: "x" }), openSettings: () => undefined,
+      confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
+    };
+    const A: Target = { kind: "file", path: "a.svg", label: "a.svg" };
+    const B: Target = { kind: "file", path: "b.svg", label: "b.svg" };
+    const shell = buildPanelShell(root, deps, slots, freshSession(A));
+    shell.setTarget(B);
+    await vi.waitFor(() => { expect(root.querySelector<HTMLElement>(".svg-studio-stage")?.shadowRoot?.querySelector("#mond")?.getAttribute("r")).toBe("11"); });
+    release(BASE.replace("40", "22"));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(root.querySelector<HTMLElement>(".svg-studio-stage")!.shadowRoot!.querySelector("#mond")!.getAttribute("r")).toBe("11");
   });
 });
