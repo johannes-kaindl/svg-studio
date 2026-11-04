@@ -15,8 +15,9 @@ Modul-Layout und Datenfluss. Das Warum steht in `docs/internal/decisions.md`, di
 - `changes.ts` — `SvgChange` (`change`, `add`, `remove`, `move`) und `applyChanges(text, changes)`: Spannen-Ersetzungen gegen den Originaltext, alles oder nichts, Round-Trip-Wächter (`roundTripProblems`). Der Vertrag (Anker unbewegt, keine `@n`-Schlüssel, Markup genau ein sauberes Element, Steuerzeichen abgelehnt, TAB/LF/CR als Zeichenreferenz) steht im Kopfkommentar. Seit Plan 2 B2: Nachkommen verschobener Elemente gelten am neuen Ort (Besitzer-Regel und „Scheiben“, Stückliste mit Offset-Abbildung statt `mapOffset`), `remove` trägt optional `expect` (kanonische Form), gegenseitiges Ineinanderschieben scheitert.
 - `format.ts` — `assignMissingIds(text)` vergibt fehlende `id`s byte-treu, `ensureUnit(text, unit)` setzt `data-unit` an der Wurzel.
 - `canon.ts` — kanonische Form eines Dokuments oder Elements (`buildCanonTree`, `canonNode`, `canonDocument`, `normalizeValue`): Attribute sortiert, Leerraum und Kommentare egal, eigener Text je Element mit seiner Stelle zwischen den Kindern; doppelte ids erlaubt (Index statt Schlüssel). Verbraucher: `remove.expect` in `changes.ts`, später `diff.ts`.
+- `diff.ts` — `diffSvg(ausgang, antwort)`: Paarung über den Schlüssel, Einträge je Änderung (`attr`, `add`, `remove`, `move`, `replace` mit Grund `text`/`style`/`moved-and-text`/`wrap`/`unwrap`), jeder mit eigener Änderungsliste; am Ende werden alle Einträge angewendet und kanonisch mit der Antwort verglichen (Vollständigkeitsprüfung, sonst „nicht zerlegbar“ mit Grund). `changesFor(einträge, angenommene)` bildet die Liste der angenommenen. Das Messlabor nutzt dieselbe Funktion (`scripts/lab/analyse.ts`).
 
-Geplant mit Plan 2: `diff.ts` (zwei SVGs → Änderungsliste per `id`-Paarung, „nicht zerlegbar“ als Ganz-ersetzt-Eintrag), `protocol.ts` (Nachrichten ans Modell, Antwort lesen), `quality.ts` (Messzeile je Modell).
+Geplant mit Plan 2: `protocol.ts` (Nachrichten ans Modell, Antwort lesen), `quality.ts` (Messzeile je Modell).
 
 ## Messlabor
 

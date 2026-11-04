@@ -17,7 +17,7 @@ export interface CanonTree {
   names: string[];
 }
 
-/** Elemente, in denen Leerraum zwischen Kindern gerendert wird. */
+/** Elemente, in denen Leerraum gerendert wird (Textelemente und ihre Nachkommen). */
 const TEXT_TAGS = new Set(["text", "tspan", "textpath", "tref", "altglyph"]);
 
 const WS_RUN = /[ \t\r\n]+/g;
@@ -76,6 +76,12 @@ export function canonTreeOf(text: string, scan: { elements: SvgElement[]; issues
     const own = elements[i].attrs.find((a) => a.name === "xml:space")?.value;
     preserve.push(own === "preserve" ? true : own === "default" ? false : parent[i] >= 0 && preserve[parent[i]]);
   }
+  // Innerhalb eines Textelements zählt jedes Leerzeichen, auch am Rand eines `tspan` (gerendert 2 gegen 3 Zeichen, gemessen im Chromium).
+  const insideText: boolean[] = [];
+  for (let i = 0; i < elements.length; i++) {
+    const p = parent[i];
+    insideText.push(p >= 0 && (TEXT_TAGS.has(elements[p].tag) || insideText[p]));
+  }
   const names = elements.map((e) => {
     let k = e.start + 1;
     while (k < e.openEnd && !/[ \t\r\n/>]/.test(text[k])) k++;
@@ -102,8 +108,9 @@ export function canonTreeOf(text: string, scan: { elements: SvgElement[]; issues
       const bare = collapse(raw, false);
       const edge = pc.slot === 0 || pc.slot === kids[pc.el].length;
       // Reiner Leerraum zwischen Tags ist Struktur und egal; nur in Textelementen zählt ein Leerzeichen ZWISCHEN zwei Kindern (b c gegen bc).
-      if (bare === "") piece = !edge && raw !== "" && TEXT_TAGS.has(elements[pc.el].tag) ? " " : "";
-      else piece = kids[pc.el].length === 0 ? bare : raw;
+      const textual = insideText[pc.el] || TEXT_TAGS.has(elements[pc.el].tag);
+      if (bare === "") piece = raw !== "" && (edge ? insideText[pc.el] : textual) ? " " : "";
+      else piece = kids[pc.el].length === 0 && !insideText[pc.el] ? bare : raw;
     }
     ownText[pc.el][pc.slot] = piece;
   }
