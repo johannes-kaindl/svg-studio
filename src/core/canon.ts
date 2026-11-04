@@ -1,4 +1,5 @@
 // Kanonische Form eines SVG-Dokuments oder Elements. Pure.
+// Grenzen (bekannt): `white-space:pre` im Stil und Doppelleerzeichen in einem Schriftnamen sieht die Form nicht (Leerraum wird zusammengefasst); ein DOCTYPE bleibt unsichtbar (`svg-guard` lehnt ihn ab, bevor ein Diff gebildet wird).
 // Zwei Texte, die dasselbe Bild beschreiben, aber anders gesetzt sind (Einrückung, Attributreihenfolge, Kommentare, neu umbrochene
 // Pfaddaten), haben dieselbe Form. Sie dient `diff.ts` (gepaarte Elemente vergleichen, Vollständigkeitsprüfung) und `remove.expect`
 // in `changes.ts` (das Element ist seit der Runde unverändert). Doppelte ids sind erlaubt: der Baum kennt Indizes, keine Schlüssel.

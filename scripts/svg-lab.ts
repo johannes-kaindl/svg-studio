@@ -16,6 +16,7 @@ import https from "node:https";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyChanges } from "../src/core/changes";
+import { CREATE_SYSTEM, REFINE_SYSTEM } from "../src/core/protocol";
 import { scanElements } from "../src/core/elements";
 import {
   decomposable, extractChanges, extractSvg, idQuote, judgeEntries, pairElements,
@@ -103,6 +104,8 @@ async function loadPrompts(): Promise<Prompts> {
 }
 
 async function loadSystem(): Promise<{ erzeugen: string; svg: string; json: string }> {
+  // Erzeugen und Verfeinern (vollständiges SVG) kommen aus dem Protokoll des Plugins (`src/core/protocol.ts`), wortgleich mit
+  // system-prompt.md (ein Test hält beide gleich); der JSON-Abschnitt bleibt als Messartefakt in der Datei.
   const md = await readFile(join(LAB_DIR, "system-prompt.md"), "utf8");
   const sec = new Map<string, string>();
   const parts = md.split(/^## (.+)$/m);
@@ -112,11 +115,10 @@ async function loadSystem(): Promise<{ erzeugen: string; svg: string; json: stri
     if (s === undefined) throw new Error(`system-prompt.md: Abschnitt "${n}" fehlt`);
     return s;
   };
-  const common = get("Gemeinsam");
   return {
-    erzeugen: `${common}\n\n${get("Erzeugen")}`,
-    svg: `${common}\n\n${get("Verfeinern (vollständiges SVG)")}`,
-    json: `${common}\n\n${get("Verfeinern (Änderungsliste)")}`,
+    erzeugen: CREATE_SYSTEM,
+    svg: REFINE_SYSTEM,
+    json: `${get("Gemeinsam")}\n\n${get("Verfeinern (Änderungsliste)")}`,
   };
 }
 
@@ -340,10 +342,11 @@ async function analysieren(dir: string): Promise<Row[]> {
     }
     if (refine && rec.input !== undefined && row.guard) {
       const pair = pairElements(rec.input, text);
-      if (pair === null) {
-        // Nicht scanbar (etwa doppelte ids) ist KEIN Ausschluss: in der SVG-Form zählt es als „nicht zerlegbar“.
+      if (pair === null || !pair.decomposable) {
+        // Nicht lesbar oder nicht zerlegbar ist KEIN Ausschluss: in der SVG-Form zählt es als „nicht zerlegbar“. Ohne Einträge gibt es nichts zu beurteilen
+        // („nichts getan“ wäre falsch): die Zeile bleibt ohne Einträge und fällt aus „auswertbar“.
         const issue = scanElements(text).issues[0];
-        const why = issue ? `nicht scanbar: ${issue.message}` : "nicht scanbar";
+        const why = pair !== null ? (pair.why ?? "nicht zerlegbar") : issue ? `nicht scanbar: ${issue.message}` : "nicht scanbar";
         row.notes.push(why);
         if (rec.form === "svg") { row.zerlegbar = false; row.zerlegbarWarum = why; }
       } else {

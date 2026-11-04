@@ -1,20 +1,35 @@
 // Auswertungs-Helfer des Messskripts (scripts/svg-lab.ts). LAB-CODE, nicht Teil des Plugins und nicht von der Gate geprüft.
-// Das Paaren und Zerlegen hier ist ein minimaler Stand-in für das spätere `diff.ts` (Plan 2): es soll nur zählen,
-// wie oft eine Modellantwort NICHT in eine Änderungsliste zerlegbar ist (Spec § 6.2, Entscheidung Nr. 12) und
-// welche Änderungen die Anweisung nicht verlangt hat. Nichts davon wandert nach src/core.
-import { applyChanges, type SvgChange } from "../../src/core/changes";
-import { scanElements, type SvgElement } from "../../src/core/elements";
+// Das Paaren und Zerlegen kommt seit Plan 2 (B3) aus `src/core/diff.ts` (`diffSvg`); hier bleibt nur die Übersetzung in die
+// Einträge der Auswertung: wie oft eine Modellantwort NICHT in eine Änderungsliste zerlegbar ist (Spec § 6.2, Entscheidung Nr. 12)
+// und welche Änderungen die Anweisung nicht verlangt hat.
+import { buildCanonTree } from "../../src/core/canon";
+import type { SvgChange } from "../../src/core/changes";
+import { diffSvg } from "../../src/core/diff";
+import { scanElements } from "../../src/core/elements";
+import { stripThinkBlocks } from "../../src/vendor/kit/think-splitter";
 
 // ---------- Antworten lesen ----------
 
 /** Entfernt <think>…</think>. Ein nie geschlossenes `<think>` verschluckt den Rest (dann ist nichts Antwort); ein einzelnes `</think>`
- *  ohne Eröffnung (der Chat-Vorlagen-Eintrag steht schon im Prompt) schneidet alles bis zum letzten `</think>` weg. */
-export function stripThink(raw: string): string {
+ *  ohne Eröffnung (der Chat-Vorlagen-Eintrag steht schon im Prompt) schneidet alles bis zum letzten `</think>` weg.
+ *  `kanal` (Standard): auch der Denkkanal von Gemma — die Rohantwort ist „Entwurf, `<channel|>`, Antwort“ (reasoning_effort none, im content);
+ *  alles bis zum ersten `<channel|>` ist Denken. Das ist der Leser des Plugins (`src/core/protocol.ts`). `kanal: false` ist der Leser der
+ *  Messung vom 2026-11-02, der den Entwurf im Zaun las (Messnote, „Korrektur der Auswertung 2026-11-04“); nur noch für die Gegenprobe. */
+export function stripThink(raw: string, o: { kanal?: boolean } = {}): string {
+  if (o.kanal !== false) return stripThinkBlocks(raw, { dropStrayClose: true, dropUnclosed: true, channel: true }).trim();
   const closed = raw.replace(/<think>[\s\S]*?<\/think>/gi, "");
   const open = closed.search(/<think>/i);
   if (open >= 0) return closed.slice(0, open).trim();
   const lone = closed.toLowerCase().lastIndexOf("</think>");
   return (lone >= 0 ? closed.slice(lone + "</think>".length) : closed).trim();
+}
+
+/** Der gelesene Text einer Rohantwort. Mit `kanal` (Standard) die Antwort hinter `<channel|>`; steht dort nichts Brauchbares (`has` trifft nicht), der
+ *  Text davor: Gemma schreibt manchmal die Antwort in den Denkkanal und lässt die eigentliche Antwort leer (gemessen: Verfeinern V1 in der SVG-Form und
+ *  alle 8 in der JSON-Form). `kanal: false` ist der Leser der Messung vom 2026-11-02 (immer der Text vor dem Kanal-Tag, Entwurf zuerst). */
+function readText(raw: string, o: { kanal?: boolean }, has: RegExp): string {
+  const s = stripThink(raw, o);
+  return o.kanal === false || has.test(s) ? s : stripThink(raw, { kanal: false });
 }
 
 /** Kommentare zählen nicht (Auswertungsvertrag): durch Leerzeichen gleicher Länge ersetzt, Offsets bleiben gültig. */
@@ -32,8 +47,8 @@ function unfence(s: string, needle: RegExp): { text: string; fenced: boolean } {
 export interface Extracted<T> { value: T | null; rein: boolean; fenced: boolean; error?: string }
 
 /** SVG aus der Rohantwort: von `<svg` bis zum letzten `</svg>`. `rein` = die Antwort IST nur das SVG (ohne Zaun, Prosa, Prolog). */
-export function extractSvg(raw: string): Extracted<string> {
-  const s = stripThink(raw);
+export function extractSvg(raw: string, o: { kanal?: boolean } = {}): Extracted<string> {
+  const s = readText(raw, o, /<svg[\s>]/i);
   const { text, fenced } = unfence(s, /<svg[\s>]/i);
   const i = text.search(/<svg[\s>]/i);
   const j = text.lastIndexOf("</svg>");
@@ -45,8 +60,8 @@ export function extractSvg(raw: string): Extracted<string> {
 const OPS = new Set(["change", "add", "remove", "move"]);
 
 /** JSON-Liste `SvgChange[]` aus der Rohantwort; prüft Form, glättet Zahlenwerte in Attributen zu Text und fehlendes parent/after zu null. */
-export function extractChanges(raw: string): Extracted<SvgChange[]> {
-  const s = stripThink(raw);
+export function extractChanges(raw: string, o: { kanal?: boolean } = {}): Extracted<SvgChange[]> {
+  const s = readText(raw, o, /\[|\{/);
   const { text, fenced } = unfence(s, /\[|\{/);
   const a = text.indexOf("[");
   const b = text.lastIndexOf("]");
@@ -107,7 +122,7 @@ export function idQuote(text: string): { quote: number; total: number; dup: numb
   return { quote, total: under.length, dup, complete: under.length > 0 && ids.length === under.length && dup === 0 };
 }
 
-// ---------- Paaren (Stand-in für diff.ts) ----------
+// ---------- Paaren (diff.ts) ----------
 
 export type Entry =
   | { kind: "attr"; key: string; tag: string; attr: string; from: string | null; to: string | null }
@@ -118,191 +133,46 @@ export type Entry =
 
 export interface Pairing {
   entries: Entry[];
-  changes: SvgChange[];
-  /** Ein Eintrag betrifft ein Element ohne id (Schlüssel `@N`): eine Änderungsliste kann es nicht ansprechen. */
-  unaddressable: boolean;
-}
-
-interface Tree { els: SvgElement[]; parent: number[]; kids: number[][]; own: string[] }
-
-function buildTree(source: string): Tree | null {
-  const text = blankComments(source);
-  const { elements, issues } = scanElements(text);
-  if (issues.length > 0 || elements.length === 0) return null;
-  const parent: number[] = [];
-  const kids: number[][] = elements.map(() => []);
-  const stack: number[] = [];
-  elements.forEach((e, i) => {
-    while (stack.length > 0 && elements[stack[stack.length - 1]].end <= e.start) stack.pop();
-    const p = stack.length > 0 ? stack[stack.length - 1] : -1;
-    parent.push(p);
-    if (p >= 0) kids[p].push(i);
-    stack.push(i);
-  });
-  // Eigener Text: Inhalt ohne Kind-Spannen, Leerraum normalisiert.
-  const own = elements.map((e, i) => {
-    if (e.selfClosing || e.closeStart <= e.openEnd) return "";
-    let s = "";
-    let at = e.openEnd;
-    for (const k of kids[i]) { s += text.slice(at, elements[k].start); at = elements[k].end; }
-    s += text.slice(at, e.closeStart);
-    return s.replace(/\s+/g, " ").trim();
-  });
-  return { els: elements, parent, kids, own };
-}
-
-/** Schlüssel mit laufender Nummer bei doppelten ids ("a", "a~2"): gepaart wird in Reihenfolge. */
-function uniqueKeys(els: SvgElement[]): string[] {
-  const seen = new Map<string, number>();
-  return els.map((e) => {
-    const n = (seen.get(e.key) ?? 0) + 1;
-    seen.set(e.key, n);
-    return n === 1 ? e.key : `${e.key}~${n}`;
-  });
-}
-
-const attrMap = (e: SvgElement): Map<string, string> => {
-  const m = new Map<string, string>();
-  for (const a of e.attrs) if (!m.has(a.name)) m.set(a.name, a.value);
-  return m;
-};
-
-/** Längste wachsende Teilfolge (Indizes), O(n²) reicht. */
-function lisSet(seq: number[]): Set<number> {
-  const best: number[] = seq.map(() => 1);
-  const prev: number[] = seq.map(() => -1);
-  let end = -1;
-  let len = 0;
-  for (let i = 0; i < seq.length; i++) {
-    for (let j = 0; j < i; j++) if (seq[j] < seq[i] && best[j] + 1 > best[i]) { best[i] = best[j] + 1; prev[i] = j; }
-    if (best[i] > len) { len = best[i]; end = i; }
-  }
-  const out = new Set<number>();
-  for (let i = end; i >= 0; i = prev[i]) out.add(i);
-  return out;
-}
-
-export function pairElements(baseText: string, ansText: string): Pairing | null {
-  const B = buildTree(baseText);
-  const A = buildTree(ansText);
-  if (!B || !A) return null;
-  const bk = uniqueKeys(B.els);
-  const ak = uniqueKeys(A.els);
-  const bIdx = new Map(bk.map((k, i) => [k, i]));
-  const aToB: number[] = ak.map((k) => bIdx.get(k) ?? -1);
-  const bToA: number[] = bk.map(() => -1);
-  aToB.forEach((b, a) => { if (b >= 0) bToA[b] = a; });
-
-  const entries: Entry[] = [];
-  const changes: SvgChange[] = [];
-  let unaddressable = false;
-  const addr = (e: SvgElement): void => { if (e.key.startsWith("@")) unaddressable = true; };
-
-  // Anker: hinter welchem unbewegten, gepaarten Geschwister (Antwort-Sicht) landet Element a?
-  const moved = new Set<number>(); // Antwort-Indizes verschobener oder ersetzter gepaarter Elemente
-  // 1. Verschobene: anderer Elternschlüssel oder aus der Reihenfolge.
-  for (let a = 0; a < A.els.length; a++) {
-    const b = aToB[a];
-    if (b < 0) continue;
-    if (A.els[a].parentKey !== B.els[b].parentKey) moved.add(a);
-  }
-  for (let p = -1; p < A.els.length; p++) {
-    const sibs = (p < 0 ? A.els.map((_, i) => i).filter((i) => A.parent[i] < 0) : A.kids[p]).filter((a) => aToB[a] >= 0 && !moved.has(a));
-    const seq = sibs.map((a) => aToB[a]);
-    const keep = lisSet(seq);
-    sibs.forEach((a, i) => { if (!keep.has(i)) moved.add(a); });
-  }
-  // 2. Blätter mit anderem Text: Entfernen + Einfügen (Attribute dazu mitnehmen).
-  const replaced = new Set<number>();
-  for (let a = 0; a < A.els.length; a++) {
-    const b = aToB[a];
-    if (b < 0 || A.kids[a].length > 0 || B.kids[b].length > 0) continue;
-    if (A.own[a] !== B.own[b]) replaced.add(a);
-  }
-
-  const anchorFor = (a: number): string | null => {
-    const sibs = A.parent[a] < 0 ? A.els.map((_, i) => i).filter((i) => A.parent[i] < 0) : A.kids[A.parent[a]];
-    for (let i = sibs.indexOf(a) - 1; i >= 0; i--) {
-      const s = sibs[i];
-      if (aToB[s] >= 0 && !moved.has(s) && !replaced.has(s)) return A.els[s].key;
-    }
-    return null;
-  };
-  const parentOf = (a: number): string | null => (A.parent[a] < 0 ? null : A.els[A.parent[a]].key === "#wurzel" ? null : A.els[A.parent[a]].key);
-
-  for (let a = 0; a < A.els.length; a++) {
-    const b = aToB[a];
-    const ea = A.els[a];
-    if (b < 0) {
-      const topAdd = A.parent[a] < 0 || aToB[A.parent[a]] >= 0;
-      if (topAdd) {
-        entries.push({ kind: "add", key: ea.key, tag: ea.tag });
-        changes.push({ op: "add", parent: parentOf(a), after: anchorFor(a), markup: ansText.slice(ea.start, ea.end) });
-      }
-      continue;
-    }
-    const eb = B.els[b];
-    if (replaced.has(a)) {
-      entries.push({ kind: "text", key: ea.key, tag: ea.tag });
-      addr(ea);
-      changes.push({ op: "remove", id: eb.key });
-      changes.push({ op: "add", parent: parentOf(a), after: anchorFor(a), markup: ansText.slice(ea.start, ea.end) });
-      continue;
-    }
-    const ma = attrMap(ea);
-    const mb = attrMap(eb);
-    const attrs: Record<string, string | null> = {};
-    for (const [k, v] of ma) if (mb.get(k) !== v) { attrs[k] = v; entries.push({ kind: "attr", key: ea.key, tag: ea.tag, attr: k, from: mb.get(k) ?? null, to: v }); }
-    for (const [k, v] of mb) if (!ma.has(k)) { attrs[k] = null; entries.push({ kind: "attr", key: ea.key, tag: ea.tag, attr: k, from: v, to: null }); }
-    if (Object.keys(attrs).length > 0) { addr(ea); changes.push({ op: "change", id: eb.key, attrs }); }
-    if (moved.has(a)) {
-      entries.push({ kind: "move", key: ea.key, tag: ea.tag });
-      addr(ea);
-      changes.push({ op: "move", id: eb.key, parent: parentOf(a), after: anchorFor(a) });
-    }
-  }
-  for (let b = 0; b < B.els.length; b++) {
-    if (bToA[b] >= 0) continue;
-    const topRemove = B.parent[b] < 0 || bToA[B.parent[b]] >= 0;
-    if (topRemove) {
-      const eb = B.els[b];
-      entries.push({ kind: "remove", key: eb.key, tag: eb.tag, text: textOf(baseText, B, b) });
-      addr(eb);
-      changes.push({ op: "remove", id: eb.key });
-    }
-  }
-  return { entries, changes, unaddressable };
+  /** `diffSvg` hat die Antwort in Einträge zerlegt (und alle zusammen ergeben die Antwort). */
+  decomposable: boolean;
+  /** Bei `decomposable: false` der Grund. */
+  why?: string;
 }
 
 /** Gesamttext eines Elements samt Nachkommen (für die Zuordnung „Kasten B“). */
-function textOf(text: string, t: Tree, i: number): string {
+function textOfKey(baseText: string, key: string): string {
+  const t = buildCanonTree(baseText);
+  const i = t?.elements.findIndex((e) => e.key === key) ?? -1;
+  if (t === null || i < 0) return "";
   const parts: string[] = [];
-  const walk = (n: number): void => { if (t.own[n]) parts.push(t.own[n]); for (const k of t.kids[n]) walk(k); };
+  const walk = (n: number): void => {
+    for (const p of t.ownText[n]) if (p !== "") parts.push(p);
+    for (const k of t.kids[n]) walk(k);
+  };
   walk(i);
   return parts.join(" ").trim();
 }
 
-/** Kanonische Form: Tags, sortierte Attribute (dekodiert), normalisierter Text; Leerraum zwischen Tags und Attributreihenfolge zählen nicht. */
-export function canon(text: string): string | null {
-  const t = buildTree(text);
-  if (!t) return null;
-  const walk = (i: number): string => {
-    const e = t.els[i];
-    const attrs = [...attrMap(e)].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ");
-    return `<${e.tag} ${attrs}>${t.own[i]}${t.kids[i].map(walk).join("")}</>`;
-  };
-  return t.els.map((_, i) => i).filter((i) => t.parent[i] < 0).map(walk).join("");
+/** `null`, wenn Ausgang oder Antwort nicht lesbar sind (keine Zerlegung möglich); sonst die Einträge von `diffSvg` in der Form der Auswertung. */
+export function pairElements(baseText: string, ansText: string): Pairing | null {
+  const d = diffSvg(baseText, ansText);
+  if (!d.decomposable) return /nicht lesbar/.test(d.why) ? null : { entries: [], decomposable: false, why: d.why };
+  // (`nicht lesbar` gilt für Ausgang und Antwort; ein Ergebnis, das `applyChanges` nicht lesen kann, kommt hier als „passen nicht zusammen“.)
+  const entries: Entry[] = d.entries.map((e): Entry => {
+    switch (e.kind) {
+      case "attr": return { kind: "attr", key: e.key, tag: e.tag, attr: e.attr, from: e.from, to: e.to };
+      case "add": return { kind: "add", key: e.key, tag: e.tag };
+      case "remove": return { kind: "remove", key: e.key, tag: e.tag, text: textOfKey(baseText, e.key) };
+      case "move": return { kind: "move", key: e.key, tag: e.tag };
+      case "replace": return { kind: "text", key: e.key, tag: e.tag };
+    }
+  });
+  return { entries, decomposable: true };
 }
 
-/** Zerlegbar = die aus dem Paaren gebildete Liste, auf den Ausgang angewendet, ergibt (kanonisch) die Antwort. */
-export function decomposable(baseText: string, ansText: string, p: Pairing): { ok: boolean; why?: string } {
-  if (p.unaddressable) return { ok: false, why: "Änderung an Element ohne id" };
-  const r = applyChanges(baseText, p.changes);
-  if (!r.ok) return { ok: false, why: `applyChanges: ${r.problems[0] ?? "?"}` };
-  const c1 = canon(r.text);
-  const c2 = canon(ansText);
-  if (c1 === null || c2 === null) return { ok: false, why: "Ergebnis nicht scanbar" };
-  return c1 === c2 ? { ok: true } : { ok: false, why: "Ergebnis weicht von der Antwort ab" };
+/** Zerlegbar = `diffSvg` hat Einträge gebildet, die zusammen die Antwort ergeben. */
+export function decomposable(_baseText: string, _ansText: string, p: Pairing): { ok: boolean; why?: string } {
+  return p.decomposable ? { ok: true } : { ok: false, why: p.why ?? "nicht zerlegbar" };
 }
 
 // ---------- „nicht verlangt“ ----------
