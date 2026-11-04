@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120">
+  <g id="gruppe" transform="translate(20 10) scale(2)">
+    <rect id="kasten" x="10" y="10" width="40" height="20" transform="translate(15 5)" fill="#e8e0d0" stroke="#554433"/>
+  </g>
+</svg>

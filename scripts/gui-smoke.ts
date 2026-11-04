@@ -90,12 +90,22 @@ const PUNKTE = [
   "c4f-namen-vergeben",
   "c4f-reparieren",
   "c4g-nichtzeichen-im-attribut",
+  "pruefliste-kartenbeschriftung",
+  "pruefliste-ablehnen",
+  "pruefliste-annehmen",
+  "pruefliste-kommentar",
+  "bestand-ohne-runde-vorschau",
+  "zahlenfeld-genau-ein-attribut",
+  "handrunde-in-versionsliste",
+  "drehmitte-in-gruppe",
   "schliessen-mit-offener-runde",
   "rest10a-behalten-waehrend-uebernehmen",
   "rest10b-angebotenes-ziel-waehrend-uebernehmen",
   "rest11-folgerunde-nach-namen-vergeben",
   "mobil-emulation",
   "mobil-trefflaeche-44px",
+  "mobil-pruefliste-trefflaeche-44px",
+  "mobil-felder",
   "mobil-geraet-tastatur",
 ] as const;
 type Name = (typeof PUNKTE)[number];
@@ -141,8 +151,25 @@ const ANTWORT_REPARATUR = [
   `  <circle id="punkt" cx="30" cy="30" r="8" fill="#8b7355"/>`,
   `</svg>`,
 ].join("\n");
+/** Ersetzt genau eine Stelle; fehlt sie, ist die Fixture-Antwort veraltet (der Treiber bricht, statt still etwas anderes zu messen). */
+function ersetze(text: string, von: string, nach: string): string {
+  if (!text.includes(von)) throw new Error(`Stub-Antwort: „${von}“ steht nicht in der Vorlage`);
+  return text.replace(von, nach);
+}
+/** Drei Änderungen in drei Elementen auf `probe.svg` (= E8): Tür nach links (x), Nordwand dicker (stroke-width), Südwand dunkelrot (stroke). Die Prüfliste zeigt drei Karten. */
+const TUER: readonly [string, string] = [`x="165"`, `x="145"`];
+const NORD: readonly [string, string] = [`<line id="wand-nord" x1="0" y1="0" x2="420" y2="0" stroke="black" stroke-width="2"`, `<line id="wand-nord" x1="0" y1="0" x2="420" y2="0" stroke="black" stroke-width="6"`];
+const SUED: readonly [string, string] = [`<line id="wand-sued" x1="420" y1="385" x2="0" y2="385" stroke="black"`, `<line id="wand-sued" x1="420" y1="385" x2="0" y2="385" stroke="#8b0000"`];
+const OST: readonly [string, string] = [`<line id="wand-ost" x1="420" y1="0" x2="420" y2="385" stroke="black" stroke-width="2"`, `<line id="wand-ost" x1="420" y1="0" x2="420" y2="385" stroke="black" stroke-width="4"`];
+const mit = (text: string, ...aenderungen: (readonly [string, string])[]): string => aenderungen.reduce((t, [von, nach]) => ersetze(t, von, nach), text);
+const ANTWORT_MEHRERE = mit(E8.raw, TUER, NORD, SUED);
+const ANTWORT_OSTWAND = mit(ANTWORT_MEHRERE, OST);
+/** Verfeinern auf `felder.svg`: der Mond bekommt eine wärmere Füllung (eine Änderung). */
+const FELDER_FILL: readonly [string, string] = [`fill="#f5f5dc"`, `fill="#ffeecc"`];
 const PROMPT_ERZEUGEN = "Grundriss 420 x 385 cm mit Tür";
 const PROMPT_VERFEINERN = "Verschiebe die Tür um 20 cm nach links.";
+const PROMPT_MEHRERE = "Tür 20 cm nach links, Nordwand dicker, Südwand dunkelrot.";
+const KOMMENTAR = "Die Tür bitte nur 10 cm nach links.";
 
 const fixtur = (name: string): string => readFileSync(join(FIXTURE_DIR, "notes", name), "utf8");
 
@@ -196,6 +223,10 @@ interface Snap {
   caption: string | null;
   previewHidden: boolean;
   svgIds: string[] | null;
+  cards: { id: string; text: string; cls: string; comment: string; del: string; ins: string }[];
+  fields: { name: string; value: string; readOnly: boolean; disabled: boolean; inputmode: string | null }[];
+  fieldsHead: string | null;
+  fieldsHint: string | null;
   notices: { text: string; button: string }[];
   changes: string[];
   error: string | null;
@@ -232,6 +263,17 @@ const SNAP_JS = `
     caption: txt(".svg-studio-preview-caption"),
     previewHidden: prev ? prev.classList.contains("is-hidden") : true,
     svgIds: svg ? Array.from(svg.querySelectorAll("[id]")).map((e) => e.getAttribute("id")) : null,
+    cards: Array.from(root.querySelectorAll(".svg-studio-changes .okit-review-card")).map((c) => ({
+      id: c.getAttribute("data-id") || "",
+      text: ((c.querySelector(".okit-review-main") || {}).innerText || "").replace(/\\s+/g, " ").trim(),
+      cls: c.className,
+      comment: ((c.querySelector(".svg-studio-card-comment") || {}).textContent || "").trim(),
+      del: Array.from(c.querySelectorAll(".okit-redline-del")).map((e) => (e.textContent || "").trim()).join("|"),
+      ins: Array.from(c.querySelectorAll(".okit-redline-ins")).map((e) => (e.textContent || "").trim()).join("|"),
+    })),
+    fields: Array.from(root.querySelectorAll(".svg-studio-fields .svg-studio-field-input")).map((i) => ({ name: i.getAttribute("data-field") || "", value: i.value, readOnly: i.readOnly, disabled: i.disabled, inputmode: i.getAttribute("inputmode") })),
+    fieldsHead: txt(".svg-studio-fields-head"),
+    fieldsHint: txt(".svg-studio-fields-hint"),
     notices: Array.from(root.querySelectorAll(".svg-studio-notice")).map((n) => ({
       text: ((n.querySelector(".svg-studio-notice-text") || {}).textContent || "").trim(),
       button: ((n.querySelector("button") || {}).textContent || "").trim(),
@@ -322,6 +364,43 @@ const warteDialog = (ms = 4000): Promise<Dlg | null> => pollUntil<Dlg>(cdp, DLG_
 const dialogKlick = (re: RegExp): Promise<boolean> =>
   klick(`(Array.from(document.querySelectorAll(".modal-container .modal-button-container button")).find((b) => new RegExp(${q(re.source)}, ${q(re.flags)}).test(b.textContent || "")))`);
 
+// ── Vorschau, Felder und Prüfliste bedienen ────────────────────────────────────────────────────────────────────────────────────────────
+
+const IM_BILD = (id: string): string =>
+  `(() => { const st = document.querySelector(".svg-studio-stage"); const svg = st && st.shadowRoot ? st.shadowRoot.querySelector("svg") : null; return svg ? Array.from(svg.querySelectorAll("[id]")).find((e) => e.getAttribute("id") === ${q(id)}) : null; })()`;
+
+/** Echter Mausklick auf ein Element im Shadow Root der Vorschau; wartet, bis die Zahlenfelder dieses Elements da sind. */
+async function klickImBild(id: string): Promise<Snap> {
+  if (!(await klick(IM_BILD(id)))) throw new Vorbedingung(`Element ${id} in der Vorschau nicht klickbar`);
+  const s = await warteSnap((x) => (x.fieldsHead ?? "").includes(id), 5000);
+  if (s === null) throw new Vorbedingung(`Nach dem Klick auf ${id} zeigt das Panel keine Felder (Kopf ${q((await snap())?.fieldsHead)}, Hinweis ${q((await snap())?.fieldsHint)})`);
+  return s;
+}
+
+/** Ein Zahlenfeld: Fokus, Inhalt ersetzen, Enter (echte Tasten). */
+async function setzeFeld(name: string, wert: string): Promise<void> {
+  const da = await cdp.evaluate<boolean>(`const i = document.querySelector('.svg-studio-field-input[data-field="${name}"]'); if (!i || i.readOnly || i.disabled) return false; i.focus(); i.select(); return true;`);
+  if (!da) throw new Vorbedingung(`Feld ${name} fehlt oder ist gesperrt`);
+  await cdp.send("Input.insertText", { text: wert });
+  const taste = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", text: "\r", ...taste });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...taste });
+}
+
+const vorschauAttr = (id: string, name: string): Promise<string | null> => cdp.evaluate<string | null>(`const e = ${IM_BILD(id)}; return e ? e.getAttribute(${q(name)}) : null;`);
+
+/** Das Panel auf `probe.svg` über den Knopf an der Einbettung (wie ein Nutzer). */
+async function oeffneProbeImPanel(): Promise<void> {
+  if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md rendert nicht");
+  const knopf = `Array.from(document.querySelectorAll(".markdown-preview-view .internal-embed.image-embed [data-svg-studio-button]")).find((b) => b.getBoundingClientRect().width > 0)`;
+  await pollUntil(cdp, `return (${knopf}) ? true : null;`, 8000, 250);
+  if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Einbettungsknopf nicht klickbar");
+  if ((await warteSnap((s) => (s.target ?? "").includes("probe.svg"), 8000)) === null) throw new Vorbedingung("Panel nicht auf probe.svg");
+}
+
+const kartenKnopf = (re: RegExp, knopf: string): string =>
+  `(() => { const c = Array.from(document.querySelectorAll(".svg-studio-changes .okit-review-card")).find((x) => new RegExp(${q(re.source)}, ${q(re.flags)}).test((x.querySelector(".okit-review-main") || {}).innerText || "")); return c ? c.querySelector(${q(knopf)}) : null; })()`;
+
 // ── Notizen und Dateien ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 async function schreibe(path: string, body: string): Promise<void> {
@@ -333,7 +412,7 @@ async function schreibe(path: string, body: string): Promise<void> {
 }
 
 async function stelleFixturenHer(): Promise<void> {
-  for (const n of ["probe.svg", "inkscape.svg", "unbenannt.svg", "kaputt.svg", "Block.md", "Einbettung.md"]) await schreibe(n, fixtur(n));
+  for (const n of ["probe.svg", "inkscape.svg", "unbenannt.svg", "kaputt.svg", "felder.svg", "drehung.svg", "Block.md", "Einbettung.md"]) await schreibe(n, fixtur(n));
 }
 
 async function liesDatei(path: string): Promise<string | null> {
@@ -866,6 +945,7 @@ async function oeffneDateiImPanel(path: string): Promise<Snap> {
 }
 
 async function punktBestand(): Promise<void> {
+  // Zugleich der Plan-Punkt „editor-angaben-entfernen“ (E4, D3 Schritt 1): derselbe Weg, deshalb nicht umbenannt und nicht doppelt gezählt.
   await lauf("c4f-editor-angaben-entfernen", async () => {
     await raeume();
     await stelleFixturenHer();
@@ -1032,6 +1112,193 @@ async function punktRandfaelle(): Promise<void> {
   });
 }
 
+/** Ein Lauf mit drei Änderungen auf `probe.svg` über den Stub; liefert den Zustand mit den drei Karten. */
+async function dreiKarten(): Promise<Snap> {
+  await raeume();
+  await stelleFixturenHer();
+  await oeffneProbeImPanel();
+  stub.antworten([ANTWORT_MEHRERE]);
+  const s = await frage(PROMPT_MEHRERE);
+  if (s.cards.length !== 3) throw new Vorbedingung(`Erwartet drei Karten, das Panel zeigt ${s.cards.length}: ${q(s.cards.map((c) => c.text))}`);
+  return s;
+}
+
+async function punktPruefliste(): Promise<void> {
+  const ORIG = fixtur("probe.svg");
+  // Ablehnen (und die Beschriftung der Karten, aus demselben Lauf).
+  let fehler: string | null = null;
+  let karten: Snap["cards"] = [];
+  let nachAblehnen: Snap | null = null;
+  let tuerVorschau: string | null = null;
+  let uebernommen: { ok: boolean; snap: Snap } | null = null;
+  let datei: string | null = null;
+  if (gewaehlt("pruefliste-kartenbeschriftung", "pruefliste-ablehnen")) {
+    try {
+      const s = await dreiKarten();
+      karten = s.cards;
+      if (!(await klick(kartenKnopf(/tuer/, ".okit-review-reject")))) throw new Vorbedingung("Ablehnen-Knopf der Tür-Karte nicht klickbar");
+      nachAblehnen = await warteSnap((x) => x.cards.some((c) => /tuer/.test(c.text) && c.cls.includes("is-rejected")), 5000);
+      tuerVorschau = await vorschauAttr("tuer", "x");
+      uebernommen = await uebernimm();
+      datei = await liesDatei("probe.svg");
+    } catch (e) {
+      fehler = fehlerText(e);
+    }
+  }
+  await lauf("pruefliste-kartenbeschriftung", async () => {
+    if (fehler !== null && karten.length === 0) throw new Vorbedingung(`Vorbereitung fehlgeschlagen: ${fehler}`);
+    const texte = karten.map((c) => `${c.text} [alt ${c.del} → neu ${c.ins}]`);
+    const karte = (re: RegExp): Snap["cards"][number] | undefined => karten.find((c) => re.test(c.text));
+    const tuerK = karte(/tuer/);
+    const nordK = karte(/wand-nord/);
+    const suedK = karte(/wand-sued/);
+    // Jede Karte nennt Element und Eigenschaft und zeigt den Wert alt → neu als gestrichenen und eingefügten Teil (Redline); Autor, Runde und Art stehen in der Kopfzeile.
+    record("pruefliste-kartenbeschriftung",
+      karten.length === 3 && /x/.test(tuerK?.text ?? "") && tuerK?.del === "165" && tuerK?.ins === "145" && /stroke-width/.test(nordK?.text ?? "") && nordK?.del === "2" && nordK?.ins === "6" && /stroke/.test(suedK?.text ?? "") && /8b0000/.test(suedK?.ins ?? "") && karten.every((c) => /^Model · Round 1/.test(c.text)),
+      `im sichtbaren Panel: ${q(texte)}`);
+  });
+  await lauf("pruefliste-ablehnen", async () => {
+    if (fehler !== null) throw new Vorbedingung(`Vorbereitung fehlgeschlagen: ${fehler}`);
+    if (uebernommen === null || datei === null) throw new Vorbedingung("Kein Ergebnis des Übernehmens");
+    // Erwartet: Nord- und Südwand geändert, die abgelehnte Tür bleibt wie im Ausgang. Bytes: der Ausgang mit genau diesen zwei Ersetzungen.
+    const erwartet = mit(ORIG, NORD, SUED);
+    record("pruefliste-ablehnen", uebernommen.ok && nachAblehnen !== null && tuerVorschau === "165" && datei === erwartet && datei.includes(`x="165"`) && !datei.includes(`x="145"`),
+      `Karte der Tür abgelehnt: ${nachAblehnen !== null} · Vorschau danach Tür x=${q(tuerVorschau)} · Übernehmen ${uebernommen.ok ? "ok" : q(uebernommen.snap.status)} · Datei = Ausgang mit nur Nord- und Südwand geändert, byte-gleich: ${datei === erwartet} (Tür x=165 steht noch: ${datei.includes(`x="165"`)})`);
+  });
+
+  // Annehmen (die Gegenprobe zu Ablehnen: ohne Ablehnen steht die Änderung drin) und die Bilder der Prüfliste.
+  await lauf("pruefliste-annehmen", async () => {
+    const s = await dreiKarten();
+    await nimmBilder("pruefliste").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
+    if (!(await klick(`document.querySelector(".svg-studio-changes .okit-review-accept-all")`))) throw new Vorbedingung("„Accept all“ nicht klickbar");
+    const alle = await warteSnap((x) => x.cards.length === 3 && x.cards.every((c) => c.cls.includes("is-accepted")), 5000);
+    const tuer = await vorschauAttr("tuer", "x");
+    const r = await uebernimm();
+    const datei2 = await liesDatei("probe.svg");
+    const erwartet = mit(ORIG, TUER, NORD, SUED);
+    record("pruefliste-annehmen", alle !== null && tuer === "145" && r.ok && datei2 === erwartet,
+      `drei Karten (${s.cards.length}) alle angenommen: ${alle !== null} · Vorschau Tür x=${q(tuer)} · Übernehmen ${r.ok ? "ok" : q(r.snap.status)} · Datei = Ausgang mit allen drei Änderungen, byte-gleich: ${datei2 === erwartet}`);
+  });
+
+  // Kommentar.
+  await lauf("pruefliste-kommentar", async () => {
+    await dreiKarten();
+    stub.antworten([ANTWORT_MEHRERE, ANTWORT_OSTWAND]);
+    if (!(await klick(kartenKnopf(/tuer/, ".okit-review-comment")))) throw new Vorbedingung("Kommentar-Taste der Tür-Karte nicht klickbar");
+    const feld = await pollUntil<{ tag: string; titel: string }>(cdp, `const f = document.querySelector(".modal-container .okit-prompt-field"); if (!f) return null; const m = f.closest(".modal"); return { tag: f.tagName, titel: ((m.querySelector(".modal-title") || {}).textContent || "").trim() };`, 5000, 150);
+    if (feld === null) throw new Vorbedingung("Der Kommentar-Dialog (promptText) kam nicht");
+    await cdp.evaluate(`const f = document.querySelector(".modal-container .okit-prompt-field"); f.focus(); return true;`);
+    await cdp.send("Input.insertText", { text: KOMMENTAR });
+    if (!(await dialogKlick(/^OK$/))) throw new Vorbedingung("OK im Kommentar-Dialog nicht klickbar");
+    const karte = await warteSnap((x) => x.cards.some((c) => /tuer/.test(c.text) && c.comment.includes(KOMMENTAR)), 5000);
+    // Die nächste Verfeinern-Anfrage trägt die Rückmeldung. Stub-Antworten: die Antwort der ersten Runde ist verbraucht, es folgt die zweite.
+    stub.loescheMitschnitt();
+    stub.antworten([ANTWORT_OSTWAND]);
+    await frage("Mach die Ostwand dicker.");
+    const anfrage = chatAnfragen().at(-1);
+    const letzte = anfrage ? nachrichten(anfrage).at(-1)?.content ?? "" : "";
+    const tuerCard = karte?.cards.find((c) => /tuer/.test(c.text));
+    record("pruefliste-kommentar",
+      feld.tag === "TEXTAREA" && karte !== null && (tuerCard?.cls ?? "").includes("is-accepted") && letzte.includes("Rückmeldung zur letzten Runde") && letzte.includes(KOMMENTAR),
+      `Dialog ${q(feld.titel)} als ${feld.tag} (mehrzeilig) · Karte zeigt den Kommentar: ${karte !== null} (Zustand bleibt ${q(tuerCard?.cls)}) · Anfrage ${chatAnfragen().length} an den Stub endet auf ${q(letzte.slice(-260))}`);
+  });
+}
+
+async function punktFelder(): Promise<void> {
+  await lauf("bestand-ohne-runde-vorschau", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneProbeImPanel();
+    const s = await warteSnap((x) => !x.previewHidden && x.svgIds !== null && (x.measure ?? "") !== "", 8000);
+    if (s === null) throw new Vorbedingung(`Keine Vorschau am Bestand (Zustand ${q(await snap())})`);
+    record("bestand-ohne-runde-vorschau",
+      s.rounds === 0 && (s.caption ?? "") === "Current state" && (s.svgIds ?? []).includes("tuer") && (s.fieldsHint ?? "") !== "" && s.acceptDisabled === true,
+      `ohne Lauf: Beschriftung ${q(s.caption)} · ${s.svgIds?.length} Elemente mit id · Maßzeile ${q(s.measure)} · Felder-Hinweis ${q(s.fieldsHint)} · Übernehmen gesperrt: ${s.acceptDisabled}`);
+    // Und die Felder kommen nach einem Klick (Element mit Feldern: die Tür).
+    const f = await klickImBild("tuer");
+    console.log(`    Felder der Tür: ${q(f.fields.map((x) => `${x.name}=${x.value}`))}`);
+  });
+
+  await lauf("zahlenfeld-genau-ein-attribut", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneDateiImPanel("felder.svg");
+    if ((await warteSnap((x) => !x.previewHidden && x.svgIds !== null, 8000)) === null) throw new Vorbedingung("Keine Vorschau am Bestand felder.svg");
+    const f = await klickImBild("mond");
+    await nimmBilder("felder").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
+    const r0 = f.fields.find((x) => x.name === "r");
+    await setzeFeld("r", "60");
+    const runde = await warteSnap((x) => x.rounds === 1, 5000);
+    const r = await uebernimm();
+    const nach = await liesDatei("felder.svg");
+    const erwartet = ersetze(fixtur("felder.svg"), `r="40"`, `r="60"`);
+    record("zahlenfeld-genau-ein-attribut", runde !== null && r.ok && nach === erwartet && r0?.value === "40",
+      `Feld r stand auf ${q(r0?.value)} · Runde ${q(runde?.labels)} · Übernehmen ${r.ok ? "ok" : q(r.snap.status)} · Quelltext nachher = Quelltext vorher mit genau r="40" → r="60", sonst byte-gleich: ${nach === erwartet}`);
+  });
+
+  await lauf("handrunde-in-versionsliste", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneDateiImPanel("felder.svg");
+    // Ein Lauf vorweg: die Kit-Versionsliste zeigt erst ab zwei Runden Zeilen.
+    stub.antworten([mit(fixtur("felder.svg"), FELDER_FILL)]);
+    await frage("Färbe den Mond wärmer.");
+    await klickImBild("mond");
+    await setzeFeld("r", "60");
+    await warteSnap((x) => x.rounds === 2, 5000);
+    await klickImBild("mond");
+    await setzeFeld("cx", "110");
+    const s = await warteSnap((x) => x.rounds === 2 && /cx/.test(x.labels[1] ?? "") && x.listRows === 2, 5000);
+    const z = await snap();
+    const hand = (z?.metas ?? []).filter((m) => m.startsWith("hand"));
+    record("handrunde-in-versionsliste", s !== null && hand.length === 1 && (z?.labels[1] ?? "").startsWith("By hand:") && (z?.labels[1] ?? "").includes("r") && z?.rounds === 2,
+      `nach einem Lauf und zwei Feldänderungen: ${z?.rounds} Runden, davon ${hand.length} von Hand · Zeilen der Versionsliste: ${z?.listRows} · Beschriftung der Handrunde ${q(z?.labels[1])} · Runden ${q(z?.metas)}`);
+  });
+
+  await lauf("drehmitte-in-gruppe", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneDateiImPanel("drehung.svg");
+    if ((await warteSnap((x) => !x.previewHidden && x.svgIds !== null, 8000)) === null) throw new Vorbedingung("Keine Vorschau am Bestand drehung.svg");
+    await klickImBild("kasten");
+    // Die Lage im Panel kann sich nach der ersten Runde verschieben (Karten, Beschriftung): gemessen wird relativ zur Wurzel des Bildes, als Bruchteil ihrer Breite.
+    const mitte = (): Promise<{ fx: number; fy: number; breite: number; cx: number; cy: number; transform: string | null }> => cdp.evaluate(`
+      const e = ${IM_BILD("kasten")};
+      const svg = e.ownerSVGElement;
+      const w = svg.getBoundingClientRect();
+      const r = e.getBoundingClientRect();
+      const b = e.getBBox();
+      return { fx: (r.left + r.width / 2 - w.left) / w.width, fy: (r.top + r.height / 2 - w.top) / w.width, breite: w.width, cx: b.x + b.width / 2, cy: b.y + b.height / 2, transform: e.getAttribute("transform") };
+    `);
+    const vorher = await mitte();
+    await setzeFeld("rotate", "30");
+    const runde = await warteSnap((x) => x.rounds === 1, 5000);
+    const nachher = await mitte();
+    const m = /rotate\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\)/.exec(nachher.transform ?? "");
+    const a = m ? Number(m[1]) : NaN;
+    const cx = m ? Number(m[2]) : NaN;
+    const cy = m ? Number(m[3]) : NaN;
+    const lokal = Math.abs(cx - vorher.cx) < 0.01 && Math.abs(cy - vorher.cy) < 0.01;
+    // Wirkung am Bild: eine Drehung um die eigene Mitte lässt die Mitte des Elements auf dem Bildschirm, wo sie war.
+    const bildschirm = Math.hypot(nachher.fx - vorher.fx, nachher.fy - vorher.fy) * nachher.breite;
+    // Gegenprobe: dieselbe Drehung um eine falsche Mitte (den Ursprung) verschiebt das Element deutlich, die Messung kann also anschlagen.
+    const falsch = await cdp.evaluate<number>(`
+      const e = ${IM_BILD("kasten")};
+      const svg = e.ownerSVGElement;
+      const alt = e.getAttribute("transform");
+      const mitteVon = () => { const w = svg.getBoundingClientRect(); const r = e.getBoundingClientRect(); return [(r.left + r.width / 2 - w.left), (r.top + r.height / 2 - w.top)]; };
+      const a = mitteVon();
+      e.setAttribute("transform", "translate(15 5) rotate(30 0 0)");
+      const b = mitteVon();
+      e.setAttribute("transform", alt);
+      return Math.hypot(b[0] - a[0], b[1] - a[1]);
+    `);
+    if (falsch < 5) throw new Vorbedingung(`Gegenprobe ohne Biss: eine Drehung um die falsche Mitte verschob das Element nur um ${falsch.toFixed(2)} px`);
+    record("drehmitte-in-gruppe", runde !== null && a === 30 && lokal && bildschirm < 1,
+      `Element mit eigenem translate in einer Gruppe mit translate und scale(2): transform vorher ${q(vorher.transform)}, nachher ${q(nachher.transform)} · Drehmitte (${cx}, ${cy}) gegen die Mitte der lokalen getBBox() (${vorher.cx}, ${vorher.cy}): ${lokal} · Mitte auf dem Bildschirm verschoben um ${bildschirm.toFixed(2)} px (erwartet unter 1; Gegenprobe: Drehung um den Ursprung verschiebt um ${falsch.toFixed(1)} px)`);
+  });
+}
+
 async function punktMobil(): Promise<void> {
   const haenge = async (): Promise<Cdp> => {
     const c = await attachTo("workspace", port, REPO_NAME);
@@ -1041,10 +1308,38 @@ async function punktMobil(): Promise<void> {
     console.log(`  (Mobil: ${v.hinweis}; ${v.neu})`);
     return c;
   };
+  let mobil = false;
+  const einschalten = async (): Promise<void> => {
+    if (mobil) return;
+    cdp = await mobilEin(cdp, haenge);
+    mobil = true;
+    await sleep(800);
+  };
   try {
+    // Die Felder am Bestand zuerst (ein Element in der Vorschau antippen), dann der Lauf mit Prüfliste.
+    await lauf("mobil-felder", async () => {
+      await einschalten();
+      await raeume();
+      await stelleFixturenHer();
+      await oeffneDateiImPanel("felder.svg");
+      if ((await warteSnap((x) => !x.previewHidden && x.svgIds !== null, 8000)) === null) throw new Vorbedingung("Keine Vorschau am Bestand felder.svg in der Mobil-Emulation");
+      const f = await klickImBild("mond");
+      await sleep(400);
+      await nimmBilder("mobil-felder").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
+      const m = await cdp.evaluate<{ docUeber: boolean; panelUeber: boolean; ausserhalb: string[]; hoehen: number[]; breiten: number[] }>(`
+        const p = document.querySelector(".svg-studio-panel");
+        const eingaben = Array.from(document.querySelectorAll(".svg-studio-fields .svg-studio-field-input"));
+        const aus = [];
+        for (const i of eingaben) { const r = i.getBoundingClientRect(); if (r.left < -0.5 || r.right > window.innerWidth + 0.5) aus.push(i.getAttribute("data-field") + " " + Math.round(r.left) + ".." + Math.round(r.right)); }
+        return { docUeber: document.documentElement.scrollWidth > window.innerWidth + 1, panelUeber: p ? p.scrollWidth > p.clientWidth + 1 : true, ausserhalb: aus,
+          hoehen: eingaben.map((i) => Math.round(i.getBoundingClientRect().height)), breiten: eingaben.map((i) => Math.round(i.getBoundingClientRect().width)) };
+      `);
+      const zahlen = f.fields.filter((x) => !x.readOnly && ["cx", "cy", "r", "stroke-width"].includes(x.name));
+      record("mobil-felder", f.fields.length >= 4 && zahlen.length >= 3 && zahlen.every((x) => x.inputmode === "decimal") && !m.docUeber && !m.panelUeber && m.ausserhalb.length === 0,
+        `${f.fields.length} Felder (${q(f.fields.map((x) => x.name))}), Zahlenfelder mit inputmode decimal: ${zahlen.every((x) => x.inputmode === "decimal")} · Seitenüberlauf Dokument ${m.docUeber}, Panel ${m.panelUeber} · außerhalb: ${q(m.ausserhalb)} · Höhen ${q(m.hoehen)} px, Breiten ${q(m.breiten)} px (Emulation, ohne Bildschirmtastatur)`);
+    });
     await lauf("mobil-emulation", async () => {
-      cdp = await mobilEin(cdp, haenge);
-      await sleep(800);
+      await einschalten();
       await raeume();
       await stelleFixturenHer();
       if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md rendert in der Mobil-Emulation nicht");
@@ -1058,6 +1353,12 @@ async function punktMobil(): Promise<void> {
       const s = await frage(PROMPT_VERFEINERN);
       await sleep(500);
       await nimmBilder("mobil").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
+      (globalThis as { __review?: unknown }).__review = await cdp.evaluate(`
+        const sel = { annehmen: ".okit-review-accept", ablehnen: ".okit-review-reject", kommentar: ".okit-review-comment", alleAnnehmen: ".okit-review-accept-all", alleAblehnen: ".okit-review-reject-all" };
+        const out = {};
+        for (const [k, v] of Object.entries(sel)) { const e = document.querySelector(".svg-studio-changes " + v); const r = e ? e.getBoundingClientRect() : null; out[k] = r ? { w: Math.round(r.width), h: Math.round(r.height) } : null; }
+        return out;
+      `);
       const m = await cdp.evaluate<{ mobil: boolean; breite: number; hoehe: number; docUeber: boolean; panelUeber: boolean; ausserhalb: string[]; stage: { w: number; h: number } | null; messzeile: string }>(`
         const p = document.querySelector(".svg-studio-panel");
         const aus = [];
@@ -1075,6 +1376,15 @@ async function punktMobil(): Promise<void> {
       `);
       record("mobil-emulation", m.mobil && m.breite === BREITE && !m.docUeber && !m.panelUeber && m.ausserhalb.length === 0 && m.stage !== null && m.stage.w > 0 && m.stage.h > 0 && m.messzeile !== "" && s.rounds === 1,
         `Emulation ${m.breite} × ${m.hoehe} (is-mobile ${m.mobil}) · Seitenüberlauf Dokument ${m.docUeber}, Panel ${m.panelUeber} · Knöpfe außerhalb: ${q(m.ausserhalb)} · Vorschau ${q(m.stage)} · Maßzeile ${q(m.messzeile)}`);
+    });
+    await lauf("mobil-pruefliste-trefflaeche-44px", async () => {
+      const g = (globalThis as { __review?: Record<string, { w: number; h: number } | null> }).__review;
+      if (g === undefined) throw new Vorbedingung("Die Knöpfe der Prüfliste wurden in der Mobil-Emulation nicht vermessen");
+      const eintraege = Object.entries(g);
+      const fehlt = eintraege.filter(([, v]) => v === null).map(([k]) => k);
+      const zuKlein = eintraege.filter(([, v]) => v !== null && (v.w < 44 || v.h < 44)).map(([k, v]) => `${k} ${v!.w} × ${v!.h}`);
+      if (fehlt.length > 0) throw new Vorbedingung(`Knöpfe nicht im DOM: ${fehlt.join(", ")}`);
+      record("mobil-pruefliste-trefflaeche-44px", zuKlein.length === 0, `Knöpfe der Prüfliste in der Emulation: ${eintraege.map(([k, v]) => `${k} ${v!.w} × ${v!.h}`).join(" · ")} (verlangt mindestens 44 × 44; zu klein: ${q(zuKlein)})`);
     });
     await lauf("mobil-trefflaeche-44px", async () => {
       const g = (globalThis as { __knopf?: { w: number; h: number } }).__knopf;
@@ -1154,12 +1464,14 @@ async function main(): Promise<void> {
     await punktNichtzeichen();
     await punktSchliessen();
     await punktRandfaelle();
+    await punktPruefliste();
+    await punktFelder();
 
     if (gewaehlt("rest11-folgerunde-nach-namen-vergeben")) skipped("rest11-folgerunde-nach-namen-vergeben", "nur von Hand prüfbar: eine Folgerunde nach „Namen vergeben“ braucht ein Modell, das auf den neu vergebenen ids aufbaut, und eine Handänderung dazwischen; der Stub belegt das nicht (C4-Rest 11, mit Johannes durchspielen)");
     if (gewaehlt("mobil-geraet-tastatur")) skipped("mobil-geraet-tastatur", "am Gerät zu messen (iPhone, Web-Inspektor, Tastatur offen): Auftrag des Masters, Plan „Mobil am Gerät“ M4 bis M6; die Emulation hat keine Bildschirmtastatur");
 
     await raeume();
-    if (gewaehlt("mobil-emulation", "mobil-trefflaeche-44px")) await punktMobil();
+    if (gewaehlt("mobil-emulation", "mobil-trefflaeche-44px", "mobil-pruefliste-trefflaeche-44px", "mobil-felder")) await punktMobil();
     if (nur !== null) for (const n of PUNKTE) if (!bilanz.eintraege().some((p) => p.name === n)) skipped(n, "nicht gewählt (--nur, Entwicklungslauf)");
   } finally {
     await zustand.schliesse();

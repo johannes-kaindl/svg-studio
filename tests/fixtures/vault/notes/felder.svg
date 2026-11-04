@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120" data-unit="cm">
+  <rect id="boden" x="10" y="10" width="180" height="100" fill="#e8e0d0" stroke="#554433" stroke-width="2"/>
+  <circle id="mond" cx="100" cy="60" r="40" fill="#f5f5dc" stroke="#8b7355"/>
+</svg>
