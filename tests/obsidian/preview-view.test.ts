@@ -52,6 +52,30 @@ describe("renderPreviewView", () => {
     expect(other.selection.id).toBeNull();
   });
 
+  it("eine Handänderung ändert den Text, nicht das gewählte Element: die Auswahl bleibt, solange die id noch da ist; onSelectionChange meldet Klick und select", () => {
+    const calls: string[] = [];
+    const host = document.body.createDiv();
+    const selection: Selection = { id: null, text: null };
+    const d = { background: { get: () => ({ on: true, tone: "light" as const, hex: "#ffffff" }), set: () => undefined }, onSelectionChange: () => { calls.push(selection.id ?? "-"); } };
+    const first = renderPreviewView(host, SVG, d, selection);
+    host.querySelector<HTMLElement>(".svg-studio-stage")!.shadowRoot!.querySelector("#wand-nord")!.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    first.select(null);
+    expect(calls).toEqual(["wand-nord", "-"]);
+    first.select("wand-nord");
+    first.dispose();
+    const edited = SVG.replace(`width="420"`, `width="400"`);
+    const host2 = document.body.createDiv();
+    renderPreviewView(host2, edited, d, selection);
+    expect(selection).toEqual({ id: "wand-nord", text: edited });
+  });
+
+  it("localBoxOf der Ansicht reicht die Messung des Elements durch; die Ansicht eines abgelehnten Texts misst nichts", () => {
+    const m = make();
+    expect(m.view.localBoxOf("wand-nord")).toBeNull(); // happy-dom hat kein Layout
+    const bad = make(`<svg ${NS}><script>x</script></svg>`);
+    expect(bad.view.localBoxOf("x")).toBeNull();
+  });
+
   it("abgelehnter Text: Fehlerblock mit Gründen, kein Bild", () => {
     const m = make(`<svg ${NS}><script>x</script></svg>`);
     expect(m.host.querySelector(".svg-studio-error")).not.toBeNull();

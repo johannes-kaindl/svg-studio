@@ -56,6 +56,19 @@ export function userBox(root: SVGSVGElement, el: SVGGraphicsElement): Box | null
   return boxWith(root, el, rootInverse(root));
 }
 
+/** Ausdehnung von `el` im EIGENEN Koordinatenraum (`getBBox()` unverändert, vor dem `transform` des Elements und seiner Eltern): der Raum, in dem `rotate(a cx cy)` die Mitte erwartet.
+ *  `null`, wo der Browser nichts misst. */
+export function localBox(el: SVGGraphicsElement): Box | null {
+  try {
+    const bb = el.getBBox();
+    if (bb.width === 0 && bb.height === 0) return null;
+    const box = { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
+    return Object.values(box).every(Number.isFinite) ? box : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Vereinigung der Ausdehnungen der gezeichneten Kinder der Wurzel (ohne Definitionen, Vorlagen und Kopfdaten, siehe `NOT_DRAWN`); `null`, wenn nichts messbar ist. */
 export function drawingBox(root: SVGSVGElement): Box | null {
   const inv = rootInverse(root);

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canonDocument } from "../../src/core/canon";
+import { scanElements } from "../../src/core/elements";
+import { fieldChange } from "../../src/core/fields";
 import { diffSvg, type DiffEntry } from "../../src/core/diff";
 import type { Problem } from "../../src/core/problem";
 import { acceptText, addHandChange, addRound, applyRound, canRefine, decide, feedbackOf, refineBaseText, type SvgRound, type SvgSession } from "../../src/core/session";
@@ -131,6 +133,63 @@ describe("Rundenmodell: Handänderungen", () => {
     expect(s.rounds.active).toBe(2);
     expect(s.rounds.rounds[1].result).toContain(`x="81"`); // die später gewählte Runde bleibt erhalten
     expect(selectRound(s.rounds, 1).active).toBe(1);
+  });
+
+  describe("Text ersetzen (remove mit expect plus add) und weitere Handänderungen am selben Element", () => {
+    const T = S(`  <circle id="mond" r="40"/>\n  <text id="titel" x="1">Hallo</text>`);
+    const fields = (t: string, field: string, input: string) => {
+      const el = scanElements(t).elements.find((e) => e.id === "titel")!;
+      const r = fieldChange(el, t, field, input, { lang: "de" });
+      if (!r.ok) throw new Error(r.problem.code);
+      return r.changes;
+    };
+
+    it("ein Text ist EIN Eintrag der Art replace, beschriftet mit dem Schlüssel", () => {
+      const s = ok(addHandChange(open(T), fields(T, "text", "Welt"), "Von Hand"));
+      const r = s.rounds.rounds[0];
+      expect(r.instruction).toBe("Von Hand: titel");
+      expect(r.body.form === "list" && r.body.entries).toMatchObject([{ kind: "replace", key: "titel", tag: "text", reason: "text" }]);
+      expect(r.result).toBe(T.replace("Hallo", "Welt"));
+    });
+
+    it("Text zweimal geändert: ein Eintrag, das Entfernen gilt dem Ausgang, der Inhalt dem letzten Stand", () => {
+      let s = ok(addHandChange(open(T), fields(T, "text", "Welt"), "Von Hand"));
+      s = ok(addHandChange(s, fields(s.rounds.rounds[0].result, "text", "Mond"), "Von Hand"));
+      const b = s.rounds.rounds[0].body;
+      expect(b.form === "list" && b.entries).toHaveLength(1);
+      expect(s.rounds.rounds[0].result).toBe(T.replace("Hallo", "Mond"));
+      expect(acceptText(s, T)).toEqual({ ok: true, text: T.replace("Hallo", "Mond") });
+    });
+
+    it("Text, dann ein Attribut desselben Elements, dann wieder Text: ein Eintrag, alles im Ergebnis", () => {
+      let s = ok(addHandChange(open(T), fields(T, "text", "Welt"), "Von Hand"));
+      s = ok(addHandChange(s, fields(s.rounds.rounds[0].result, "x", "9"), "Von Hand"));
+      let b = s.rounds.rounds[0].body;
+      expect(b.form === "list" && b.entries).toHaveLength(1);
+      expect(s.rounds.rounds[0].result).toBe(T.replace("Hallo", "Welt").replace(`x="1"`, `x="9"`));
+      s = ok(addHandChange(s, fields(s.rounds.rounds[0].result, "text", "Neu"), "Von Hand"));
+      b = s.rounds.rounds[0].body;
+      expect(b.form === "list" && b.entries).toHaveLength(1);
+      expect(s.rounds.rounds[0].result).toBe(T.replace("Hallo", "Neu").replace(`x="1"`, `x="9"`));
+      expect(acceptText(s, T)).toMatchObject({ ok: true, text: s.rounds.rounds[0].result });
+    });
+
+    it("erst ein Attribut, dann der Text desselben Elements: ein Eintrag, das Entfernen gilt dem Ausgang", () => {
+      let s = ok(addHandChange(open(T), fields(T, "x", "9"), "Von Hand"));
+      s = ok(addHandChange(s, fields(s.rounds.rounds[0].result, "text", "Welt"), "Von Hand"));
+      const b = s.rounds.rounds[0].body;
+      expect(b.form === "list" && b.entries).toHaveLength(1);
+      expect(s.rounds.rounds[0].result).toBe(T.replace("Hallo", "Welt").replace(`x="1"`, `x="9"`));
+    });
+
+    it("ein anderes Element dazwischen bleibt eigener Eintrag; ablehnen des Ersetzens lässt den Rest", () => {
+      let s = ok(addHandChange(open(T), fields(T, "text", "Welt"), "Von Hand"));
+      s = ok(addHandChange(s, [{ op: "change", id: "mond", attrs: { r: "9" } }], "Von Hand"));
+      const b = s.rounds.rounds[0].body;
+      expect(b.form === "list" && b.entries).toHaveLength(2);
+      const rejected = ok(decide(s, 0, 0, { state: "rejected" }));
+      expect(rejected.rounds.rounds[0].result).toBe(T.replace(`r="40"`, `r="9"`));
+    });
   });
 
   it("ohne Text keine Handänderung", () => {

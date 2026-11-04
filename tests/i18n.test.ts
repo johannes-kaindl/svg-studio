@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { initStrings, STRINGS, t } from "../src/i18n/strings";
+import { HAND_LABEL } from "../src/core/fields";
+import { initStrings, problemText, STRINGS, t } from "../src/i18n/strings";
 
 describe("Oberflächentexte", () => {
   it("beide Sprachen haben dieselben Schlüssel", () => {
@@ -68,6 +69,25 @@ describe("Messzeile ist einsprachig", () => {
     expect(qualityTexts().measured(gemma)).not.toContain("top_p");
     initStrings("de");
     expect(qualityTexts().measured(qwen)).toContain("ohne top_p gemessen");
+    initStrings("en");
+  });
+});
+
+describe("Zahlenfelder", () => {
+  it("das Wort des Rundentitels im Kern stimmt mit dem der Oberfläche überein (`review.author.hand`)", () => {
+    expect(HAND_LABEL.de).toBe(STRINGS.de["review.author.hand"]);
+    expect(HAND_LABEL.en).toBe(STRINGS.en["review.author.hand"]);
+  });
+
+  it("jeder Schreibschutzgrund hat einen Text, und field-readonly setzt ihn in den Satz", () => {
+    for (const reason of ["unit", "value", "style", "markup", "unnamed", "ambiguous", "matrix", "scale", "skew", "transform"]) {
+      expect(STRINGS.en[`fields.readonly.${reason}`], reason).toBeTruthy();
+      expect(STRINGS.de[`fields.readonly.${reason}`], reason).toBeTruthy();
+    }
+    initStrings("en");
+    expect(problemText({ code: "field-readonly", params: ["rotate", "matrix"] })).toBe("The field “rotate” is write-protected: The transform is a matrix: change it in the code.");
+    initStrings("de");
+    expect(problemText({ code: "field-readonly", params: ["rotate", "matrix"] })).toBe("Das Feld „rotate“ ist schreibgeschützt: Das transform ist eine Matrix: im Code ändern.");
     initStrings("en");
   });
 });

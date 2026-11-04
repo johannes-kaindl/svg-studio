@@ -2,7 +2,7 @@
 // Die Vorschau (Shadow Root, Hintergrund-Regler, Maßzeile, Auswahl) steht in `preview-view.ts`, der Bestand beim Öffnen (Reparieren, Namen vergeben, Editor-Angaben
 // entfernen) in `bestand.ts`, die Prüfliste mit den Einzelentscheidungen in `review.ts`.
 import { svgQualityLine } from "../../core/quality";
-import { addRound, type SvgRound, type SvgSession } from "../../core/session";
+import { addHandChange, addRound, type SvgRound, type SvgSession } from "../../core/session";
 import { problemText, qualityTexts, t } from "../../i18n/strings";
 import { activeRound, EMPTY_ROUNDS } from "../../vendor/kit/rounds";
 import type { Target } from "../../vendor/kit/panel-session";
@@ -10,6 +10,7 @@ import { checkSvg } from "../../vendor/kit/svg-guard";
 import type { LlmConnection } from "../../vendor/kit-obsidian/llm-connection";
 import { renderPreviewView, type PreviewView, type PreviewViewDeps, type Selection } from "./preview-view";
 import { bestandProblems, renderBestandNotice, repairProblem } from "./bestand";
+import { renderFields } from "./fields-view";
 import { renderReview } from "./review";
 import { runSvgPrompt, runSvgRepair } from "./run";
 import type { NoticeCtx, PanelSlots } from "./shell";
@@ -40,6 +41,10 @@ export function roundMeta(r: SvgRound): string {
 export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
   let view: PreviewView | null = null;
   const selection: Selection = { id: null, text: null };
+  /** Das Feld, in dem Enter kam: nach dem Neuzeichnen bekommt es den Fokus zurück. */
+  const focus: { name: string | null } = { name: null };
+  /** Zeichnet die Zahlenfelder des gewählten Elements neu (eine Auswahl im Bild ändert nur sie, nicht das Panel). */
+  let paintFields: (() => void) | null = null;
   return {
     fresh: freshSession,
     roundLabel: (r) => r.instruction,
@@ -51,7 +56,36 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       view?.dispose();
       view = null;
       if (text === null) return;
-      view = renderPreviewView(host, text, { background: d.background }, selection);
+      view = renderPreviewView(host, text, { background: d.background, onSelectionChange: () => { paintFields?.(); } }, selection);
+    },
+    renderFields(host, round, _session, ctx) {
+      paintFields = () => {
+        host.empty();
+        if (round === null) return;
+        if (selection.id === null || view === null) {
+          host.createDiv({ cls: "svg-studio-fields-hint", text: t("fields.hint") });
+          return;
+        }
+        const id = selection.id;
+        renderFields(host, {
+          text: round.result,
+          id,
+          center: () => {
+            const box = view?.localBoxOf(id) ?? null;
+            return box === null ? null : [box.x + box.width / 2, box.y + box.height / 2];
+          },
+          busy: ctx.busy,
+          focus,
+          commit: (changes, label) => {
+            if (ctx.busy()) return null;
+            const next = addHandChange(ctx.session(), changes, label);
+            if ("problem" in next) return next.problem;
+            ctx.setSession(next);
+            return null;
+          },
+        });
+      };
+      paintFields();
     },
     renderChanges(host, round, session, ctx) {
       renderReview(host, round, session, ctx, { background: d.background, jump: (id) => { view?.select(id); } });
@@ -62,6 +96,7 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
     dispose() {
       view?.dispose();
       view = null;
+      paintFields = null;
     },
   };
 }

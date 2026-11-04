@@ -125,22 +125,50 @@ export function addRound(s: SvgSession, r: Omit<SvgRound, "result">): SvgSession
   return { ...s, rounds: pushRound(s.rounds, { ...r, body, result: step.text }) };
 }
 
-/** Einträge für Handänderungen: dieselbe Form wie die des Diffs, damit Anzeige und Entscheidungen gleich laufen. */
+/** Einträge für Handänderungen: dieselbe Form wie die des Diffs, damit Anzeige und Entscheidungen gleich laufen. Ein `remove` mit `expect`, gefolgt von einem `add` desselben Elements, ist ein Ersetzen (Text eines `<text>`). */
 function entriesFromChanges(base: string, changes: readonly SvgChange[]): DiffEntry[] {
   const els = scanElements(base).elements;
   const find = (key: string) => els.find((e) => e.key === key);
-  return changes.flatMap((c): DiffEntry[] => {
-    if (c.op === "change") {
+  const out: DiffEntry[] = [];
+  for (let i = 0; i < changes.length; i++) {
+    const c = changes[i];
+    const next = changes[i + 1];
+    if (c.op === "remove" && c.expect !== undefined && next !== undefined && next.op === "add" && scanElements(next.markup).elements[0]?.id === c.id) {
+      out.push({ kind: "replace", key: c.id, tag: find(c.id)?.tag ?? "", reason: "text", changes: [c, next] });
+      i++;
+    } else if (c.op === "change") {
       const el = find(c.id);
-      return Object.entries(c.attrs).map(([name, to]): DiffEntry => ({
-        kind: "attr", key: c.id, tag: el?.tag ?? "", attr: name, from: el === undefined ? null : attr(el, name), to, changes: [{ op: "change", id: c.id, attrs: { [name]: to } }],
-      }));
+      for (const [name, to] of Object.entries(c.attrs)) {
+        out.push({ kind: "attr", key: c.id, tag: el?.tag ?? "", attr: name, from: el === undefined ? null : attr(el, name), to, changes: [{ op: "change", id: c.id, attrs: { [name]: to } }] });
+      }
+    } else if (c.op === "remove") out.push({ kind: "remove", key: c.id, tag: find(c.id)?.tag ?? "", changes: [c] });
+    else if (c.op === "move") out.push({ kind: "move", key: c.id, tag: find(c.id)?.tag ?? "", parentKey: c.parent, changes: [c] });
+    else {
+      const top = scanElements(c.markup).elements[0];
+      out.push({ kind: "add", key: top?.key ?? "", tag: top?.tag ?? "", changes: [c] });
     }
-    if (c.op === "remove") return [{ kind: "remove", key: c.id, tag: find(c.id)?.tag ?? "", changes: [c] }];
-    if (c.op === "move") return [{ kind: "move", key: c.id, tag: find(c.id)?.tag ?? "", parentKey: c.parent, changes: [c] }];
-    const top = scanElements(c.markup).elements[0];
-    return [{ kind: "add", key: top?.key ?? "", tag: top?.tag ?? "", changes: [c] }];
-  });
+  }
+  return out;
+}
+
+/** Das Ersetzen eines Elements und jede weitere Handänderung an ihm (Attribut oder noch ein Ersetzen) werden EIN Eintrag: alle Einträge einer Handrunde gelten gegen den Ausgang,
+ *  dort gäbe `change` plus `remove` desselben Elements einen Widerspruch und das zweite `remove` verfehlte sein `expect`. Das Entfernen bleibt das des Ausgangs, der neue Inhalt kommt vom jetzigen Stand. */
+function foldReplaced(entries: DiffEntry[], fresh: DiffEntry, base: string, after: string | null): DiffEntry[] {
+  const same = entries.flatMap((x, k) => (x.key === fresh.key ? [k] : []));
+  const old = same.map((k) => entries[k]).find((x) => x.kind === "replace");
+  const baseTree = buildCanonTree(base);
+  const baseEl = scanElements(base).elements;
+  const bi = baseEl.findIndex((e) => e.key === fresh.key);
+  const remove = old !== undefined && old.kind === "replace" ? old.changes[0] : baseTree !== null && bi >= 0 ? ({ op: "remove", id: fresh.key, expect: canonNode(baseTree, bi) } as SvgChange) : null;
+  const add = fresh.kind === "replace" ? fresh.changes[1] : old !== undefined && old.kind === "replace" ? old.changes[1] : null;
+  if (remove === null || add === null || add.op !== "add") return [...entries, fresh];
+  let markup = add.markup;
+  if (fresh.kind === "attr" && after !== null) {
+    const el = scanElements(after).elements.find((e) => e.key === fresh.key);
+    if (el !== undefined) markup = after.slice(el.start, el.end);
+  }
+  const merged: DiffEntry = { kind: "replace", key: fresh.key, tag: fresh.tag, reason: "text", changes: [remove, { ...add, markup }] };
+  return entries.flatMap((x, k) => (k === same[0] ? [merged] : same.includes(k) ? [] : [x]));
 }
 
 const labelOfEntry = (e: DiffEntry): string => {
@@ -165,7 +193,14 @@ export function addHandChange(s: SvgSession, changes: SvgChange[], label: string
   const before = merge ? active.result : startFrom;
   const fresh = entriesFromChanges(before, changes);
   let entries: DiffEntry[] = merge && active.body.form === "list" ? [...active.body.entries] : [];
+  const afterFresh = applyChanges(before, changes);
   for (const e of fresh) {
+    // Ersetzen und jede weitere Änderung desselben Elements: ein Eintrag.
+    const touched = entries.some((x) => x.key === e.key);
+    if (touched && (e.kind === "replace" || entries.some((x) => x.key === e.key && x.kind === "replace"))) {
+      entries = foldReplaced(entries, e, startFrom, afterFresh.ok ? afterFresh.text : null);
+      continue;
+    }
     const i = e.kind === "attr" ? entries.findIndex((x) => x.kind === "attr" && x.key === e.key && x.attr === e.attr) : -1;
     if (i < 0) {
       entries.push(e);

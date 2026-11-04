@@ -116,6 +116,9 @@ export interface PanelSlots<R, S extends PanelSession<R> = PanelSession<R>> {
   /** Hinweise zum Text, auf dem die Sitzung steht (Bestand: kaputt, ohne Namen, Editor-Angaben), mit Knöpfen, die über `ctx` eine Regelrunde setzen oder einen Lauf starten.
    *  Wird bei jedem Zeichnen mit leerem `host` gerufen; `ctx.current()` sagt, ob das Zeichnen noch gilt (der Slot darf asynchron lesen). */
   notices?(host: HTMLElement, ctx: NoticeCtx<S>): void;
+  /** Die Felder unter der Vorschau (Zahlenfelder des gewählten Elements). Wird nach jedem Zeichnen der Vorschau mit leerem `host` gerufen; eine Eingabe läuft über `ctx.setSession`
+   *  und ist in einem Lauf oder beim Übernehmen gesperrt (`ctx.busy()`). */
+  renderFields?(host: HTMLElement, round: R | null, session: S, ctx: ChangesCtx<S>): void;
   extras?(host: HTMLElement): void;
   dispose?(): void;
 }
@@ -239,6 +242,7 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
   const previewWrap = panelEl.createDiv({ cls: "svg-studio-preview is-hidden" });
   const previewCaption = previewWrap.createDiv({ cls: "svg-studio-preview-caption" });
   const previewHost = previewWrap.createDiv({ cls: "svg-studio-preview-host" });
+  const fieldsHost = previewWrap.createDiv({ cls: "svg-studio-fields-host" });
   const changesHost = panelEl.createDiv({ cls: "svg-studio-changes" });
   const roundsEl = panelEl.createDiv({ cls: "svg-studio-rounds" });
   slots.extras?.(panelEl.createDiv({ cls: "svg-studio-extras" }));
@@ -435,6 +439,8 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     for (const b of Array.from(noticesHost.querySelectorAll("button"))) b.disabled = running || applying;
     // Die Prüfliste sperrt der Kit-Baustein selbst (gesperrte Karten bleiben gesperrt): hier nur zusperren, nie aufsperren.
     if (running || applying) for (const b of Array.from(changesHost.querySelectorAll("button"))) b.disabled = true;
+    // Die Zahlenfelder ebenso: Enter in einem Feld darf während eines Laufs oder Übernehmens keine zweite Änderung auslösen.
+    if (running || applying) for (const f of Array.from(fieldsHost.querySelectorAll<HTMLInputElement>("input"))) f.disabled = true;
     noEndpointEl.toggleClass("is-hidden", !noEndpoint);
     // Zwei getrennte Elemente; trifft beides zu, gewinnt „kein Endpunkt“.
     examplesEl.toggleClass("is-hidden", noEndpoint || running || n > 0 || session.target.kind !== "new");
@@ -464,11 +470,12 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     previewCaption.setText(round === null ? st.previewNone : st.previewOf(session.rounds.active + 1));
     previewHost.empty();
     slots.renderPreview(previewHost, round, round === null ? null : slots.roundText(round));
+    fieldsHost.empty();
+    slots.renderFields?.(fieldsHost, round, session, changesCtx());
   }
 
-  function renderChanges(): void {
-    changesHost.empty();
-    slots.renderChanges(changesHost, activeRound(), session, {
+  function changesCtx(): ChangesCtx<S> {
+    return {
       busy: () => slot.running() || applying,
       session: () => session,
       setSession(next) {
@@ -477,7 +484,12 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
         renderAll();
       },
       setStatus,
-    });
+    };
+  }
+
+  function renderChanges(): void {
+    changesHost.empty();
+    slots.renderChanges(changesHost, activeRound(), session, changesCtx());
   }
 
   let noticeTicket = 0;

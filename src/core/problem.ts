@@ -21,6 +21,14 @@ export const PROBLEM_CODES = [
   "nothing-to-apply", // Es gibt nichts anzuwenden.
   "text-unreadable", // [detail, offset]: Der Text ist nicht lesbar.
   "editor-unnamed", // [namen]: Elemente ohne id tragen Editor-Angaben.
+  "field-unknown", // [feld]: Das Element hat kein solches Zahlenfeld.
+  "field-readonly", // [feld, grund]: Das Feld ist schreibgeschützt; der Grund ist ein Code (`ReadonlyReason`), die Oberfläche übersetzt ihn.
+  "field-empty", // [feld]: Das Feld darf nicht leer sein.
+  "field-number", // [feld, eingabe]: Die Eingabe ist keine Zahl.
+  "field-negative", // [feld]: Das Feld nimmt keine negative Zahl.
+  "field-color", // [feld, eingabe]: Die Eingabe ist keine Farbe.
+  "field-text-invalid", // [feld]: Der Text enthält ein Zeichen, das XML nicht darstellen kann.
+  "field-no-center", // Die Mitte des Elements ließ sich nicht messen; ohne sie gibt es keine Drehung.
 ] as const;
 export type ProblemCode = (typeof PROBLEM_CODES)[number];
 

@@ -5,7 +5,7 @@
 // steht (Popout-Fenster!), nie der Text per `innerHTML` (Parser-Differenz HTML gegen XML, code-kit 0.45.0). Abgelehnter Text: nichts gezeigt, die Probleme
 // gehen zurück. Die Auswahlmarke ist ein Attribut mit zufälligem Namen am Element der Vorschau plus ein `<style>` im Shadow Root, nie eine Änderung am Quelltext.
 import type { SvgProblem, checkSvg } from "../../vendor/kit/svg-guard";
-import { drawingBox, userBox, type Box } from "./bbox";
+import { drawingBox, localBox, userBox, type Box } from "./bbox";
 
 export type { Box };
 
@@ -16,6 +16,8 @@ export interface PreviewHandle {
   /** Ausdehnung des Elements, `null` = die ganze Zeichnung. Ist das gewählte (geklickte) Element das mit dieser `id`, gilt es, nicht ein anderes mit derselben `id`.
    *  `null` auch, wo der Browser nicht messen kann oder nichts zu messen ist. */
   boxOf: (id: string | null) => Box | null;
+  /** Ausdehnung des Elements in seinem EIGENEN Koordinatenraum (vor jedem `transform`): die Mitte für `rotate(a cx cy)` (Zahlenfelder, Spec § 7.5). `null`, wo nichts zu messen ist. */
+  localBoxOf: (id: string) => Box | null;
   /** Trägt mehr als ein Element diese `id`? Dann ist die Auswahl über die `id` mehrdeutig (Plan 2, Review-Fokus 5). */
   isAmbiguous: (id: string) => boolean;
   /** Farbe der Vorschaufläche (Inline-Stil am Host); `null` = Obsidians Grund. */
@@ -120,6 +122,10 @@ svg { display: block; max-width: 100%; height: auto; }
       if (id === null) return drawingBox(svg);
       const el = marked !== null && marked.getAttribute("id") === id ? (marked as SVGGraphicsElement) : (withId(id)[0] ?? null);
       return el === null ? null : userBox(svg, el);
+    },
+    localBoxOf(id) {
+      const el = marked !== null && marked.getAttribute("id") === id ? (marked as SVGGraphicsElement) : (withId(id)[0] ?? null);
+      return el === null ? null : localBox(el);
     },
     isAmbiguous: (id) => withId(id).length > 1,
     setBackground(color) {

@@ -65,7 +65,7 @@ function normalizeLiteralBreaks(raw: string): string {
 }
 
 /** Löst &amp; &lt; &gt; &quot; &apos; &#n; &#xn; auf; alles andere bleibt wörtlich stehen. */
-function decodeEntities(raw: string): string {
+export function decodeEntities(raw: string): string {
   let amp = raw.indexOf("&");
   if (amp < 0) return raw;
   let out = "";

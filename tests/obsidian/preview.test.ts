@@ -407,6 +407,20 @@ describe("buildPreview: Maße", () => {
     expect(spy.mock.calls).toHaveLength(51);
   });
 
+  it("localBoxOf: getBBox im EIGENEN Raum des Elements, ohne Matrix von Wurzel und Element (die Drehmitte der Zahlenfelder); null ohne Maß, ohne Layout, bei unbekannter id", () => {
+    browser();
+    const m = make();
+    m.handle.show(SVG);
+    expect(m.handle.localBoxOf("wand")).toEqual({ x: 1, y: 2, width: 3, height: 4 }); // boxOf gäbe { x: 11, … }
+    expect(m.handle.boxOf("wand")).toEqual({ x: 11, y: 2, width: 3, height: 4 });
+    expect(m.handle.localBoxOf("gibtsnicht")).toBeNull();
+    expect(m.handle.localBoxOf("haus")).toEqual({ x: 0, y: 0, width: 50, height: 10 });
+    vi.spyOn(proto(), "getBBox").mockImplementation(() => ({ x: 0, y: 0, width: 0, height: 0 }));
+    expect(m.handle.localBoxOf("wand")).toBeNull();
+    vi.spyOn(proto(), "getBBox").mockImplementation(() => { throw new Error("kein Layout"); });
+    expect(m.handle.localBoxOf("wand")).toBeNull();
+  });
+
   it("wo der Browser nicht messen kann (Ausnahme, keine Matrix), kommt null und es wird nicht geworfen", () => {
     const m = make();
     m.handle.show(SVG);
