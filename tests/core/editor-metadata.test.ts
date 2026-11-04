@@ -28,7 +28,7 @@ describe("stripEditorMetadata", () => {
   it("das Ergebnis von applyChanges besteht checkSvg und trägt kein Editor-Zeichen mehr", () => {
     expect(checkSvg(PROBE).ok).toBe(false); // Ausgangslage: der Bereiniger lehnt den Bestand ab
     const r = stripEditorMetadata(PROBE);
-    if (!r.ok) throw new Error(r.problem);
+    if (!r.ok) throw new Error(r.problem.code);
     const out = applyChanges(PROBE, r.changes);
     expect(out.ok, out.ok ? "" : out.problems.join("; ")).toBe(true);
     if (!out.ok) return;
@@ -48,13 +48,13 @@ describe("stripEditorMetadata", () => {
     const t = PROBE.replace(`<sodipodi:namedview id="namedview1"`, `<sodipodi:namedview`);
     const r = stripEditorMetadata(t);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.problem).toContain("Namen vergeben");
+    expect(!r.ok && r.problem).toMatchObject({ code: "editor-unnamed", params: [expect.stringContaining("sodipodi:namedview")] });
   });
 
   it("ein Präfix, das noch gebraucht wird, behält seine Deklaration", () => {
     const t = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" inkscape:version="1"><title id="t1">x</title><desc id="d1" dc:foo="1">y</desc></svg>`;
     const r = stripEditorMetadata(t);
-    if (!r.ok) throw new Error(r.problem);
+    if (!r.ok) throw new Error(r.problem.code);
     const root = r.changes.find((c) => c.op === "change" && c.id === "#wurzel") as { attrs: Record<string, string | null> };
     expect(Object.keys(root.attrs).sort()).toEqual(["inkscape:version", "xmlns:inkscape"]);
   });

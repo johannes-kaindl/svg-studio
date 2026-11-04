@@ -15,7 +15,11 @@ export interface PreviewViewDeps {
 /** Die Auswahl überlebt ein Neuzeichnen mit demselben Text (Status-Wechsel zeichnen das Panel neu), nicht aber einen anderen Text. */
 export interface Selection { id: string | null; text: string | null }
 
-export interface PreviewView { dispose: () => void }
+export interface PreviewView {
+  dispose: () => void;
+  /** Das Element mit dieser `id` markieren und messen (die Prüfliste springt hierher); `null` hebt die Marke auf. */
+  select: (id: string | null) => void;
+}
 
 /** Wie viele Probleme der Bereiniger in der Anzeige genannt werden; alle stehen im Block-Fehler der Notiz. */
 const SHOWN_PROBLEMS = 3;
@@ -66,7 +70,7 @@ export function renderPreviewView(host: HTMLElement, text: string, d: PreviewVie
     err.createEl("p", { cls: "svg-studio-error-head", text: t("block.rejected") });
     const list = err.createEl("ul");
     for (const p of shown.problems.slice(0, SHOWN_PROBLEMS)) list.createEl("li", { text: t("block.problem", p.code, p.detail) });
-    return { dispose: () => undefined };
+    return { dispose: () => undefined, select: () => undefined };
   }
   preview.select(selection.id);
   paintMeasure();
@@ -75,5 +79,8 @@ export function renderPreviewView(host: HTMLElement, text: string, d: PreviewVie
   const RO = host.ownerDocument.defaultView?.ResizeObserver;
   const observer = RO === undefined ? null : new RO(() => { paintMeasure(); });
   observer?.observe(host);
-  return { dispose: () => { observer?.disconnect(); preview.destroy(); } };
+  return {
+    dispose: () => { observer?.disconnect(); preview.destroy(); },
+    select: (id) => { selection.id = id; preview.select(id); paintMeasure(); },
+  };
 }

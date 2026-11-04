@@ -8,8 +8,9 @@ import { changesFor, type DiffEntry } from "./diff";
 import { stripEditorMetadata } from "./editor-metadata";
 import { attr, scanElements } from "./elements";
 import { assignMissingIds } from "./format";
+import type { Problem } from "./problem";
 import type { Feedback } from "./protocol";
-import { acceptChain, baseTextForRefine, type PanelSession, type Step } from "../vendor/kit/panel-session";
+import { baseTextForRefine, chainOf, type PanelSession } from "../vendor/kit/panel-session";
 import { activeRound, pushRound } from "../vendor/kit/rounds";
 
 export type RoundArt = "create" | "prompt" | "hand" | "repair" | "names" | "cleanup";
@@ -32,8 +33,11 @@ export interface SvgSession extends PanelSession<SvgRound> {
   startText: string | null;
 }
 
-type Problem = { problem: string };
-const fail = (problem: string): { ok: false; problem: string } => ({ ok: false, problem });
+/** Ergebnis eines Schritts, der einen Text liefert: der Text oder ein Problem als Wert (Code und Parameter, nie ein Satz). */
+export type SvgStep = { ok: true; text: string } | { ok: false; problem: Problem };
+type Failed = { problem: Problem };
+const problem = (code: Problem["code"], ...params: Problem["params"]): Problem => ({ code, params });
+const fail = (code: Problem["code"], ...params: Problem["params"]): { ok: false; problem: Problem } => ({ ok: false, problem: problem(code, ...params) });
 
 /** Wert des Attributs im Text, `null` wenn das Element oder das Attribut fehlt (Vergleichsform). */
 function attrNow(text: string, key: string, name: string): string | null | undefined {
@@ -43,23 +47,40 @@ function attrNow(text: string, key: string, name: string): string | null | undef
   return v === null ? null : normalizeValue(v);
 }
 
+/** Vorabprüfung der beiden Fälle, die ein Übernehmen nach einer Handänderung wirklich trifft (Review-Fokus 2): ein Element, das die Liste anfasst, ist weg, oder eines, das sie
+ *  entfernen will, hat sich verändert. `applyChanges` meldet beides auch, aber auf Deutsch und als Satz; hier wird es ein Wert. Alles Übrige bleibt bei `applyChanges`. */
+function preflight(text: string, changes: readonly SvgChange[]): Problem | null {
+  const tree = buildCanonTree(text);
+  if (tree === null) return null; // nicht lesbar: das meldet applyChanges
+  const index = (key: string): number[] => tree.elements.flatMap((e, i) => (e.key === key ? [i] : []));
+  for (const c of changes) {
+    const keys = c.op === "add" ? [c.parent, c.after] : c.op === "move" ? [c.id, c.parent, c.after] : [c.id];
+    for (const k of keys) if (k !== null && index(k).length === 0) return problem("element-missing", k);
+    if (c.op === "remove" && c.expect !== undefined) {
+      const hits = index(c.id);
+      if (hits.length === 1 && canonNode(tree, hits[0]) !== c.expect) return problem("element-changed", c.id);
+    }
+  }
+  return null;
+}
+
 /** Die Runde auf den Text anwenden, der gerade gilt (`null`: es gibt keinen). */
-export function applyRound(text: string | null, r: SvgRound): Step {
+export function applyRound(text: string | null, r: SvgRound): SvgStep {
   const b = r.body;
   if (b.form === "whole") {
     if (b.decision === "accepted") return { ok: true, text: b.text };
-    return text === null ? fail("Es gibt keinen Text, auf dem die Runde aufsetzt.") : { ok: true, text };
+    return text === null ? fail("no-base") : { ok: true, text };
   }
-  if (text === null) return fail("Es gibt keinen Text, auf dem die Runde aufsetzt.");
+  if (text === null) return fail("no-base");
   if (b.form === "rule") {
     if (b.rule === "assign-ids") {
       const r2 = assignMissingIds(text);
-      return r2.issues !== undefined ? fail("Der Text ist nicht lesbar; Namen lassen sich nicht vergeben.") : { ok: true, text: r2.text };
+      return r2.issues !== undefined ? fail("names-unreadable") : { ok: true, text: r2.text };
     }
     const s = stripEditorMetadata(text);
-    if (!s.ok) return fail(s.problem);
+    if (!s.ok) return s;
     const out = applyChanges(text, s.changes);
-    return out.ok ? { ok: true, text: out.text } : fail(out.problems.join("; "));
+    return out.ok ? { ok: true, text: out.text } : fail("apply-failed", out.problems.join("; "));
   }
   const accepted = new Set(b.entries.flatMap((_, i) => (b.decisions[i]?.state === "accepted" ? [i] : [])));
   // Ein Attribut, das seit der Runde von Hand geändert wurde, wird nicht still überschrieben (Spec § 3: eine Handänderung geht nie verloren).
@@ -68,17 +89,24 @@ export function applyRound(text: string | null, r: SvgRound): Step {
     if (e.kind !== "attr") continue;
     const now = attrNow(text, e.key, e.attr);
     const was = e.from === null ? null : normalizeValue(e.from);
-    if (now !== undefined && now !== was) return fail(`„${e.key}“: ${e.attr} hat sich seit der Runde geändert (jetzt ${now === null ? "nicht gesetzt" : `„${now}“`}, die Runde ging von ${was === null ? "nicht gesetzt" : `„${was}“`} aus).`);
+    if (now !== undefined && now !== was) return fail("attr-changed", e.key, e.attr, now, was);
   }
   const changes = changesFor(b.entries, accepted);
   if (changes.length === 0) return { ok: true, text };
+  const gone = preflight(text, changes);
+  if (gone !== null) return { ok: false, problem: gone };
   const out = applyChanges(text, changes);
-  return out.ok ? { ok: true, text: out.text } : fail(out.problems.join("; "));
+  return out.ok ? { ok: true, text: out.text } : fail("apply-failed", out.problems.join("; "));
 }
 
 /** Der Text, auf dem eine Runde mit diesem `basedOn` aufsetzt: das Ergebnis der Vorgänger-Runde, sonst der Text beim Öffnen. */
 function baseOf(s: SvgSession, basedOn: number | null): string | null {
   return basedOn === null ? s.startText : (s.rounds.rounds[basedOn]?.result ?? null);
+}
+
+/** Der Text, auf dem diese Runde aufsetzt (das Ergebnis ihrer Vorgängerin, sonst der Text beim Öffnen); `null`: es gibt keinen (ein neues SVG). */
+export function baseTextOfRound(s: SvgSession, r: SvgRound): string | null {
+  return baseOf(s, r.basedOn);
 }
 
 /** Entscheidungen vervollständigen: ohne Angabe gilt ein Eintrag als angenommen (Plan 2, E3). */
@@ -87,9 +115,9 @@ function withDecisions(b: RoundBody): RoundBody {
   return { ...b, decisions: b.entries.map((_, i): Decision => b.decisions[i] ?? { state: "accepted" }) };
 }
 
-export function addRound(s: SvgSession, r: Omit<SvgRound, "result">): SvgSession | Problem {
+export function addRound(s: SvgSession, r: Omit<SvgRound, "result">): SvgSession | Failed {
   if (r.basedOn !== null && (!Number.isInteger(r.basedOn) || r.basedOn < 0 || r.basedOn >= s.rounds.rounds.length)) {
-    return { problem: `Die Runde baut auf Runde ${String(r.basedOn + 1)}, die es nicht gibt.` };
+    return { problem: problem("round-missing", r.basedOn + 1) };
   }
   const body = withDecisions(r.body);
   const step = applyRound(baseOf(s, r.basedOn), { ...r, body, result: "" });
@@ -126,13 +154,13 @@ const labelOfEntry = (e: DiffEntry): string => {
 };
 
 /** Handänderungen (Zahlenfelder, Knoten) sammeln sich in EINER Runde, solange sie die letzte und aktive ist; jede andere Runde schließt sie. */
-export function addHandChange(s: SvgSession, changes: SvgChange[], label: string): SvgSession | Problem {
+export function addHandChange(s: SvgSession, changes: SvgChange[], label: string): SvgSession | Failed {
   const active = activeRound(s.rounds);
   const last = s.rounds.rounds.length - 1;
   const merge = active !== null && active.art === "hand" && active.body.form === "list" && s.rounds.active === last;
   const basedOn = merge ? active.basedOn : s.rounds.active >= 0 ? s.rounds.active : null;
   const startFrom = baseOf(s, basedOn);
-  if (startFrom === null) return { problem: "Es gibt keinen Text, an dem sich etwas von Hand ändern ließe." };
+  if (startFrom === null) return { problem: problem("hand-no-text") };
   // Neue Einträge gegen den Text bis zur Runde davor (merge) bzw. die aktive (neue Runde) berechnen.
   const before = merge ? active.result : startFrom;
   const fresh = entriesFromChanges(before, changes);
@@ -161,19 +189,19 @@ export function addHandChange(s: SvgSession, changes: SvgChange[], label: string
 }
 
 /** Entscheidung zu einem Eintrag. Gesperrt, sobald eine andere Runde auf dieser aufbaut (deren Ergebnis hinge am alten Stand). */
-export function decide(s: SvgSession, round: number, entry: number, d: Decision): SvgSession | Problem {
+export function decide(s: SvgSession, round: number, entry: number, d: Decision): SvgSession | Failed {
   const r = s.rounds.rounds[round];
-  if (r === undefined) return { problem: `Es gibt keine Runde ${String(round + 1)}.` };
-  if (s.rounds.rounds.some((x) => x.basedOn === round)) return { problem: `Auf Runde ${String(round + 1)} baut schon eine weitere auf; ihre Entscheidungen sind gesperrt.` };
+  if (r === undefined) return { problem: problem("round-unknown", round + 1) };
+  if (s.rounds.rounds.some((x) => x.basedOn === round)) return { problem: problem("round-locked", round + 1) };
   let body: RoundBody;
   if (r.body.form === "list") {
-    if (!Number.isInteger(entry) || entry < 0 || entry >= r.body.entries.length) return { problem: `Die Runde hat keinen Eintrag ${String(entry + 1)}.` };
+    if (!Number.isInteger(entry) || entry < 0 || entry >= r.body.entries.length) return { problem: problem("entry-unknown", entry + 1) };
     body = { ...r.body, decisions: r.body.decisions.map((x, i) => (i === entry ? d : x)) };
   } else if (r.body.form === "whole") {
-    if (entry !== 0) return { problem: "Die Runde hat nur einen Eintrag." };
+    if (entry !== 0) return { problem: problem("entry-single") };
     body = { ...r.body, decision: d.state };
   } else {
-    return { problem: "Diese Runde hat keine Einträge, über die sich einzeln entscheiden ließe." };
+    return { problem: problem("entry-none") };
   }
   const step = applyRound(baseOf(s, r.basedOn), { ...r, body });
   if (!step.ok) return { problem: step.problem };
@@ -215,21 +243,33 @@ function sameNaming(now: Map<string, string> | null, then: Map<string, string> |
  *  - „Namen vergeben“ mit einer Folgerunde: deren Einträge nennen die vergebenen Namen, und die leitet die Regel auf dem Text von JETZT ab; ein Element ohne Namen mehr
  *    oder weniger davor verschöbe die Namen auf andere Elemente. Als letzte Runde der Kette bleibt die Regel frei (ein neues Element bekommt auch einen Namen).
  *  Einträge von Runden mit Regel `strip-editor-metadata` hängen an ids, nicht an Nummern: dort genügt die Neuableitung. */
-function applyChained(s: SvgSession, text: string | null, r: SvgRound, index: number): Step {
+function applyChained(s: SvgSession, text: string | null, r: SvgRound, index: number): SvgStep {
   const base = baseOf(s, r.basedOn);
   const b = r.body;
   if (b.form === "whole" && b.decision === "accepted" && text !== null && base !== null && !sameStand(text, base)) {
-    return fail("Das Ziel hat sich seit der Runde geändert; die Runde ersetzt das ganze Bild.");
+    return fail("target-changed");
   }
   if (b.form === "rule" && b.rule === "assign-ids" && index !== s.rounds.active && text !== null && base !== null && !sameStand(text, base)) {
-    if (!sameNaming(nameAssignment(text), nameAssignment(base))) return fail("Die Elemente ohne Namen haben sich seit der Runde geändert; bitte neu Namen vergeben.");
+    if (!sameNaming(nameAssignment(text), nameAssignment(base))) return fail("names-changed");
   }
   return applyRound(text, r);
 }
 
 /** Der Text, den Übernehmen schreibt: die angenommenen Einträge aller Runden bis zur aktiven, in Reihenfolge, auf den Text, der jetzt gilt. */
-export function acceptText(s: SvgSession, current: string | null): Step {
-  return acceptChain(s.rounds, current, { basedOnOf: (r) => r.basedOn, applyRound: (text, r, index) => applyChained(s, text, r, index) });
+export function acceptText(s: SvgSession, current: string | null): SvgStep {
+  // Die Kette der Runden kommt vom Kit (`chainOf`); die Schleife ist eigen, weil das Kit-`acceptChain` nur Zeichenketten durchreicht und „round n:“ englisch voranstellt.
+  const resolved = chainOf(s.rounds, (r) => r.basedOn);
+  if (!resolved.ok) return fail("chain-broken");
+  if (resolved.chain.length === 0) return fail("nothing-to-apply");
+  let text: string | null = current;
+  for (const index of resolved.chain) {
+    const round = s.rounds.rounds[index];
+    if (round === undefined) return fail("chain-broken");
+    const step = applyChained(s, text, round, index);
+    if (!step.ok) return { ok: false, problem: { ...step.problem, round: index + 1 } };
+    text = step.text;
+  }
+  return text === null ? fail("nothing-to-apply") : { ok: true, text };
 }
 
 /** Der Text, auf dem die nächste Verfeinerung aufsetzt: der der aktiven Runde (nur Angenommenes), sonst der aktuelle. */

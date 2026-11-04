@@ -35,7 +35,7 @@ export type DiffEntry =
   | { kind: "attr"; key: string; tag: string; attr: string; from: string | null; to: string | null; changes: SvgChange[] }
   | { kind: "add"; key: string; tag: string; changes: SvgChange[] }
   | { kind: "remove"; key: string; tag: string; changes: SvgChange[] } // remove mit expect
-  | { kind: "move"; key: string; tag: string; parentKey: string | null; changes: SvgChange[] }
+  | { kind: "move"; key: string; tag: string; parentKey: string | null; /** Elternwechsel (sonst nur die Stapelreihenfolge). */ reparent?: boolean; /** Ohne Elternwechsel: weiter vorn (später im Text, über den Geschwistern) statt hinten. */ front?: boolean; changes: SvgChange[] }
   | { kind: "replace"; key: string; tag: string; reason: ReplaceReason; changes: SvgChange[] }; // remove mit expect + add, nur ganz
 export type DiffResult = { decomposable: true; entries: DiffEntry[] } | { decomposable: false; why: string };
 
@@ -220,7 +220,7 @@ export function diffSvg(baseText: string, answerText: string): DiffResult {
   const removeChange = (b: number): SvgChange => ({ op: "remove", id: use(B.elements[b]), expect: canonNode(B, b) });
 
   // --- Einheiten in Antwortreihenfolge (Wurzeln der Einfügungen und Ersetzungen) und die Entfernungen des Ausgangs; gekoppelte werden unten zusammengelegt.
-  interface Unit { pos: number; key: string; tag: string; reason: ReplaceReason | null; kind: "add" | "remove" | "replace" | "move"; changes: SvgChange[]; freed: boolean; wrap: boolean; parentKey?: string | null }
+  interface Unit { pos: number; key: string; tag: string; reason: ReplaceReason | null; kind: "add" | "remove" | "replace" | "move"; changes: SvgChange[]; freed: boolean; wrap: boolean; parentKey?: string | null; reparent?: boolean; front?: boolean }
   const units: Unit[] = [];
   const unitOfRootA = new Map<number, number>();
   const unitOfRemoveB = new Map<number, number>();
@@ -270,7 +270,17 @@ export function diffSvg(baseText: string, answerText: string): DiffResult {
       for (const [name, v] of mb) if (!ma.has(name)) attrEntry(name, v, null);
       if (movedAny[a]) {
         const pk = parentKeyOf(a);
-        unit({ kind: "move", reason: null, wrap: false, freed: false, parentKey: pk, changes: [{ op: "move", id: use(eb), parent: pk, after: anchorKey(a) }] });
+        const reparent = aToB[A.parent[a]] !== B.parent[b];
+        let front: boolean | undefined;
+        if (!reparent) {
+          // Rang unter den Geschwistern, die in beiden Texten unter demselben Elternknoten stehen: später im Text heißt weiter vorn gezeichnet.
+          const pa = A.parent[a];
+          const common = (k: number): boolean => aToB[k] >= 0 && B.parent[aToB[k]] === aToB[pa];
+          const rankA = A.kids[pa].filter(common).indexOf(a);
+          const rankB = B.kids[aToB[pa]].filter((k) => bToA[k] >= 0 && A.parent[bToA[k]] === pa).indexOf(b);
+          front = rankA > rankB;
+        }
+        unit({ kind: "move", reason: null, wrap: false, freed: false, parentKey: pk, reparent, ...(front === undefined ? {} : { front }), changes: [{ op: "move", id: use(eb), parent: pk, after: anchorKey(a) }] });
       }
     }
   }
@@ -337,7 +347,7 @@ export function diffSvg(baseText: string, answerText: string): DiffResult {
     const changes = ordered.flatMap((u) => u.changes);
     if (us.length === 1) {
       if (first.kind === "move") {
-        built.push({ pos: first.pos, entry: { kind: "move", key: first.key, tag: first.tag, parentKey: first.parentKey ?? null, changes } });
+        built.push({ pos: first.pos, entry: { kind: "move", key: first.key, tag: first.tag, parentKey: first.parentKey ?? null, ...(first.reparent === undefined ? {} : { reparent: first.reparent }), ...(first.front === undefined ? {} : { front: first.front }), changes } });
         continue;
       }
       built.push({ pos: first.pos, entry: first.kind === "replace" ? { kind: "replace", key: first.key, tag: first.tag, reason: first.reason ?? "text", changes } : { kind: first.kind, key: first.key, tag: first.tag, changes } });

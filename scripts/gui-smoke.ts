@@ -236,7 +236,7 @@ const SNAP_JS = `
       text: ((n.querySelector(".svg-studio-notice-text") || {}).textContent || "").trim(),
       button: ((n.querySelector("button") || {}).textContent || "").trim(),
     })),
-    changes: Array.from(root.querySelectorAll(".svg-studio-change-list li")).map((e) => e.textContent),
+    changes: Array.from(root.querySelectorAll(".svg-studio-changes .okit-redline")).map((e) => e.textContent),
     error: txt(".svg-studio-error"),
   };
 `;

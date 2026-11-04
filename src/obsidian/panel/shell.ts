@@ -104,8 +104,8 @@ export interface PanelSlots<R, S extends PanelSession<R> = PanelSession<R>> {
   /** Eine leere Sitzung für ein Ziel (beim Start, bei Verwerfen und Neu). */
   fresh(target: Target): S;
   renderPreview(host: HTMLElement, round: R | null, text: string | null): void;
-  /** Die Änderungen der aktiven Runde; die Sitzung gibt den Ausgang, gegen den eine Regelrunde ihre Einträge zeigt. */
-  renderChanges(host: HTMLElement, round: R | null, session: S): void;
+  /** Die Änderungen der aktiven Runde (die Prüfliste); die Sitzung gibt den Ausgang, gegen den eine Regelrunde ihre Einträge zeigt, `ctx` lässt eine Entscheidung die Sitzung ersetzen. */
+  renderChanges(host: HTMLElement, round: R | null, session: S, ctx: ChangesCtx<S>): void;
   roundLabel(round: R, index: number): string;
   roundMeta(round: R): string;
   /** Der Text nach dieser Runde (Vorschau). */
@@ -133,6 +133,9 @@ export interface NoticeCtx<S> {
   run: (instruction: string, exec: (call: RunCall<S>) => Promise<RunResult<S>>) => void;
   setStatus: (phase: StatusPhase, text: string) => void;
 }
+
+/** Was die Änderungen am Panel tun dürfen: den Zustand lesen und eine Entscheidung (neue Sitzung) zurückgeben. */
+export type ChangesCtx<S> = Pick<NoticeCtx<S>, "busy" | "session" | "setSession" | "setStatus">;
 
 export interface PanelShell<S> {
   setStatus(phase: StatusPhase, text: string): void;
@@ -430,6 +433,8 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
     discardBtn.disabled = n === 0 || running || applying;
     newBtn.disabled = running || applying;
     for (const b of Array.from(noticesHost.querySelectorAll("button"))) b.disabled = running || applying;
+    // Die Prüfliste sperrt der Kit-Baustein selbst (gesperrte Karten bleiben gesperrt): hier nur zusperren, nie aufsperren.
+    if (running || applying) for (const b of Array.from(changesHost.querySelectorAll("button"))) b.disabled = true;
     noEndpointEl.toggleClass("is-hidden", !noEndpoint);
     // Zwei getrennte Elemente; trifft beides zu, gewinnt „kein Endpunkt“.
     examplesEl.toggleClass("is-hidden", noEndpoint || running || n > 0 || session.target.kind !== "new");
@@ -463,7 +468,16 @@ export function buildPanelShell<R, S extends PanelSession<R>>(root: HTMLElement,
 
   function renderChanges(): void {
     changesHost.empty();
-    slots.renderChanges(changesHost, activeRound(), session);
+    slots.renderChanges(changesHost, activeRound(), session, {
+      busy: () => slot.running() || applying,
+      session: () => session,
+      setSession(next) {
+        if (destroyed || slot.running() || applying) return;
+        session = next;
+        renderAll();
+      },
+      setStatus,
+    });
   }
 
   let noticeTicket = 0;

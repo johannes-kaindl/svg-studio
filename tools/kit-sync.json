@@ -11,7 +11,7 @@
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure",
       "modules": ["safe-markdown", "i18n", "answer-retry", "llm-answer", "think-splitter", "sha256", "data-url", "slug", { "name": "measured-quality", "ref": "0.55.0" },
-        { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "rounds", "ref": "0.54.0" }, { "name": "run-slot", "ref": "0.54.0" }, { "name": "rotation", "ref": "0.54.0" }, { "name": "css-color", "ref": "0.56.0" }]
+        { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "rounds", "ref": "0.54.0" }, { "name": "run-slot", "ref": "0.54.0" }, { "name": "rotation", "ref": "0.54.0" }, { "name": "css-color", "ref": "0.56.0" }, { "name": "word-diff", "ref": "0.55.0" }]
     },
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure", "ref": "0.55.0",

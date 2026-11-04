@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canonDocument } from "../../src/core/canon";
 import { diffSvg, type DiffEntry } from "../../src/core/diff";
+import type { Problem } from "../../src/core/problem";
 import { acceptText, addHandChange, addRound, applyRound, canRefine, decide, feedbackOf, refineBaseText, type SvgRound, type SvgSession } from "../../src/core/session";
 import { EMPTY_ROUNDS, selectRound } from "../../src/vendor/kit/rounds";
 
@@ -12,11 +13,11 @@ const open = (startText: string | null): SvgSession => ({
   rounds: EMPTY_ROUNDS,
   startText,
 });
-const ok = (r: SvgSession | { problem: string }): SvgSession => {
-  if ("problem" in r) throw new Error(`erwartet Sitzung, bekam: ${r.problem}`);
+const ok = (r: SvgSession | { problem: Problem }): SvgSession => {
+  if ("problem" in r) throw new Error(`erwartet Sitzung, bekam: ${r.problem.code}`);
   return r;
 };
-const problem = (r: SvgSession | { problem: string }): string => {
+const problem = (r: SvgSession | { problem: Problem }): Problem => {
   if (!("problem" in r)) throw new Error("erwartet Problem");
   return r.problem;
 };
@@ -133,7 +134,7 @@ describe("Rundenmodell: Handänderungen", () => {
   });
 
   it("ohne Text keine Handänderung", () => {
-    expect(problem(addHandChange(open(null), [{ op: "change", id: "a", attrs: { x: "1" } }], "Von Hand"))).toContain("keinen Text");
+    expect(problem(addHandChange(open(null), [{ op: "change", id: "a", attrs: { x: "1" } }], "Von Hand"))).toMatchObject({ code: "hand-no-text", params: [] });
   });
 });
 
@@ -141,7 +142,7 @@ describe("Rundenmodell: Sperren und Brüche", () => {
   it("Entscheidung in einer Runde mit Nachfolger → Problem", () => {
     let s = ok(addRound(open(BASE), prompt(BASE, BASE.replace(`r="40"`, `r="50"`))));
     s = ok(addRound(s, prompt(s.rounds.rounds[0].result, s.rounds.rounds[0].result.replace(`x="80"`, `x="81"`), 0)));
-    expect(problem(decide(s, 0, 0, { state: "rejected" }))).toContain("gesperrt");
+    expect(problem(decide(s, 0, 0, { state: "rejected" }))).toEqual({ code: "round-locked", params: [1] });
     expect(decide(s, 1, 0, { state: "rejected" })).not.toHaveProperty("problem");
   });
 
@@ -152,15 +153,14 @@ describe("Rundenmodell: Sperren und Brüche", () => {
     const hand = BASE.replace(`x="80"`, `x="99"`);
     const r = acceptText(s, hand);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.problem).toContain("hat sich seit der Runde geändert");
-    expect(!r.ok && r.problem).toMatch(/^round 1: /);
+    expect(!r.ok && r.problem).toEqual({ code: "element-changed", params: ["tuer"], round: 1 });
   });
 
   it("Attribut seither von Hand geändert → nicht still überschrieben", () => {
     const s = ok(addRound(open(BASE), prompt(BASE, BASE.replace(`r="40"`, `r="60"`))));
     const r = acceptText(s, BASE.replace(`r="40"`, `r="50"`));
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.problem).toContain("hat sich seit der Runde geändert");
+    expect(!r.ok && r.problem).toEqual({ code: "attr-changed", params: ["mond", "r", "50", "40"], round: 1 });
   });
 
   it("das Element ist weg: acceptText ok:false mit Meldung statt Wurf", () => {
@@ -170,7 +170,7 @@ describe("Rundenmodell: Sperren und Brüche", () => {
 
   it("kaputte Kette → Problem", () => {
     const s = ok(addRound(open(BASE), prompt(BASE, BASE.replace(`r="40"`, `r="60"`))));
-    expect(problem(addRound(s, prompt(BASE, BASE.replace(`r="40"`, `r="61"`), 5)))).toContain("Runde 6");
+    expect(problem(addRound(s, prompt(BASE, BASE.replace(`r="40"`, `r="61"`), 5)))).toEqual({ code: "round-missing", params: [6] });
   });
 });
 
@@ -237,7 +237,7 @@ describe("acceptText: ein ganzes Bild ersetzt nur den Ausgang, den die Runde kan
     const hand = BASE.replace("</svg>", `  <text id="notiz">Wichtig</text>\n</svg>`);
     const r = acceptText(whole(BASE, neu), hand);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.problem).toMatch(/^round 1: Das Ziel hat sich seit der Runde geändert/);
+    expect(!r.ok && r.problem).toEqual({ code: "target-changed", params: [], round: 1 });
   });
 
   it("dasselbe als Reparatur eines unlesbaren Ausgangs (roher Vergleich, weil kanonisch nichts zu vergleichen ist)", () => {
@@ -268,7 +268,7 @@ describe("acceptText: ein ganzes Bild ersetzt nur den Ausgang, den die Runde kan
     expect(after).not.toBe(BASE);
     const r = acceptText(s, BASE.replace(`x="1"`, `x="9"`));
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.problem).toMatch(/^round 2:/);
+    expect(!r.ok && r.problem).toMatchObject({ code: "target-changed", round: 2 });
   });
 });
 
@@ -289,7 +289,7 @@ describe("acceptText: „Namen vergeben“ mit Folgerunde (Review C4, B2)", () =
     const hand = UNNAMED.replace(`  <rect x="1"/>`, `  <rect x="0" data-hand="ja"/>\n  <rect x="1"/>`);
     const r = acceptText(withFollow(), hand);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.problem).toMatch(/^round 1: Die Elemente ohne Namen haben sich seit der Runde geändert/);
+    expect(!r.ok && r.problem).toEqual({ code: "names-changed", params: [], round: 1 });
   });
 
   it("ein Element ohne id HINTER den vergebenen Namen (am Ende ergänzt) verschiebt nichts: das zweite Rechteck wird rot, das neue bekommt rect-3", () => {
@@ -302,7 +302,7 @@ describe("acceptText: „Namen vergeben“ mit Folgerunde (Review C4, B2)", () =
     const hand = UNNAMED.replace(`  <rect x="2"/>\n`, "");
     const r = acceptText(withFollow(), hand);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.problem).toMatch(/^round 1: Die Elemente ohne Namen haben sich seit der Runde geändert/);
+    expect(!r.ok && r.problem).toEqual({ code: "names-changed", params: [], round: 1 });
   });
 
   it("eine Handänderung an anderer Stelle (benannte Elemente) ist kein Grund abzubrechen", () => {
@@ -317,7 +317,7 @@ describe("acceptText: „Namen vergeben“ mit Folgerunde (Review C4, B2)", () =
   it("der Text ist inzwischen nicht mehr lesbar → Abbruch mit Meldung, kein Wurf", () => {
     const r = acceptText(withFollow(), `<svg xmlns="http://www.w3.org/2000/svg"><rect x="1"/><g></svg>`);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.problem).toMatch(/^round 1: Die Elemente ohne Namen haben sich seit der Runde geändert/);
+    expect(!r.ok && r.problem).toEqual({ code: "names-changed", params: [], round: 1 });
   });
 
   it("als LETZTE Runde darf auch ein Element ohne id VOR den anderen stehen: die Regel benennt auf dem Text von JETZT, es hängt nichts an den alten Namen", () => {

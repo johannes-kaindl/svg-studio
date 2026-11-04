@@ -3,6 +3,7 @@
 // der Kit-Vertrag „ablehnen statt still entfernen“ bleibt. Diese Regel entfernt es ausdrücklich, ohne Modell, als Änderungsliste, die der Nutzer als
 // Diff sieht und annimmt. Pure.
 import type { SvgChange } from "./changes";
+import type { Problem } from "./problem";
 import { scanElements, type SvgElement } from "./elements";
 
 /** Präfixe der Editor-Namensräume (Inkrementweise Liste, ergänzt nur nach Fund in einem echten Bestand). */
@@ -14,10 +15,10 @@ const prefixOf = (name: string): string | null => {
   return i > 0 ? name.slice(0, i) : null;
 };
 
-export function stripEditorMetadata(text: string): { ok: true; changes: SvgChange[] } | { ok: false; problem: string } {
+export function stripEditorMetadata(text: string): { ok: true; changes: SvgChange[] } | { ok: false; problem: Problem } {
   const scan = scanElements(text);
   const syntax = scan.issues.find((i) => i.kind === "syntax");
-  if (syntax !== undefined) return { ok: false, problem: `Der Text ist nicht lesbar: ${syntax.message} (Offset ${syntax.offset}).` };
+  if (syntax !== undefined) return { ok: false, problem: { code: "text-unreadable", params: [syntax.message, syntax.offset] } };
   const els = scan.elements;
   const rawName = (e: SvgElement): string => {
     let k = e.start + 1;
@@ -89,7 +90,7 @@ export function stripEditorMetadata(text: string): { ok: true; changes: SvgChang
     else changes.push({ op: "change", id: e.key, attrs });
   });
   if (unnamed.length > 0) {
-    return { ok: false, problem: `Elemente ohne id tragen Editor-Angaben (${[...new Set(unnamed)].join(", ")}): erst Namen vergeben, dann entfernen.` };
+    return { ok: false, problem: { code: "editor-unnamed", params: [[...new Set(unnamed)].join(", ")] } };
   }
   return { ok: true, changes: [...removes, ...changes] };
 }

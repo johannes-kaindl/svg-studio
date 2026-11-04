@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Problem } from "../../src/core/problem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/vendor/kit-obsidian/choice-modal", () => ({ askChoice: vi.fn() }));
@@ -28,8 +29,8 @@ const FILE: Target = { kind: "file", path: "Anhänge/logo.svg", label: "logo.svg
 const NOTE = ["intro", "", "```svg-studio", BASE.trimEnd(), "```", "", "outro"].join("\n");
 const BLOCK: Target = { kind: "block", path: "n.md", lineStart: 2, lineEnd: 7, label: "n:3", body: BASE.trimEnd() };
 
-const ok = <T>(r: T | { problem: string }): T => {
-  if (typeof r === "object" && r !== null && "problem" in r) throw new Error((r as { problem: string }).problem);
+const ok = <T>(r: T | { problem: Problem }): T => {
+  if (typeof r === "object" && r !== null && "problem" in r) throw new Error((r as { problem: Problem }).problem.code);
   return r as T;
 };
 /** Ein neues SVG: eine `create`-Runde. */
@@ -254,7 +255,7 @@ describe("Übernehmen: bestehende Datei", () => {
     const t = acceptSetup({ "Anhänge/logo.svg": BASE.replace(`r="40"`, `r="50"`) });
     const r = await run(t.env, refineSession(FILE));
     expect(r.ok).toBe(false);
-    expect(r.message).toMatch(/mond.*r hat sich seit der Runde geändert.*; nothing was written\.$/);
+    expect(r.message).toMatch(/^Round 1: mond: r has changed since the round \(now 50, the round assumed 40\); nothing was written\.$/);
     expect(t.store["Anhänge/logo.svg"]).toContain(`r="50"`);
     expect(t.order).toEqual([]);
   });
@@ -547,7 +548,7 @@ describe("Übernehmen: eine Handänderung geht nie verloren (Review C4, B1)", ()
     const t = acceptSetup({ "Anhänge/logo.svg": hand });
     const r = await run(t.env, repair());
     expect(r.ok).toBe(false);
-    expect(r.message).toContain("Das Ziel hat sich seit der Runde geändert");
+    expect(r.message).toContain("The target has changed since the round");
     expect(t.store["Anhänge/logo.svg"]).toBe(hand);
     expect(t.order).toEqual([]);
   });
@@ -582,7 +583,7 @@ describe("Übernehmen: Namen vergeben mit Folgerunde (Review C4, B2)", () => {
     const t = acceptSetup({ "Anhänge/logo.svg": hand });
     const r = await run(t.env, session());
     expect(r.ok).toBe(false);
-    expect(r.message).toContain("Die Elemente ohne Namen haben sich seit der Runde geändert");
+    expect(r.message).toContain("The elements without names have changed since the round");
     expect(t.store["Anhänge/logo.svg"]).toBe(hand);
     expect(t.order).toEqual([]);
   });

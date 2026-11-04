@@ -5,12 +5,12 @@ import { applyChanges } from "../../core/changes";
 import { stripEditorMetadata } from "../../core/editor-metadata";
 import { scanElements } from "../../core/elements";
 import { canRefine } from "../../core/session";
-import { t } from "../../i18n/strings";
+import { problemText, t } from "../../i18n/strings";
 import type { SvgProblem, checkSvg } from "../../vendor/kit/svg-guard";
 
 export interface BestandProblems {
-  /** Das Parserproblem, wenn der Text nicht wohlgeformt ist (Wortlaut wie in `protocol.ts`, geht so an das Modell), sonst `null`. */
-  parse: string | null;
+  /** Das Parserproblem, wenn der Text nicht wohlgeformt ist, sonst `null`. Als Wert: der Satz für den Nutzer entsteht in der Oberfläche (`problemText`), der für das Modell in `repairProblem`. */
+  parse: { message: string; offset: number } | null;
   /** Die Befunde des Bereinigers (leer, wenn er annimmt oder der Text nicht wohlgeformt ist). */
   guard: SvgProblem[];
   /** Elemente ohne `id`, gezählt auf dem Text, der nach „Editor-Angaben entfernen“ gälte (deren Kinder gehen mit). */
@@ -22,7 +22,7 @@ export interface BestandProblems {
 export function bestandProblems(text: string, guard: typeof checkSvg): BestandProblems {
   const syntax = scanElements(text).issues.find((i) => i.kind === "syntax");
   if (syntax !== undefined) {
-    return { parse: `Das SVG ist nicht wohlgeformt: ${syntax.message} (Offset ${String(syntax.offset)}).`, guard: [], unnamed: 0, editorMetadata: false };
+    return { parse: { message: syntax.message, offset: syntax.offset }, guard: [], unnamed: 0, editorMetadata: false };
   }
   const g = guard(text);
   // `stripEditorMetadata` scheitert bei lesbarem Text nur, wenn Elemente ohne id Editor-Angaben tragen: auch das sind Editor-Angaben.
@@ -39,7 +39,7 @@ export function bestandProblems(text: string, guard: typeof checkSvg): BestandPr
 
 /** Der Befund, mit dem die Reparatur ans Modell geht: das Parserproblem, sonst die Befunde des Bereinigers (Wortlaut wie in `protocol.ts`). */
 export function repairProblem(b: BestandProblems): string {
-  if (b.parse !== null) return b.parse;
+  if (b.parse !== null) return `Das SVG ist nicht wohlgeformt: ${b.parse.message} (Offset ${String(b.parse.offset)}).`;
   return `Der Bereiniger lehnt ab: ${b.guard.map((p) => `${p.code}: ${p.detail}`).join("; ")}.`;
 }
 
@@ -66,7 +66,7 @@ export function renderBestandNotice(host: HTMLElement, b: BestandProblems, a: Be
   if (b.unnamed > 0) card(plain(t("bestand.unnamed", b.unnamed)), t("bestand.names"), t("bestand.names.hint"), a.names);
   if (b.editorMetadata) card(plain(t("bestand.editor")), t("bestand.cleanup"), t("bestand.cleanup.hint"), a.cleanup);
   if (b.parse !== null) {
-    card(plain(t("bestand.unusable", b.parse)), t("bestand.repair"), t("bestand.repair.hint"), a.repair);
+    card(plain(t("bestand.unusable", problemText({ code: "text-unreadable", params: [b.parse.message, b.parse.offset] }))), t("bestand.repair"), t("bestand.repair.hint"), a.repair);
   } else if (b.guard.length > 0) {
     card((box) => {
       box.createDiv({ text: t("bestand.unusableHead") });

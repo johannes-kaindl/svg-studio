@@ -1,10 +1,12 @@
 // Der Lauf des Panels (Spec § 8 „In der Runde“): Erzeugen und Verfeinern mit Rückfrage bei ungültiger Antwort, dann eine Runde im Rundenmodell.
 // Formatgebunden (SVG); der Kern `shell.ts` ruft ihn über den Slot `run`. Sampling (Modus `transform`, Temperatur 0,2, Denken aus, `max_tokens` 16384) setzt
 // die Verbindung in `main.ts`; hier steht nur, was zum Protokoll gehört.
+import { describeEntry } from "../../core/diff-labels";
 import { buildCreateMessages, buildRefineMessages, buildRepairMessages, RETRY_INSTRUCTION, validateCreate, validateRefine, validateRepair, type GuardFn } from "../../core/protocol";
 import { svgFailureHint } from "../../core/quality";
-import { addRound, canRefine, refineBaseText, type SvgRound, type SvgSession } from "../../core/session";
-import { getLang, qualityTexts, t } from "../../i18n/strings";
+import { addRound, canRefine, feedbackOf, refineBaseText, type SvgRound, type SvgSession } from "../../core/session";
+import { getLang, labelTexts, problemText, qualityTexts, t } from "../../i18n/strings";
+import { activeRound } from "../../vendor/kit/rounds";
 import { askUntilValid, type AskUntilValidResult, type Verdict } from "../../vendor/kit/answer-retry";
 import { taskKind, type Target } from "../../vendor/kit/panel-session";
 import { checkSvg } from "../../vendor/kit/svg-guard";
@@ -64,15 +66,19 @@ export async function runSvgPrompt(call: RunCall<SvgSession>, d: SvgRunDeps): Pr
       const res = await askUntilValid(ask, (raw) => wrap(validateCreate(raw, { guard, prompt: instruction })), opts(buildCreateMessages(instruction)));
       if (!res.ok) return failed(res, call, task, d);
       const added = addRound(start, { art: "create", instruction, basedOn: null, body: { form: "whole", text: res.value.svg, decision: "accepted" } });
-      return "problem" in added ? error(t("run.noRound", added.problem)) : { ok: true, session: added, message: t("run.doneCreate") };
+      return "problem" in added ? error(t("run.noRound", problemText(added.problem))) : { ok: true, session: added, message: t("run.doneCreate") };
     }
-    const res = await askUntilValid(ask, (raw) => wrap(validateRefine(raw, { guard, base })), opts(buildRefineMessages(base, instruction)));
+    // Rückmeldungen der Runde, auf der diese aufbaut (die aktive): Ablehnungen und Kommentare, unter dem Titel ihrer Karte. Ohne sie bleibt die gemessene Vorlage unberührt (Entscheidung 16).
+    const last = activeRound(session.rounds);
+    const texts = labelTexts();
+    const feedback = last === null ? [] : feedbackOf(last, (e) => describeEntry(e, texts).title);
+    const res = await askUntilValid(ask, (raw) => wrap(validateRefine(raw, { guard, base })), opts(buildRefineMessages(base, instruction, feedback)));
     if (!res.ok) return failed(res, call, task, d);
     const diff = res.value.diff;
     // Zerlegbar: die Einträge der Prüfliste; sonst ein Eintrag „Ganzes Bild ersetzt“ (Spec Nr. 12), nie still verloren.
     const body: SvgRound["body"] = diff.decomposable ? { form: "list", entries: diff.entries, decisions: [] } : { form: "whole", text: res.value.svg, decision: "accepted" };
     const added = addRound(start, { art: "prompt", instruction, basedOn: start.rounds.active >= 0 ? start.rounds.active : null, body });
-    return "problem" in added ? error(t("run.noRound", added.problem)) : { ok: true, session: added, message: t("run.doneRefine") };
+    return "problem" in added ? error(t("run.noRound", problemText(added.problem))) : { ok: true, session: added, message: t("run.doneRefine") };
   } catch (e) {
     return failedRun(e, call);
   }
@@ -126,7 +132,7 @@ export async function runSvgRepair(call: RunCall<SvgSession>, d: SvgRunDeps, o: 
     const diff = res.value.diff;
     const body: SvgRound["body"] = diff.decomposable ? { form: "list", entries: diff.entries, decisions: [] } : { form: "whole", text: res.value.svg, decision: "accepted" };
     const added = addRound(start, { art: "repair", instruction: o.instruction, basedOn: start.rounds.active >= 0 ? start.rounds.active : null, body });
-    return "problem" in added ? error(t("run.noRound", added.problem)) : { ok: true, session: added, message: t("run.doneRepair") };
+    return "problem" in added ? error(t("run.noRound", problemText(added.problem))) : { ok: true, session: added, message: t("run.doneRepair") };
   } catch (e) {
     return failedRun(e, call);
   }

@@ -69,7 +69,7 @@ function refineUser(svg: string, instruction: string): string {
 /** Verfeinern: die gemessene Vorlage; nur wenn es Rückmeldungen zur letzten Runde gibt, hängt ein Block daran (Plan 2, Entscheidung 16). */
 export function buildRefineMessages(base: string, instruction: string, feedback?: readonly Feedback[]): TextMessage[] {
   const lines = (feedback ?? []).flatMap((f) => {
-    if (f.decision === "rejected") return [`- ${f.label}: abgelehnt`];
+    if (f.decision === "rejected") return [f.comment !== undefined && f.comment.trim() !== "" ? `- ${f.label}: abgelehnt (${f.comment.trim()})` : `- ${f.label}: abgelehnt`];
     return f.comment !== undefined && f.comment.trim() !== "" ? [`- ${f.label}: ${f.comment.trim()}`] : [];
   });
   const block = lines.length === 0 ? "" : `\n\nRückmeldung zur letzten Runde:\n${lines.join("\n")}`;

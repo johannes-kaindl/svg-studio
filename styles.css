@@ -666,11 +666,6 @@
   display: none;
 }
 
-.svg-studio-change-whole {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-}
-
 .svg-studio-input {
   width: 100%;
   resize: vertical;
@@ -766,9 +761,45 @@
   font-variant-numeric: tabular-nums;
 }
 
-.svg-studio-change-list {
-  margin: 0;
-  padding-inline-start: var(--size-4-5);
+/* Prüfliste (Kit review-list). Die Taste „Kommentar“ des Bausteins bleibt ausgeblendet, bis das Kit eine Texteingabe für Karten hat (Rest-Task D1). */
+.svg-studio-review .okit-review-comment {
+  display: none;
+}
+
+/* Ganzes Bild ersetzt: zwei kleine Vorschauen nebeneinander, am schmalen Panel untereinander. */
+.svg-studio-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10em, 1fr));
+  gap: var(--size-4-2);
+}
+
+.svg-studio-compare-cell {
+  min-width: 0;
+}
+
+.svg-studio-compare-cell .svg-studio-stage {
+  max-height: 10em;
+}
+
+.svg-studio-compare-label,
+.svg-studio-compare-none {
   color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* Regelrunde: was die Regel ändert, als Redline-Zeilen. */
+.svg-studio-rule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+  padding: var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
   font-size: var(--font-ui-small);
+}
+
+.svg-studio-rule-head {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
 }

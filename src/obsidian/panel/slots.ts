@@ -1,16 +1,16 @@
 // Die SVG-gebundenen Teile des Panels (Slots für `buildPanelShell`): Sitzung, Beschriftung der Runden, Messzeile, Lauf, Vorschau.
 // Die Vorschau (Shadow Root, Hintergrund-Regler, Maßzeile, Auswahl) steht in `preview-view.ts`, der Bestand beim Öffnen (Reparieren, Namen vergeben, Editor-Angaben
-// entfernen) in `bestand.ts`. Die Prüfliste ist noch ein einfacher Platzhalter (die Änderungen als Liste); die Prüfliste mit Einzelentscheidungen kommt mit D1.
-import { diffSvg, type DiffEntry } from "../../core/diff";
+// entfernen) in `bestand.ts`, die Prüfliste mit den Einzelentscheidungen in `review.ts`.
 import { svgQualityLine } from "../../core/quality";
 import { addRound, type SvgRound, type SvgSession } from "../../core/session";
-import { qualityTexts, t } from "../../i18n/strings";
+import { problemText, qualityTexts, t } from "../../i18n/strings";
 import { activeRound, EMPTY_ROUNDS } from "../../vendor/kit/rounds";
 import type { Target } from "../../vendor/kit/panel-session";
 import { checkSvg } from "../../vendor/kit/svg-guard";
 import type { LlmConnection } from "../../vendor/kit-obsidian/llm-connection";
 import { renderPreviewView, type PreviewView, type PreviewViewDeps, type Selection } from "./preview-view";
 import { bestandProblems, renderBestandNotice, repairProblem } from "./bestand";
+import { renderReview } from "./review";
 import { runSvgPrompt, runSvgRepair } from "./run";
 import type { NoticeCtx, PanelSlots } from "./shell";
 
@@ -37,17 +37,6 @@ export function roundMeta(r: SvgRound): string {
   return t("panel.roundChanges", b.entries.length);
 }
 
-/** Platzhalter der Prüfliste (bis D1): ein Eintrag je Zeile. */
-function renderEntries(host: HTMLElement, entries: readonly DiffEntry[]): void {
-  const list = host.createEl("ul", { cls: "svg-studio-change-list" });
-  for (const e of entries) list.createEl("li", { text: `${e.kind} ${e.key}` });
-}
-
-/** Der Text, auf dem eine Runde aufsetzt: das Ergebnis der Vorgängerin, sonst der Text beim Öffnen. */
-function beforeOf(s: SvgSession, r: SvgRound): string | null {
-  return r.basedOn === null ? s.startText : (s.rounds.rounds[r.basedOn]?.result ?? null);
-}
-
 export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
   let view: PreviewView | null = null;
   const selection: Selection = { id: null, text: null };
@@ -64,22 +53,8 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       if (text === null) return;
       view = renderPreviewView(host, text, { background: d.background }, selection);
     },
-    renderChanges(host, round, session) {
-      if (round === null) return;
-      const b = round.body;
-      if (b.form === "list") {
-        renderEntries(host, b.entries);
-      } else if (b.form === "whole") {
-        // Das ganze Bild ersetzt den Ausgang (Reparatur eines unlesbaren Bestands, „nicht zerlegbar“): ohne Einzelheiten, nur nicht stumm (die Prüfliste mit Entscheidung folgt mit D1).
-        if (round.art !== "create") host.createDiv({ cls: "svg-studio-change-whole", text: t("bestand.changesWhole") });
-      } else if (b.form === "rule") {
-        // Eine Regelrunde hat keine Einträge; gezeigt wird das Diff vom Ausgang zum Ergebnis.
-        const before = beforeOf(session, round);
-        if (before === null) return;
-        const diff = diffSvg(before, round.result);
-        if (diff.decomposable) renderEntries(host, diff.entries);
-        else host.createDiv({ cls: "svg-studio-change-whole", text: t("bestand.changesWhole") });
-      }
+    renderChanges(host, round, session, ctx) {
+      renderReview(host, round, session, ctx, { background: d.background, jump: (id) => { view?.select(id); } });
     },
     notices(host, ctx) {
       void renderNotices(host, ctx, d);
@@ -103,7 +78,7 @@ async function renderNotices(host: HTMLElement, ctx: NoticeCtx<SvgSession>, d: S
     const start = s.rounds.rounds.length === 0 ? { ...s, startText: text } : s;
     const added = addRound(start, { art, instruction, basedOn: start.rounds.active >= 0 ? start.rounds.active : null, body: { form: "rule", rule } });
     if ("problem" in added) {
-      ctx.setStatus("error", t("bestand.failed", added.problem));
+      ctx.setStatus("error", t("bestand.failed", problemText(added.problem)));
       return;
     }
     ctx.setSession(added);

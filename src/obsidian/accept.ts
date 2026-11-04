@@ -6,7 +6,7 @@
 import type { App, MarkdownView } from "obsidian";
 import type { AcceptAs } from "../core/settings";
 import { acceptText, type SvgSession } from "../core/session";
-import { acceptStrings, t } from "../i18n/strings";
+import { acceptStrings, problemText, t } from "../i18n/strings";
 import { listFences } from "../vendor/kit/fence-scan";
 import { wrapInFence } from "../vendor/kit/fences";
 import { slugify } from "../vendor/kit/slug";
@@ -105,7 +105,11 @@ export async function acceptSvgSession(env: AcceptEnv, s: SvgSession, o: { guard
       content: text,
       reference: (linktext) => `![[${linktext}]]`,
     }),
-    compute: (current) => acceptText(s, current),
+    // Das Kit reicht nur Zeichenketten durch: die Übersetzung des Problems geschieht hier, vor der Rückgabe an das Kit.
+    compute: (current) => {
+      const r = acceptText(s, current);
+      return r.ok ? r : { ok: false, problem: problemText(r.problem) };
+    },
     checkWrite: (text) => {
       const r = o.guard(text);
       return r.ok ? null : t("accept.invalid", r.problems.map((p) => `${p.code}: ${p.detail}`).join("; "));

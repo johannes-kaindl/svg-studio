@@ -43,9 +43,10 @@ describe("bestandProblems", () => {
 
   it("kaputtes XML → parse trägt das Parserproblem, nichts anderes wird gezählt", () => {
     const b = bestandProblems(BROKEN, checkSvg);
-    expect(b.parse).toMatch(/^Das SVG ist nicht wohlgeformt: .*\(Offset \d+\)\.$/);
+    expect(b.parse).toEqual({ message: expect.any(String), offset: expect.any(Number) });
     expect(b).toMatchObject({ unnamed: 0, editorMetadata: false });
-    expect(repairProblem(b)).toBe(b.parse);
+    // Der Satz für das Modell bleibt deutsch (gewollt), der für den Nutzer entsteht in der Oberfläche.
+    expect(repairProblem(b)).toMatch(/^Das SVG ist nicht wohlgeformt: .*\(Offset \d+\)\.$/);
   });
 
   it("repairProblem: ohne Parserfehler die Bereiniger-Befunde", () => {
@@ -100,9 +101,11 @@ describe("Bestand beim Öffnen: Editor-Angaben (Inkscape)", () => {
     const s = setup(INKSCAPE);
     await shown(s.root);
     button(s.root, "Remove editor data")!.click();
-    const items = [...s.root.querySelectorAll(".svg-studio-change-list li")].map((li) => li.textContent);
+    // Eine Regelrunde hat nichts zu entscheiden: sie zeigt ihre Änderungen als Redline-Zeilen, ohne Annehmen und Ablehnen.
+    const items = [...s.root.querySelectorAll(".svg-studio-rule-line")].map((li) => li.textContent);
     expect(items.length).toBeGreaterThan(0);
-    expect(items.join("|")).toMatch(/namedview1/);
+    expect(items.join("|")).toMatch(/namedview1: removed/);
+    expect(s.root.querySelector(".svg-studio-changes .okit-review-card")).toBeNull();
   });
 
   it("nach der Regelrunde ist der Hinweis weg (der Text der aktiven Runde ist sauber)", async () => {
@@ -145,7 +148,9 @@ describe("Bestand beim Öffnen: kaputt oder abgelehnt → Reparieren", () => {
   it("kaputtes XML: „Repair“ baut die Nachricht mit dem Parserproblem; die Runde ist art repair, form whole", async () => {
     const s = setup(BROKEN);
     const n = await shown(s.root);
-    expect(n.textContent).toContain("This SVG can't be used as it is: Das SVG ist nicht wohlgeformt");
+    // Kein deutscher Rest im englischen Satz (Rest-Task C4, Punkt 9); die Scanner-Meldung selbst ist noch nicht übersetzt.
+    expect(n.textContent).toMatch(/^This SVG can't be used as it is: The text is not readable: .* \(offset \d+\)\.Repair$/);
+    expect(n.textContent).not.toContain("Das SVG ist nicht wohlgeformt");
     expect(button(s.root, "Assign names")).toBeNull();
     button(s.root, "Repair")!.click();
     await s.shell.settled();
@@ -278,7 +283,8 @@ describe("Reparatur: Anzeige (Review C4, S3)", () => {
     button(s.root, "Repair")!.click();
     await s.shell.settled();
     expect(roundMeta(s.shell.session().rounds.rounds[0]!)).toBe("repair · whole image");
-    expect(s.root.querySelector(".svg-studio-changes")!.textContent).toBe("The whole image changes.");
+    const card = s.root.querySelector(".svg-studio-changes .okit-review-card")!;
+    expect(card.querySelector(".okit-redline")!.textContent).toBe("Repair: whole image");
   });
 
   it("auf Deutsch", async () => {
@@ -288,7 +294,7 @@ describe("Reparatur: Anzeige (Review C4, S3)", () => {
     button(s.root, "Reparieren")!.click();
     await s.shell.settled();
     expect(roundMeta(s.shell.session().rounds.rounds[0]!)).toBe("Reparatur · ganzes Bild");
-    expect(s.root.querySelector(".svg-studio-changes")!.textContent).toBe("Das ganze Bild ändert sich.");
+    expect(s.root.querySelector(".svg-studio-changes .okit-redline")!.textContent).toBe("Reparatur: ganzes Bild");
   });
 
   it("scheitert die Reparatur, passt der Hinweis zur Reparatur und nicht zum Ändern („simpler wording“)", async () => {
@@ -333,6 +339,6 @@ describe("Karte „Reparieren“: Befunde als Liste, gekürzt (C5)", () => {
     const b = setup(BROKEN);
     const n = await shown(b.root);
     expect(items(b.root)).toHaveLength(0);
-    expect(n.textContent).toContain("This SVG can't be used as it is: Das SVG ist nicht wohlgeformt");
+    expect(n.textContent).toContain("This SVG can't be used as it is: The text is not readable:");
   });
 });
