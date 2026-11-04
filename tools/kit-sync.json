@@ -1,13 +1,29 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.75.0" },
-    "code-kit": { "ref": "0.45.0" }
+    "obsidian-kit": { "ref": "0.78.0" },
+    "code-kit": { "ref": "0.52.1" }
   },
   "targets": [
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["svg-guard"],
       "rewrite": [["../pure/", "./"]]
     },
-    { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure", "modules": ["safe-markdown"] }
+    {
+      "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure",
+      "modules": ["safe-markdown", "answer-retry", "llm-answer", "think-splitter", "sha256", "data-url", "slug"]
+    },
+    {
+      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure", "modules": ["block-writer"],
+      "rewrite": [["../vendor/code-kit/pure/", "./"]]
+    },
+    {
+      "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "from": "src/obsidian",
+      "modules": ["status-indicator", "choice-modal", "write-ports"],
+      "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"]]
+    },
+    {
+      "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing",
+      "modules": ["kit-css", "linear-probe", "window-timers"]
+    }
   ]
 }

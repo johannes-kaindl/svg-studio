@@ -1,6 +1,9 @@
 {
   "source": "code-kit",
-  "version": "0.45.0",
-  "sha": "3d058b2",
-  "vendored": "svg-guard.ts, safe-markdown.ts"
+  "version": "0.52.1",
+  "sha": "f368e77",
+  "vendored": "svg-guard.ts, safe-markdown.ts, answer-retry.ts, llm-answer.ts, think-splitter.ts, sha256.ts, data-url.ts, slug.ts",
+  "obsidian_kit_version": "0.78.0",
+  "obsidian_kit_sha": "c5961de",
+  "obsidian_kit_vendored": "block-writer.ts"
 }

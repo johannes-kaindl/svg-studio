@@ -1,4 +1,4 @@
-// vendored from code-kit@0.45.0, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.52.1, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 import { CSS_RISKY, CSS_RISKY_PLAIN, isLocalRef, normalizeUrlRef, trimUrlLikeBrowser } from "./safe-markdown";
 
 /** Checks SVG text written by a model (or any untrusted source) BEFORE it is shown or stored. The guard REJECTS: it

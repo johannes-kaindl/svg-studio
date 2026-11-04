@@ -1,0 +1,6 @@
+{
+  "source": "obsidian-kit",
+  "version": "0.78.0",
+  "sha": "c5961de",
+  "vendored": "status-indicator.ts, choice-modal.ts, write-ports.ts"
+}

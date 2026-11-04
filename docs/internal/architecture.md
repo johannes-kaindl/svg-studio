@@ -6,7 +6,7 @@ Modul-Layout und Datenfluss. Das Warum steht in `docs/internal/decisions.md`, di
 
 - `src/core/**` ist obsidian-, DOM- und node-frei (`npm run check:pure`). Hier liegt der Fachkern; er rechnet auf dem SVG-**Text**, nicht auf einem DOM.
 - `src/main.ts` ist heute ein leeres Plugin-Gerüst. Rendern, Panel und Schreibwege kommen mit Plan 2 (Inkremente 2 bis 5 der Spec).
-- `src/vendor/kit/` trägt die Kit-Module aus code-kit (`svg-guard`, `safe-markdown`), vendort über `tools/sync-kit.sh` mit Herkunfts-Header, nie von Hand.
+- `src/vendor/kit/` trägt die Kit-Module aus code-kit 0.52.1 (`svg-guard`, `safe-markdown`, `answer-retry`, `llm-answer`, `think-splitter`, `sha256`, `data-url`, `slug`) und obsidian-kit 0.78.0 (`block-writer`); `src/vendor/kit-obsidian/` die Obsidian-Schicht (`status-indicator`, `choice-modal`, `write-ports`); `tests/vendor/kit/` die Test-Helfer (`kit-css`, `linear-probe`, `window-timers`). Vendort über `tools/sync-kit.sh` (Wrapper auf `tools/kit-sync`) mit Herkunfts-Header, nie von Hand.
 
 ## Module in `src/core/`
 

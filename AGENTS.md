@@ -40,7 +40,7 @@ Release-Infra und GitHub-Mirror kommen erst mit dem ersten Release (Skill `plugi
 
 - Conventional Commits, deutsche Beschreibung erlaubt. Nur berührte Dateien stagen, per Pathspec.
 - Ein Test mit DOM setzt `// @vitest-environment happy-dom` in die Kopfzeile. happy-dom parst anders als Chromium: für Sicherheits- und Parserfragen zählt der Lauf im echten Chromium (code-kit `npm run check:svg-guard-chromium`).
-- **`src/vendor/` ist ein Verbatim-Snapshot** aus `code-kit` (heute `svg-guard`, `safe-markdown`, Pin 0.45.0) und `obsidian-kit` (Pin 0.75.0) — nie von Hand editieren, sondern `sh tools/sync-kit.sh` fahren (Quellen, Pins und Zielordner in `tools/kit-sync.json`). Bricht ein Kit-Modul hier, gehört der Fix ins Kit.
+- **`src/vendor/` ist ein Verbatim-Snapshot** aus `code-kit` (heute `svg-guard`, `safe-markdown`, `answer-retry`, `llm-answer`, `think-splitter`, `sha256`, `data-url`, `slug`, Pin 0.52.1) und `obsidian-kit` (heute `block-writer`, `status-indicator`, `choice-modal`, `write-ports`, Pin 0.78.0; Test-Helfer unter `tests/vendor/kit`) — nie von Hand editieren, sondern `sh tools/sync-kit.sh` fahren (Quellen, Pins und Zielordner in `tools/kit-sync.json`). Bricht ein Kit-Modul hier, gehört der Fix ins Kit.
 - Vor einer neuen Hilfsfunktion `../REGISTRY.md` und `python3 ../tools/funktionsinventur/naehte_suche.py <wörter>` prüfen.
 - Specs, Pläne, Messnoten und Task-Reports gehören ins Cockpit (`25_Coding/svg-studio/_SDD/`), nicht ins Repo (CORE-META-14).
 
