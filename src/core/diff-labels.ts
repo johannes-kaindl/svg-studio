@@ -50,6 +50,10 @@ type Seg = EntryText["segments"][number];
 const SHAPE_ATTRS = new Set(["d", "points"]);
 /** Mehr als so viele Zeichen kanonische Form je Seite zeigt die Karte nicht (sie zeigte dann Zahlensalat und sprengte die Seitenleiste). */
 const MAX_DETAIL = 1200;
+/** Darüber wird kein Wort-Diff gebildet (Rechenzeit); die Karte bleibt ohne Detail. */
+const MAX_WORDS = 40000;
+/** Gleicher Text rund um eine Abweichung, der in einer großen Karte stehen bleibt. */
+const CONTEXT = 40;
 
 const fixedKind = (key: string): "style" | "title" | "desc" | null => (key.startsWith("#style-") ? "style" : key === "#title" ? "title" : key === "#desc" ? "desc" : null);
 
@@ -72,8 +76,35 @@ function replaceDetail(e: Extract<DiffEntry, { kind: "replace" }>): Seg[] {
     else if (c.op === "add") after += canonOfMarkup(c.markup);
   }
   if (before === "" && after === "") return [];
-  if (before.length > MAX_DETAIL || after.length > MAX_DETAIL) return [];
-  return wordSegments(before, after);
+  if (before.length > MAX_WORDS || after.length > MAX_WORDS) return [];
+  const segs = wordSegments(before, after);
+  return before.length > MAX_DETAIL || after.length > MAX_DETAIL ? shorten(segs) : segs;
+}
+
+/**
+ * Eine große Ersetzung zeigt nur ihre Abweichungen: lange gleiche Stücke werden auf den Rand gekürzt („…“), bis die Karte das Maß hält; Gelöschtes und Eingefügtes
+ * bleibt vor Gleichem erhalten. Ohne das blieb eine nebenbei geänderte Farbe in einer großen Gruppe unsichtbar (Opus-Gesamtreview 2026-11-05, Spec § 3 Punkt 2).
+ */
+function shorten(segs: Seg[]): Seg[] {
+  const out: Seg[] = segs.map((seg, i) => {
+    if (seg.kind !== "same" || seg.text.length <= 2 * CONTEXT + 4) return seg;
+    const head = i === 0 ? "" : seg.text.slice(0, CONTEXT);
+    const tail = i === segs.length - 1 ? "" : seg.text.slice(-CONTEXT);
+    return { kind: "same", text: `${head}…${tail}` };
+  });
+  let used = 0;
+  const kept: Seg[] = [];
+  // Ein einzelnes Stück nimmt höchstens ein Viertel des Maßes, damit das Gelöschte nicht das Eingefügte verdrängt.
+  const cap = MAX_DETAIL / 4;
+  for (const seg0 of out) {
+    const seg: Seg = seg0.text.length > cap ? { kind: seg0.kind, text: `${seg0.text.slice(0, cap)}…` } : seg0;
+    const room = MAX_DETAIL - used;
+    if (room <= 0) break;
+    kept.push(seg.text.length <= room ? seg : { kind: seg.kind, text: `${seg.text.slice(0, room)}…` });
+    used += seg.text.length;
+  }
+  if (kept.length < out.length) kept.push({ kind: "same", text: "…" });
+  return kept;
 }
 
 export function describeEntry(e: DiffEntry, t: LabelTexts): EntryText {

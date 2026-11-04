@@ -178,10 +178,38 @@ describe("describeEntry: replace", () => {
     expect(flat(g)).not.toMatch(/12345|99999/);
   });
 
-  it("zu große Ersatzstücke zeigen nur den Titel", () => {
+  it("zu große Ersatzstücke bleiben unter dem Maß, zeigen aber Gelöschtes und Eingefügtes (gekürzt, mit „…“)", () => {
     const big = "x".repeat(2000);
     const base = S(`  <text id="label">${big}</text>`);
     const e = entries(base, base.replace(big, `${big}y`))[0]!;
-    expect(describeEntry(e, labelTexts()).segments).toEqual([{ kind: "same", text: "Text label: text changed" }]);
+    const segs = describeEntry(e, labelTexts()).segments;
+    expect(segs.some((x) => x.kind === "del")).toBe(true);
+    expect(segs.some((x) => x.kind === "ins")).toBe(true);
+    expect(segs.map((x) => x.text).join("").length).toBeLessThan(3000);
+  });
+});
+
+// Opus-Gesamtreview 2026-11-05, Befund 2: über MAX_DETAIL blieb die Karte ohne Detail; eine nebenbei geänderte Farbe in einer großen Gruppe war unsichtbar (Spec § 3 Punkt 2).
+describe("describeEntry: große Ersetzungen zeigen jede Abweichung", () => {
+  const rects = (n: number, fill9?: string): string => Array.from({ length: n }, (_, i) => `    <rect id="fenster-${String(i)}" x="${String(i * 10)}" y="5" width="8" height="12" fill="${i === 9 && fill9 !== undefined ? fill9 : "#cccccc"}" stroke="#333333" stroke-width="1"/>`).join("\n");
+  const base = S(rects(30));
+  const wrapped = S(`  <g id="fenster">\n${rects(30, "#ff0000")}\n  </g>`);
+
+  it("30 Fenster in eine Gruppe, nebenbei fenster-9 rot: die Karte nennt die Änderung", () => {
+    const es = entries(base, wrapped);
+    expect(es).toHaveLength(1);
+    const d = oldNew(es[0]!);
+    expect(d.neu).toContain("#ff0000");
+    expect(d.old).toContain("#cccccc");
+    const text = flat(es[0]!);
+    expect(text.length).toBeLessThan(2500);
+  });
+
+  it("jede Seite bleibt unter dem Maß, auch wenn alles anders ist", () => {
+    const other = S(`  <g id="fenster">\n${rects(30).replace(/#cccccc/g, "#123456").replace(/x="/g, 'x="1')}\n  </g>`);
+    const es = entries(base, other);
+    const text = flat(es[0]!);
+    expect(text.length).toBeLessThan(2500);
+    expect(text).toContain("…");
   });
 });
