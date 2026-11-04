@@ -1,0 +1,1172 @@
+/**
+ * GUI-Smoke von svg-studio — fährt die Naht zum Host gegen ein LAUFENDES Obsidian (CORE-TEST-02 b, Plan 2 Task C5): Block als Bild, Knopf an der Einbettung,
+ * Panel mit Lauf gegen einen Ersatz-Endpunkt (LLM-Stub hinter einem Fake-Manager), Rückfrage, Vorschau im Shadow Root, Übernehmen als Datei und als Block,
+ * Lesemodus, Bestand (Inkscape, Namen, Reparatur), Schließen mit offener Runde. Das LLM ist immer der Stub: Antworten aus `tests/fixtures/lab/` (Fälle E8 Erzeugen,
+ * V3 Verfeinern). Der Stub belegt Verdrahtung, Strom und Darstellung, nie die Qualität einer Modellantwort.
+ *
+ * ## Aufruf (Zweitinstanz, nie die reguläre; `--port` ist Pflicht)
+ *
+ * Alles in einem Zug (baut, stellt den Staging-Vault her, startet eine frische Zweitinstanz, fährt den Lauf, beendet nur die eigene Instanz):
+ *
+ *   export REPO=svg-studio PORT=9660 UD=/tmp/obs-test-svg-studio BILDER=<ordner> \
+ *     && python3 ~/.claude/hooks/obsidian-cdp-lock.py acquire --label svg-studio --intent "GUI-Smoke" --exclusive focus --port 9660 --ttl 900 \
+ *     && ../tools/obsidian-cdp/messlauf.sh
+ *
+ * Von Hand: `npm run build && npm run smoke:gui -- --setup`, Zweitinstanz mit eigenem Profil starten (README der Brücke § Frisches Profil, `--lang=en-US`), dann
+ * `npm run smoke:gui -- --port 9660 --bilder <ordner>`. Der Staging-Vault kommt aus `tests/fixtures/vault/` nach `$STAGING_VAULTS_DIR` (`buildVault`).
+ *
+ * ## Prüfpunkte
+ *
+ * Die Soll-Liste `PUNKTE` ist der Nenner der Bilanz (CORE-TEST-19). Was nur von Hand oder am Gerät prüfbar ist, steht als `skipped` mit Grund darin.
+ * Bilder (`--bilder <ordner>`): Panel hell und dunkel, Desktop und Mobil-Emulation 390 × 844; sie sind Beleg, keine README-Bilder, und wollen angesehen werden
+ * (ein DOM-Smoke ist kein Layout-Beleg).
+ *
+ * Typen: `npm run typecheck:test` (sieht `scripts/`).
+ */
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { cwd } from "node:process";
+
+import { stampedName } from "../src/vendor/kit/rotation";
+import { Vorbedingung, createBilanz, parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
+import {
+  AbbruchAusnahme,
+  Cdp,
+  attachTo,
+  beimAbbruch,
+  bereiteInstanzVor,
+  clearNotices,
+  clickReal,
+  entferneFakeManager,
+  installFakeManager,
+  istAbgebrochen,
+  ladePluginNeu,
+  openExisting,
+  openNote,
+  pollUntil,
+  requireVisible,
+  schliesseDialog,
+  setPluginSetting,
+} from "../../tools/obsidian-cdp/cdp.js";
+import { BREITE, HOEHE, mobilAus, mobilEin } from "../../tools/obsidian-cdp/chat-layout.js";
+import { startLlmStub, type LlmStub, type StubAnfrage } from "../../tools/obsidian-cdp/llm-stub.js";
+import { gegenprobeErreichbarkeit, gegenprobeFokus, messeErreichbarkeit, messeFokusErhalt, mitHoehe, zeichnePflicht, type PflichtTeilurteil } from "../../tools/obsidian-cdp/pflichtpunkte.js";
+import { boxOf, capture, setWindowSize } from "../../tools/obsidian-cdp/shot.js";
+import { buildVault, stagingVaultDir } from "../../tools/obsidian-cdp/vault.js";
+
+const REPO_NAME = "svg-studio";
+const PLUGIN_ID = "svg-studio";
+const VIEW_TYPE = "svg-studio-panel";
+const MANAGER_ID = "llm-endpoint-manager";
+const REPO_ROOT = cwd();
+const FIXTURE_DIR = join(REPO_ROOT, "tests/fixtures/vault");
+const LAB_DATEI = join(REPO_ROOT, "tests/fixtures/lab/qwen-qwen3.8-27b-4bit-svg.jsonl");
+const ANHANG = "Anhaenge";
+/** Notizen, die der Treiber anlegt; sie werden vor und nach dem Lauf weggeräumt. */
+const SMOKE_PRAEFIX = "_smoke-";
+
+/** Soll-Liste aller Prüfpunkte — der Nenner der Bilanz (CORE-TEST-19). */
+const PUNKTE = [
+  "plugin-geladen",
+  "block-rendert-als-bild",
+  "einbettung-hat-knopf",
+  "knopf-oeffnet-panel",
+  "erzeugen-ersatzendpunkt",
+  "rueckfrage-nach-ungueltiger-antwort",
+  "schattenwurzel-isoliert",
+  "fokus-erhalt",
+  "fokus-erhalt-gegenprobe",
+  "erreichbarkeit",
+  "erreichbarkeit-gegenprobe",
+  "uebernehmen-als-datei",
+  "uebernehmen-als-block",
+  "c4a-bediente-notiz",
+  "strg-z-nach-block-uebernehmen",
+  "uebernehmen-lesemodus",
+  "c4c-sperre-ohne-notiz",
+  "c4d-schnappschuss",
+  "c4e-auswahl-dialog",
+  "c4f-editor-angaben-entfernen",
+  "c4f-namen-vergeben",
+  "c4f-reparieren",
+  "c4g-nichtzeichen-im-attribut",
+  "schliessen-mit-offener-runde",
+  "rest10a-behalten-waehrend-uebernehmen",
+  "rest10b-angebotenes-ziel-waehrend-uebernehmen",
+  "rest11-folgerunde-nach-namen-vergeben",
+  "mobil-emulation",
+  "mobil-trefflaeche-44px",
+  "mobil-geraet-tastatur",
+] as const;
+type Name = (typeof PUNKTE)[number];
+
+const bilanz = createBilanz({ punkte: PUNKTE });
+const { record, skipped, unmeasured } = bilanz;
+
+const q = (s: unknown): string => JSON.stringify(s);
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const fehlerText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+// ── Stub-Antworten aus der Messung ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+interface LabFall { case: string; prompt: string; raw: string; input?: string }
+function labFall(name: string): LabFall {
+  for (const zeile of readFileSync(LAB_DATEI, "utf8").split("\n")) {
+    if (zeile.trim() === "") continue;
+    const f = JSON.parse(zeile) as LabFall;
+    if (f.case === name) return f;
+  }
+  throw new Error(`Fall ${name} fehlt in ${LAB_DATEI}`);
+}
+const E8 = labFall("E8");
+const V3 = labFall("V3");
+/** Erzeugen: der Grundriss aus der Messung. */
+const ANTWORT_ERZEUGEN = E8.raw;
+/** Verfeinern: V3 baut auf E8 auf (`probe.svg` ist E8). */
+const ANTWORT_VERFEINERN = V3.raw;
+/** Ungültig für den Bereiniger: ein CSS-Kommentar in `<style>` (Kit-Vertrag von svg-guard). */
+const ANTWORT_UNGUELTIG = E8.raw.replace("</desc>", "</desc>\n  <style>/* kommentar */ .x { fill: red }</style>");
+/** Ein SVG, dessen `<style>` das ganze Dokument rot färben würde. */
+const ANTWORT_STIL = [
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60">`,
+  `  <style>* { color: red }</style>`,
+  `  <rect id="kasten" x="10" y="10" width="80" height="40" fill="currentColor"/>`,
+  `  <circle id="punkt" cx="50" cy="30" r="8" fill="white"/>`,
+  `</svg>`,
+].join("\n");
+/** Die Reparatur von `kaputt.svg`. */
+const ANTWORT_REPARATUR = [
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60">`,
+  `  <rect id="kasten" x="10" y="10" width="80" height="40" fill="#e8e0d0"/>`,
+  `  <circle id="punkt" cx="30" cy="30" r="8" fill="#8b7355"/>`,
+  `</svg>`,
+].join("\n");
+const PROMPT_ERZEUGEN = "Grundriss 420 x 385 cm mit Tür";
+const PROMPT_VERFEINERN = "Verschiebe die Tür um 20 cm nach links.";
+
+const fixtur = (name: string): string => readFileSync(join(FIXTURE_DIR, "notes", name), "utf8");
+
+// ── Zustand des Treibers ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+let cdp: Cdp;
+let stub: LlmStub;
+let bilderDir: string | null = null;
+let port = 0;
+/** Konsole und Ausnahmen des Fensters (Mitschnitt der Brücke): bei einem Fehlschlag steht das Ende davon in der Meldung. */
+const konsole: string[] = [];
+/** `--nur a,b`: nur diese Punkte fahren, die übrigen stehen als übersprungen in der Bilanz (Entwicklung des Treibers; der volle Lauf ist die Baseline). */
+let nur: Set<string> | null = null;
+const gewaehlt = (...namen: Name[]): boolean => nur === null || namen.some((n) => nur!.has(n));
+
+const chatAnfragen = (): StubAnfrage[] => stub.anfragen().filter((a) => a.route === "chat");
+const nachrichten = (a: StubAnfrage): { role: string; content: string }[] => (a.json as { messages?: { role: string; content: string }[] } | null)?.messages ?? [];
+
+/** Ein Punkt: Ausnahmen werden „nichts gemessen“ (ein Abbruch läuft durch), ein stiller Punkt ebenfalls. */
+async function lauf(name: Name, fn: () => Promise<void>): Promise<void> {
+  if (!gewaehlt(name)) return;
+  console.log(`\n${name}`);
+  try {
+    await fn();
+  } catch (e) {
+    if (e instanceof AbbruchAusnahme || istAbgebrochen()) throw e;
+    unmeasured(name, e instanceof Vorbedingung ? e.message : `Ausnahme im Treiber: ${fehlerText(e)}`);
+  }
+  if (!bilanz.eintraege().some((p) => p.name === name)) unmeasured(name, "der Punkt hat nichts aufgezeichnet");
+}
+
+function urteil(name: Name, u: PflichtTeilurteil): void {
+  zeichnePflicht(bilanz, name, u);
+}
+
+// ── Panel lesen und bedienen ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+interface Snap {
+  target: string | null;
+  status: string | null;
+  statusClass: string;
+  rounds: number;
+  labels: string[];
+  metas: string[];
+  listRows: number;
+  acceptDisabled: boolean | null;
+  sendDisabled: boolean | null;
+  running: boolean;
+  hint: string | null;
+  measure: string | null;
+  caption: string | null;
+  previewHidden: boolean;
+  svgIds: string[] | null;
+  notices: { text: string; button: string }[];
+  changes: string[];
+  error: string | null;
+}
+
+const SNAP_JS = `
+  const root = document.querySelector(".svg-studio-panel");
+  if (!root) return null;
+  const txt = (s) => { const e = root.querySelector(s); return e ? (e.textContent || "").trim() : null; };
+  const stage = root.querySelector(".svg-studio-stage");
+  const svg = stage && stage.shadowRoot ? stage.shadowRoot.querySelector("svg") : null;
+  const accept = root.querySelector(".svg-studio-accept");
+  const send = root.querySelector(".svg-studio-send");
+  const stop = root.querySelector(".svg-studio-stop");
+  const prev = root.querySelector(".svg-studio-preview");
+  const status = root.querySelector(".svg-studio-status");
+  // Die Rundenliste des Kits entsteht erst ab zwei Runden; die Zahl der Runden nennt die Sitzung der Ansicht (Testnaht state()).
+  const leaf = app.workspace.getLeavesOfType("svg-studio-panel")[0];
+  const sit = leaf && leaf.view && leaf.view.state ? leaf.view.state() : null;
+  const rs = sit ? sit.rounds.rounds : [];
+  return {
+    target: txt(".svg-studio-target"),
+    status: txt(".svg-studio-status"),
+    statusClass: status ? status.className : "",
+    rounds: rs.length,
+    labels: rs.map((r) => r.instruction),
+    metas: rs.map((r) => r.art + (r.body ? ":" + r.body.form : "")),
+    listRows: root.querySelectorAll(".okit-vlist-row").length,
+    acceptDisabled: accept ? accept.disabled : null,
+    sendDisabled: send ? send.disabled : null,
+    running: stop ? !stop.classList.contains("is-hidden") : false,
+    hint: txt(".svg-studio-accept-hint"),
+    measure: txt(".svg-studio-measure"),
+    caption: txt(".svg-studio-preview-caption"),
+    previewHidden: prev ? prev.classList.contains("is-hidden") : true,
+    svgIds: svg ? Array.from(svg.querySelectorAll("[id]")).map((e) => e.getAttribute("id")) : null,
+    notices: Array.from(root.querySelectorAll(".svg-studio-notice")).map((n) => ({
+      text: ((n.querySelector(".svg-studio-notice-text") || {}).textContent || "").trim(),
+      button: ((n.querySelector("button") || {}).textContent || "").trim(),
+    })),
+    changes: Array.from(root.querySelectorAll(".svg-studio-change-list li")).map((e) => e.textContent),
+    error: txt(".svg-studio-error"),
+  };
+`;
+
+const snap = (): Promise<Snap | null> => cdp.evaluate<Snap | null>(SNAP_JS);
+
+async function warteSnap(ok: (s: Snap) => boolean, ms = 15000): Promise<Snap | null> {
+  const ende = Date.now() + ms;
+  while (Date.now() < ende) {
+    const s = await snap();
+    if (s !== null && ok(s)) return s;
+    await sleep(150);
+  }
+  return null;
+}
+
+async function oeffneNeuesPanel(): Promise<Snap> {
+  await cdp.evaluate(`app.commands.executeCommandById("${PLUGIN_ID}:new-svg"); return true;`);
+  const s = await warteSnap((x) => x.target !== null, 10000);
+  if (s === null) throw new Vorbedingung("Das Panel kam nach „New SVG“ nicht hoch");
+  return s;
+}
+
+async function tippe(text: string): Promise<void> {
+  await cdp.evaluate(`const el = document.querySelector(".svg-studio-input"); el.focus(); el.value = ""; el.dispatchEvent(new Event("input", { bubbles: true })); return true;`);
+  await cdp.send("Input.insertText", { text });
+  const wert = await cdp.evaluate<string>(`return document.querySelector(".svg-studio-input").value;`);
+  if (wert !== text) {
+    await cdp.evaluate(`const el = document.querySelector(".svg-studio-input"); el.value = ${q(text)}; el.dispatchEvent(new Event("input", { bubbles: true })); return true;`);
+  }
+}
+
+/** Klick mit vorherigem Rollen OHNE Animation: `scrollIntoView` der Brücke rollt weich, die Lage wird mitten in der Bewegung gemessen und der Klick trifft den Behälter statt des Knopfs
+ *  (gemessen in diesem Treiber: Ereignisse auf `svg-studio-actions` statt `svg-studio-send`). */
+async function klick(ausdruck: string): Promise<boolean> {
+  await cdp.evaluate(`const el = ${ausdruck}; if (el) el.scrollIntoView({ block: "center", behavior: "instant" }); return true;`);
+  await sleep(250);
+  return clickReal(cdp, ausdruck);
+}
+
+const klickSenden = async (): Promise<void> => {
+  if (!(await klick(`document.querySelector(".svg-studio-send")`))) throw new Vorbedingung("Senden-Knopf nicht klickbar");
+};
+
+/** Prompt tippen, senden und auf die neue Runde (oder einen Fehler) warten. */
+async function frage(text: string, ms = 30000): Promise<Snap> {
+  const vorher = (await snap())?.rounds ?? 0;
+  await tippe(text);
+  await klickSenden();
+  const s = await warteSnap((x) => x.rounds > vorher || (x.statusClass.includes("is-error") && !x.running), ms);
+  if (s === null) {
+    const d = await snap();
+    const z = stub.zaehler();
+    const e = await cdp.evaluate<string>(`const i = document.querySelector(".svg-studio-input"); return JSON.stringify({ wert: i ? i.value : null, fokus: document.activeElement ? document.activeElement.className : null });`);
+    throw new Vorbedingung(`Keine neue Runde nach „${text}“ (Status: ${q(d?.status)}, Klasse ${q(d?.statusClass)}, Senden gesperrt ${d?.sendDisabled}, läuft ${d?.running}; Stub: ${q(z)} ${q(stub.alleAnfragen().map((a) => `${a.methode} ${a.pfad}`))}; Eingabe ${e}; Konsole ${q(konsole.slice(-6))})`);
+  }
+  if (s.rounds <= vorher) throw new Vorbedingung(`Der Lauf endete mit Fehler: ${s.status ?? "?"}`);
+  return s;
+}
+
+/** Übernehmen klicken; wartet, bis die Runden weg sind (Erfolg) oder der Status Fehler meldet. */
+async function uebernimm(ms = 20000): Promise<{ ok: boolean; snap: Snap }> {
+  if (!(await klick(`document.querySelector(".svg-studio-accept")`))) throw new Vorbedingung("Übernehmen-Knopf nicht klickbar");
+  const s = await warteSnap((x) => x.rounds === 0 || (x.statusClass.includes("is-error") && !x.running && x.acceptDisabled === false), ms);
+  if (s === null) throw new Vorbedingung(`Übernehmen endete nicht (Status: ${(await snap())?.status ?? "kein Panel"})`);
+  return { ok: s.rounds === 0, snap: s };
+}
+
+const klickText = (bereich: string, re: RegExp): Promise<boolean> =>
+  klick(`(Array.from(document.querySelectorAll(${q(`${bereich} button`)})).find((b) => new RegExp(${q(re.source)}, ${q(re.flags)}).test(b.textContent || "")))`);
+
+interface Dlg { title: string; paras: string[]; buttons: string[] }
+const DLG_JS = `
+  const m = document.querySelector(".modal-container .modal");
+  if (!m) return null;
+  return {
+    title: ((m.querySelector(".modal-title") || {}).textContent || "").trim(),
+    paras: Array.from(m.querySelectorAll("p")).map((p) => (p.textContent || "").trim()),
+    buttons: Array.from(m.querySelectorAll(".modal-button-container button")).map((b) => (b.textContent || "").trim()),
+  };
+`;
+const warteDialog = (ms = 4000): Promise<Dlg | null> => pollUntil<Dlg>(cdp, DLG_JS, ms, 150);
+const dialogKlick = (re: RegExp): Promise<boolean> =>
+  klick(`(Array.from(document.querySelectorAll(".modal-container .modal-button-container button")).find((b) => new RegExp(${q(re.source)}, ${q(re.flags)}).test(b.textContent || "")))`);
+
+// ── Notizen und Dateien ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+async function schreibe(path: string, body: string): Promise<void> {
+  await cdp.evaluate(`
+    const f = app.vault.getAbstractFileByPath(${q(path)});
+    if (f) await app.vault.modify(f, ${q(body)}); else await app.vault.create(${q(path)}, ${q(body)});
+    return true;
+  `);
+}
+
+async function stelleFixturenHer(): Promise<void> {
+  for (const n of ["probe.svg", "inkscape.svg", "unbenannt.svg", "kaputt.svg", "Block.md", "Einbettung.md"]) await schreibe(n, fixtur(n));
+}
+
+async function liesDatei(path: string): Promise<string | null> {
+  return cdp.evaluate<string | null>(`const f = app.vault.getAbstractFileByPath(${q(path)}); return f ? await app.vault.read(f) : null;`);
+}
+
+/** Text einer Notiz so, wie Obsidian ihn hält: offener Quell-Editor, sonst Vault. */
+async function notizText(path: string): Promise<string | null> {
+  return cdp.evaluate<string | null>(`
+    const l = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === ${q(path)} && x.view.getMode() === "source");
+    if (l) return l.view.editor.getValue();
+    const f = app.vault.getAbstractFileByPath(${q(path)});
+    return f ? await app.vault.read(f) : null;
+  `);
+}
+
+const anhaenge = (): Promise<string[]> => cdp.evaluate<string[]>(`return app.vault.getFiles().filter((f) => f.path.startsWith(${q(`${ANHANG}/`)})).map((f) => f.path);`);
+
+/** Neue Notiz in einem neuen Tab (oder geteiltem Blatt) öffnen und aktiv machen. */
+async function oeffneNotiz(path: string, body: string, mode: "source" | "preview", wie: "tab" | "split" | "aktuell" = "aktuell"): Promise<void> {
+  if (wie === "aktuell") {
+    await openNote(cdp, path, body, mode);
+  } else {
+    await schreibe(path, body);
+    await cdp.evaluate(`
+      const f = app.vault.getAbstractFileByPath(${q(path)});
+      const leaf = ${wie === "split" ? `app.workspace.getLeaf("split", "vertical")` : `app.workspace.getLeaf("tab")`};
+      await leaf.openFile(f, { state: { mode: ${q(mode)} } });
+      app.workspace.setActiveLeaf(leaf, { focus: true });
+      return true;
+    `);
+  }
+  await sleep(600);
+}
+
+async function setzeCursor(path: string, line: number): Promise<void> {
+  await cdp.evaluate(`
+    const l = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === ${q(path)});
+    if (l && l.view.editor) { app.workspace.setActiveLeaf(l, { focus: true }); l.view.editor.setCursor({ line: ${line}, ch: 0 }); }
+    return true;
+  `);
+}
+
+const setzeAcceptAs = (v: "file" | "block" | "ask"): Promise<void> => setPluginSetting(cdp, PLUGIN_ID, "acceptAs", v);
+
+async function schliesseNotizen(): Promise<void> {
+  await cdp.evaluate(`const alle = []; app.workspace.iterateRootLeaves((l) => alle.push(l)); for (const l of alle) l.detach(); return true;`);
+  await sleep(500);
+}
+
+/** Zurück auf einen sauberen Ausgang: Dialoge zu, Panel zu (offene Runden verworfen), Notizen zu, Übernehmen-Ziel Datei, Stub leer. */
+async function raeume(): Promise<void> {
+  await clearNotices(cdp);
+  await schliesseDialog(cdp, { fristMs: 500 }).catch(() => undefined);
+  await cdp.evaluate(`delete app.vault.create; for (const l of app.workspace.getLeavesOfType(${q(VIEW_TYPE)})) l.detach(); return true;`);
+  const d = await warteDialog(1200);
+  if (d !== null) {
+    await dialogKlick(/discard|verwerfen/i);
+    await sleep(300);
+  }
+  await schliesseNotizen();
+  await setzeAcceptAs("file");
+  await cdp.evaluate(`
+    for (const f of app.vault.getFiles().filter((x) => x.path.startsWith(${q(`${ANHANG}/`)}) || x.name.startsWith(${q(SMOKE_PRAEFIX)}))) await app.fileManager.trashFile(f);
+    return true;
+  `);
+  stub.antworten([]);
+  stub.loescheMitschnitt();
+}
+
+async function schnappschussWurzel(): Promise<string> {
+  return cdp.evaluate<string>(`return app.vault.configDir + "/plugins/${PLUGIN_ID}/snapshots";`);
+}
+async function loescheSchnappschuesse(): Promise<void> {
+  const w = await schnappschussWurzel();
+  await cdp.evaluate(`if (await app.vault.adapter.exists(${q(w)})) await app.vault.adapter.rmdir(${q(w)}, true); return true;`);
+}
+
+// ── Bilder ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+async function setzeThema(modus: "hell" | "dunkel"): Promise<void> {
+  await cdp.evaluate(`document.body.classList.remove("theme-light", "theme-dark"); document.body.classList.add(${q(modus === "dunkel" ? "theme-dark" : "theme-light")}); app.workspace.trigger("css-change"); return true;`);
+  await sleep(500);
+}
+
+async function bildSchreiben(name: string, png: Buffer): Promise<void> {
+  if (bilderDir === null) return;
+  mkdirSync(bilderDir, { recursive: true });
+  writeFileSync(join(bilderDir, name), png);
+  console.log(`    Bild: ${name} (${Math.round(png.length / 1024)} KB)`);
+}
+
+/** Das Panel in seinem jetzigen Zustand: ganzes Fenster und Panel allein, oben und unten, hell und dunkel. */
+async function nimmBilder(tag: string): Promise<void> {
+  if (bilderDir === null) return;
+  const panel = `.workspace-leaf-content[data-type="${VIEW_TYPE}"]`;
+  for (const modus of ["hell", "dunkel"] as const) {
+    await setzeThema(modus);
+    await bildSchreiben(`panel-${modus}-${tag}-fenster.png`, await capture(cdp, undefined, 1));
+    const box = await boxOf(cdp, panel);
+    if (box !== null) await bildSchreiben(`panel-${modus}-${tag}-oben.png`, await capture(cdp, box, 1));
+    await cdp.evaluate(`const p = document.querySelector(".svg-studio-panel"); if (p) p.scrollTop = p.scrollHeight; return true;`);
+    await sleep(300);
+    const box2 = await boxOf(cdp, panel);
+    if (box2 !== null) await bildSchreiben(`panel-${modus}-${tag}-unten.png`, await capture(cdp, box2, 1));
+    await cdp.evaluate(`const p = document.querySelector(".svg-studio-panel"); if (p) p.scrollTop = 0; return true;`);
+  }
+  await setzeThema("hell");
+}
+
+// ── Aufbau ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+function setup(): void {
+  const vaultDir = stagingVaultDir(REPO_NAME);
+  const log = buildVault({ repoRoot: REPO_ROOT, vaultDir, fixtureDir: FIXTURE_DIR, pluginId: PLUGIN_ID });
+  console.log(`Staging-Vault gebaut: ${vaultDir}`);
+  for (const l of log) console.log(`  · ${l}`);
+}
+
+interface Vorbereitet { hinweis: string; version: string | null; versionPasst: boolean | undefined; neu: string }
+
+async function bereiteVor(c: Cdp): Promise<Vorbereitet> {
+  await requireVisible(c);
+  const klar = await bereiteInstanzVor(c, { pluginIds: [PLUGIN_ID], nurVault: REPO_NAME, sprache: "en", erwarteteVersion: "1.15" });
+  const neu = await ladePluginNeu(c, PLUGIN_ID, { repoMainJs: join(REPO_ROOT, "main.js"), sprache: "en", melde: (m) => console.log(`  ! ${m}`) });
+  if (!neu.geladen) throw new Error(`Plugin nicht aktiv — ${neu.hinweis}`);
+  if (!neu.aktuell) throw new Error(neu.hinweis);
+  const fm = await installFakeManager(c, {
+    pluginId: MANAGER_ID,
+    invalidiere: [PLUGIN_ID],
+    endpunkte: [{ id: "smoke-stub", label: "Stub", url: stub.url, models: ["stub-modell"], defaultModel: "stub-modell", capabilities: ["chat"] }],
+  });
+  if (!fm.installiert) throw new Error(`Fake-Manager nicht eingebaut: ${fm.grund ?? "?"}`);
+  return { hinweis: klar.hinweis, version: klar.version, versionPasst: klar.versionPasst, neu: neu.hinweis };
+}
+
+// ── Die Punkte ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const SICHTBAR = `const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };`;
+
+async function punktBlock(): Promise<void> {
+  await lauf("block-rendert-als-bild", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    const messe = (scope: string): Promise<{ n: number; nw: number; nh: number; complete: boolean; src: string; w: number; edit: boolean } | null> =>
+      pollUntil(cdp, `
+        ${SICHTBAR}
+        const imgs = Array.from(document.querySelectorAll(${q(`${scope} img.svg-studio-img`)})).filter(vis);
+        if (imgs.length === 0) return null;
+        const i = imgs[0];
+        return { n: imgs.length, nw: i.naturalWidth, nh: i.naturalHeight, complete: i.complete, src: i.src.slice(0, 26), w: Math.round(i.getBoundingClientRect().width), edit: !!i.closest(".svg-studio-block").querySelector(".svg-studio-edit") };
+      `, 8000, 250);
+    if (!(await openExisting(cdp, "Block.md", "preview"))) throw new Vorbedingung("Block.md (Lesemodus) rendert nicht");
+    const lesen = await messe(".markdown-preview-view");
+    if (!(await openExisting(cdp, "Block.md", "source"))) throw new Vorbedingung("Block.md (Live Preview) rendert nicht");
+    const lp = await messe(".markdown-source-view");
+    const modus = await cdp.evaluate<string>(`const l = app.workspace.getMostRecentLeaf(app.workspace.rootSplit); return JSON.stringify({ mode: l.view.getMode(), source: l.view.getState().source });`);
+    const gut = (m: typeof lesen): boolean => m !== null && m.n === 1 && m.nw > 0 && m.nh > 0 && m.complete && m.src.startsWith("data:image/svg+xml") && m.edit;
+    record("block-rendert-als-bild", gut(lesen) && gut(lp), `Lesemodus ${q(lesen)} · Live Preview ${q(lp)} (Blattzustand ${modus})`);
+  });
+}
+
+async function punktEinbettung(): Promise<void> {
+  await lauf("einbettung-hat-knopf", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    type Knopf = { n: number; knoepfe: number; w: number; h: number; label: string | null };
+    const messe = async (scope: string): Promise<Knopf | null> => {
+      const ende = Date.now() + 8000;
+      let r: Knopf | null = null as Knopf | null;
+      while (Date.now() < ende) {
+        r = await cdp.evaluate<Knopf | null>(`
+          ${SICHTBAR}
+          const es = Array.from(document.querySelectorAll(${q(`${scope} .internal-embed.image-embed`)})).filter(vis);
+          if (es.length === 0) return null;
+          const bs = es[0].querySelectorAll("[data-svg-studio-button]");
+          const b = bs[0];
+          const rr = b ? b.getBoundingClientRect() : null;
+          return { n: es.length, knoepfe: bs.length, w: rr ? Math.round(rr.width) : 0, h: rr ? Math.round(rr.height) : 0, label: b ? b.getAttribute("aria-label") : null };
+        `);
+        if (r !== null && r.knoepfe >= 1) break;
+        await sleep(250);
+      }
+      return r;
+    };
+    if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md (Lesemodus) rendert nicht");
+    const lesen = await messe(".markdown-preview-view");
+    if (!(await openExisting(cdp, "Einbettung.md", "source"))) throw new Vorbedingung("Einbettung.md (Live Preview) rendert nicht");
+    const lp = await messe(".markdown-source-view");
+    const gut = (m: typeof lesen): boolean => m !== null && m.n === 1 && m.knoepfe === 1 && m.w > 0 && m.h > 0 && m.label !== null;
+    record("einbettung-hat-knopf", gut(lesen) && gut(lp), `nur die sichtbare Fassung · Lesemodus ${q(lesen)} · Live Preview ${q(lp)}`);
+  });
+}
+
+async function punktKnopfOeffnetPanel(): Promise<void> {
+  await lauf("knopf-oeffnet-panel", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md rendert nicht");
+    const knopfE = `Array.from(document.querySelectorAll(".markdown-preview-view .internal-embed.image-embed [data-svg-studio-button]")).find((b) => b.getBoundingClientRect().width > 0)`;
+    await pollUntil(cdp, `return (${knopfE}) ? true : null;`, 8000, 250);
+    if (!(await klick(`(${knopfE})`))) throw new Vorbedingung("Einbettungsknopf nicht klickbar");
+    const e = await warteSnap((s) => (s.target ?? "").includes("probe.svg"), 8000);
+    const blaetter = await cdp.evaluate<number>(`return app.workspace.getLeavesOfType(${q(VIEW_TYPE)}).length;`);
+    if (!(await openExisting(cdp, "Block.md", "preview"))) throw new Vorbedingung("Block.md rendert nicht");
+    const knopfB = `Array.from(document.querySelectorAll(".markdown-preview-view .svg-studio-block > .svg-studio-edit")).find((b) => b.getBoundingClientRect().width > 0)`;
+    await pollUntil(cdp, `return (${knopfB}) ? true : null;`, 8000, 250);
+    if (!(await klick(`(${knopfB})`))) throw new Vorbedingung("Blockknopf nicht klickbar");
+    const b = await warteSnap((s) => /Block\.md:\d+/.test(s.target ?? ""), 8000);
+    const blaetter2 = await cdp.evaluate<number>(`return app.workspace.getLeavesOfType(${q(VIEW_TYPE)}).length;`);
+    record("knopf-oeffnet-panel", e !== null && b !== null && blaetter === 1 && blaetter2 === 1, `Einbettung: Ziel ${q(e?.target)} (${blaetter} Blatt) · Block: Ziel ${q(b?.target)} (${blaetter2} Blatt)`);
+  });
+}
+
+async function punktSchnappschuss(): Promise<void> {
+  await lauf("c4d-schnappschuss", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await loescheSchnappschuesse();
+    // 8 Schnappschüsse von früher am Tag: mit dem neuen sind es 9, die Staffelung (6 heute, dazu der älteste) behält 7.
+    const wurzel = await schnappschussWurzel();
+    const alt = fixtur("probe.svg");
+    const jetzt = Date.now();
+    const saat: string[] = [];
+    for (let i = 8; i >= 1; i--) saat.push(stampedName(jetzt - (i + 2) * 60_000));
+    for (const name of saat) {
+      await cdp.evaluate(`
+        const dir = ${q(`${wurzel}/${name}`)};
+        await app.vault.adapter.mkdir(${q(wurzel)}).catch(() => undefined);
+        await app.vault.adapter.mkdir(dir);
+        await app.vault.adapter.write(dir + "/probe.svg", ${q(alt)});
+        return true;
+      `);
+    }
+    if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md rendert nicht");
+    const knopf = `Array.from(document.querySelectorAll(".markdown-preview-view .internal-embed.image-embed [data-svg-studio-button]")).find((b) => b.getBoundingClientRect().width > 0)`;
+    await pollUntil(cdp, `return (${knopf}) ? true : null;`, 8000, 250);
+    if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Einbettungsknopf nicht klickbar");
+    if ((await warteSnap((s) => (s.target ?? "").includes("probe.svg"), 8000)) === null) throw new Vorbedingung("Panel nicht auf probe.svg");
+    stub.antworten([ANTWORT_VERFEINERN]);
+    const s = await frage(PROMPT_VERFEINERN);
+    console.log(`    Runde: ${q(s.labels)} ${q(s.metas)} · Änderungen ${q(s.changes)} · ${s.measure ?? "(keine Maßzeile)"}`);
+    await nimmBilder("desktop").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
+    const r = await uebernimm();
+    const neu = await liesDatei("probe.svg");
+    const liste = await cdp.evaluate<string[]>(`
+      const w = ${q(wurzel)};
+      if (!(await app.vault.adapter.exists(w))) return [];
+      return (await app.vault.adapter.list(w)).folders.map((f) => f.split("/").pop());
+    `);
+    const neuester = [...liste].sort().at(-1) ?? "";
+    const kopie = neuester === "" ? null : await liesDatei(`${wurzel}/${neuester}/probe.svg`).catch(() => null);
+    const kopieDirekt = neuester === "" ? null : await cdp.evaluate<string | null>(`const p = ${q(`${wurzel}/${neuester}/probe.svg`)}; return (await app.vault.adapter.exists(p)) ? await app.vault.adapter.read(p) : null;`);
+    const geschrieben = neu !== null && neu.includes('x="145"') && !neu.includes('x="165"');
+    const gesichert = kopieDirekt !== null && kopieDirekt === alt && !saat.includes(neuester);
+    const rotiert = liste.length < 9 && saat.slice(0, 1).every((n) => liste.includes(n)) && liste.length >= 2;
+    void kopie;
+    record("c4d-schnappschuss", r.ok && geschrieben && gesichert && rotiert,
+      `Übernehmen ${r.ok ? "ok" : `Fehler: ${r.snap.status}`} · Datei geändert (Tür x=145): ${geschrieben} · Kopie des alten Standes im neuesten Ordner ${q(neuester)}: ${gesichert} · Rotation: ${liste.length} von 9 Ordnern übrig, ältester da: ${saat.slice(0, 1).every((n) => liste.includes(n))}`);
+    await loescheSchnappschuesse();
+    await schreibe("probe.svg", fixtur("probe.svg"));
+  });
+}
+
+async function punktErzeugen(): Promise<void> {
+  await lauf("erzeugen-ersatzendpunkt", async () => {
+    await raeume();
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_ERZEUGEN]);
+    const s = await frage(PROMPT_ERZEUGEN);
+    const chats = chatAnfragen();
+    const modell = (chats[0]?.json as { model?: string } | null)?.model;
+    const ids = s.svgIds ?? [];
+    record("erzeugen-ersatzendpunkt",
+      s.rounds === 1 && !s.previewHidden && ids.includes("tuer") && ids.includes("raum") && chats.length === 1 && modell === "stub-modell" && (s.measure ?? "") !== "",
+      `Runde ${q(s.labels)} (${q(s.metas)}) · Vorschau zeigt ${ids.length} Elemente mit id (tuer: ${ids.includes("tuer")}) · Maßzeile ${q(s.measure)} · Status ${q(s.status)} · Stub: ${chats.length} Chat-Anfrage, Modell ${q(modell)} (gegen den Stub, nicht gegen ein Modell)`);
+  });
+}
+
+async function punktRueckfrage(): Promise<void> {
+  await lauf("rueckfrage-nach-ungueltiger-antwort", async () => {
+    await raeume();
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_UNGUELTIG, ANTWORT_ERZEUGEN]);
+    const s = await frage(PROMPT_ERZEUGEN);
+    const chats = chatAnfragen();
+    const zweite = chats[1] ? nachrichten(chats[1]) : [];
+    const letzte = zweite.at(-1)?.content ?? "";
+    const ok = chats.length === 2 && nachrichten(chats[0]!).length === 2 && zweite.length === 4 && letzte.startsWith("Your previous answer was not valid:") && letzte.includes("Kommentare in <style>");
+    record("rueckfrage-nach-ungueltiger-antwort", ok && s.rounds === 1 && (s.svgIds ?? []).includes("tuer"),
+      `${chats.length} Anfragen im Stub-Protokoll · Nachrichten je Anfrage ${q(chats.map((c) => nachrichten(c).length))} · Rückfrage beginnt ${q(letzte.slice(0, 120))} · am Ende ${s.rounds} Runde mit tuer: ${(s.svgIds ?? []).includes("tuer")}`);
+  });
+}
+
+async function punktSchattenwurzel(): Promise<void> {
+  await lauf("schattenwurzel-isoliert", async () => {
+    await raeume();
+    await oeffneNotiz("_smoke-schatten.md", "Eine Notiz neben dem Panel.\n", "preview");
+    await oeffneNeuesPanel();
+    const FARBEN = `
+      const farbe = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).color : null; };
+      return { knopf: farbe(".svg-studio-send"), ziel: farbe(".svg-studio-target"), flaeche: farbe(".workspace-split.mod-root"), notiz: farbe(".markdown-preview-view"), body: farbe("body") };
+    `;
+    type Farben = { knopf: string | null; ziel: string | null; flaeche: string | null; notiz: string | null; body: string | null };
+    const vorher = await cdp.evaluate<Farben>(FARBEN);
+    stub.antworten([ANTWORT_STIL]);
+    const s = await frage("Ein Kasten mit rotem Stil");
+    if (s.error !== null) throw new Vorbedingung(`Der Bereiniger lehnt das Stil-SVG ab: ${s.error}`);
+    const nachher = await cdp.evaluate<Farben>(FARBEN);
+    const innen = await cdp.evaluate<string | null>(`const st = document.querySelector(".svg-studio-stage"); const svg = st && st.shadowRoot ? st.shadowRoot.querySelector("svg") : null; return svg ? getComputedStyle(svg).color : null;`);
+    const stilDa = await cdp.evaluate<boolean>(`const st = document.querySelector(".svg-studio-stage"); return !!(st && st.shadowRoot && st.shadowRoot.querySelector("style") && Array.from(st.shadowRoot.querySelectorAll("style")).some((x) => (x.textContent || "").includes("color: red")));`);
+    // Gegenprobe: dieselbe Regel im Licht-DOM (mit !important, denn `*` hat keine Spezifität und verliert gegen die eigene Farbregel des Knopfs) färbt Knopf und Zieltext — die Messung kann also rot werden.
+    await cdp.evaluate(`const st = document.createElement("style"); st.id = "smoke-leck"; st.textContent = "* { color: red !important }"; document.head.appendChild(st); return true;`);
+    const leck = await cdp.evaluate<Farben>(FARBEN);
+    await cdp.evaluate(`const st = document.getElementById("smoke-leck"); if (st) st.remove(); return true;`);
+    const gleich = vorher.knopf === nachher.knopf && vorher.ziel === nachher.ziel && vorher.flaeche === nachher.flaeche && vorher.notiz === nachher.notiz && vorher.body === nachher.body;
+    const beisst = leck.knopf === "rgb(255, 0, 0)" && leck.ziel === "rgb(255, 0, 0)" && vorher.knopf !== "rgb(255, 0, 0)" && vorher.ziel !== "rgb(255, 0, 0)";
+    if (!stilDa || innen !== "rgb(255, 0, 0)") throw new Vorbedingung(`Das <style> wirkt nicht einmal im Shadow Root (innen ${innen}, Stil da: ${stilDa}): der Punkt hätte keinen Gegenstand`);
+    if (!beisst) throw new Vorbedingung(`Gegenprobe ohne Biss: im Licht-DOM färbt dieselbe Regel Knopf und Zieltext nicht (${leck.knopf}, ${leck.ziel})`);
+    record("schattenwurzel-isoliert", gleich, `Knopf ${vorher.knopf} → ${nachher.knopf} · Zieltext ${vorher.ziel} → ${nachher.ziel} · Arbeitsfläche ${vorher.flaeche} → ${nachher.flaeche} · Notiz ${vorher.notiz} → ${nachher.notiz} · im Shadow Root color ${innen} (die Regel wirkt dort) · Gegenprobe (Regel mit !important im Licht-DOM): Knopf ${leck.knopf}, Zieltext ${leck.ziel}`);
+  });
+}
+
+const ERREICHBAR = {
+  selektoren: [".svg-studio-input", ".svg-studio-send", ".svg-studio-accept", ".svg-studio-discard", ".svg-studio-new", ".svg-studio-bg-toggle", ".okit-model-bar-select"],
+  erforderlich: [".svg-studio-send", ".svg-studio-accept", ".svg-studio-discard", ".svg-studio-input"],
+  fuelle: { in: ".svg-studio-stream .okit-stream-body", zeilen: 150 },
+  ueberlauf: ".svg-studio-panel",
+};
+const KURZ = { element: ".workspace-leaf", enthaelt: ".svg-studio-panel", hoehe: 420 };
+
+async function punktFokusUndErreichbarkeit(): Promise<void> {
+  if (!gewaehlt("fokus-erhalt", "fokus-erhalt-gegenprobe", "erreichbarkeit", "erreichbarkeit-gegenprobe")) return;
+  await raeume();
+  await oeffneNeuesPanel();
+  stub.antworten([{ text: ANTWORT_ERZEUGEN, takt: 150, teile: 30 }]);
+  let laeuft = false;
+  try {
+    await tippe(PROMPT_ERZEUGEN);
+    await klickSenden();
+    laeuft = (await warteSnap((s) => s.running, 5000)) !== null;
+  } catch (e) {
+    console.log(`    ! Lauf nicht gestartet: ${fehlerText(e)}`);
+  }
+  await lauf("fokus-erhalt", async () => {
+    if (!laeuft) throw new Vorbedingung("Der Lauf startete nicht (Fokus WÄHREND des Stroms nicht messbar)");
+    const u = await messeFokusErhalt(cdp, { selector: ".svg-studio-input" });
+    urteil("fokus-erhalt", { ...u, detail: `${u.detail} (getippt während des Stroms)` });
+  });
+  await warteSnap((s) => s.rounds === 1 && !s.running, 30000);
+  await lauf("fokus-erhalt-gegenprobe", async () => {
+    urteil("fokus-erhalt-gegenprobe", await gegenprobeFokus(cdp, { selector: ".svg-studio-input" }));
+  });
+  await lauf("erreichbarkeit", async () => {
+    const s = await snap();
+    if (s === null || s.rounds !== 1) throw new Vorbedingung("Keine Runde im Panel: die Vorschau fehlt");
+    const u1 = await messeErreichbarkeit(cdp, ERREICHBAR);
+    const u2 = await mitHoehe(cdp, KURZ, () => messeErreichbarkeit(cdp, ERREICHBAR));
+    const teile = [u1, u2 as PflichtTeilurteil];
+    const rot = teile.find((t) => t.urteil === "rot");
+    const gruen = teile.filter((t) => t.urteil === "gruen").length;
+    const gesamt: PflichtTeilurteil = rot !== undefined ? rot : gruen > 0 ? { urteil: "gruen", detail: "" } : { urteil: "nichts-gemessen", detail: "" };
+    urteil("erreichbarkeit", { ...gesamt, detail: `normal: ${u1.urteil} (${u1.detail}) · kurzes Panel 420 px: ${(u2 as PflichtTeilurteil).urteil} (${(u2 as PflichtTeilurteil).detail})` });
+  });
+  await lauf("erreichbarkeit-gegenprobe", async () => {
+    const g = await mitHoehe(cdp, KURZ, () => gegenprobeErreichbarkeit(cdp, ERREICHBAR));
+    urteil("erreichbarkeit-gegenprobe", g as PflichtTeilurteil);
+  });
+}
+
+async function punktUebernehmenDatei(): Promise<void> {
+  await lauf("uebernehmen-als-datei", async () => {
+    // Das Panel mit der Runde aus dem vorigen Abschnitt weiterverwenden, aber die Notiz neu hinlegen.
+    const s0 = await snap();
+    if (s0 === null || s0.rounds !== 1) {
+      await raeume();
+      await oeffneNeuesPanel();
+      stub.antworten([ANTWORT_ERZEUGEN]);
+      await frage(PROMPT_ERZEUGEN);
+    }
+    await oeffneNotiz("_smoke-datei.md", "Vorher\n\nNachher\n", "source");
+    await setzeCursor("_smoke-datei.md", 2);
+    const vor = await anhaenge();
+    const r = await uebernimm();
+    const nach = await anhaenge();
+    const neu = nach.filter((p) => !vor.includes(p));
+    const inhalt = neu[0] === undefined ? null : await liesDatei(neu[0]);
+    await sleep(300);
+    const notiz = (await notizText("_smoke-datei.md")) ?? "";
+    const name = neu[0]?.split("/").pop() ?? "";
+    record("uebernehmen-als-datei",
+      r.ok && neu.length === 1 && neu[0]!.startsWith(`${ANHANG}/`) && inhalt !== null && inhalt.includes('id="tuer"') && name !== "" && notiz.includes(`![[${name}]]`) && (r.snap.target ?? "").includes(name),
+      `Übernehmen ${r.ok ? "ok" : "Fehler"}: ${q(r.snap.status)} · neue Dateien ${q(neu)} · enthält tuer: ${inhalt?.includes('id="tuer"')} · Einbettung in der Notiz: ${notiz.includes(`![[${name}]]`)} · Panel-Ziel danach ${q(r.snap.target)}`);
+  });
+}
+
+async function punktUebernehmenBlock(): Promise<void> {
+  if (!gewaehlt("uebernehmen-als-block", "c4a-bediente-notiz", "strg-z-nach-block-uebernehmen")) return;
+  await raeume();
+  await setzeAcceptAs("block");
+  await oeffneNotiz("_smoke-andere.md", "Eine andere Notiz.\n", "source");
+  await oeffneNotiz("_smoke-block.md", "Vorher\n\nNachher\n", "source", "tab");
+  await setzeCursor("_smoke-block.md", 2);
+  await oeffneNeuesPanel();
+  stub.antworten([ANTWORT_ERZEUGEN]);
+  let fehler: string | null = null;
+  try {
+    await frage(PROMPT_ERZEUGEN);
+  } catch (e) {
+    fehler = fehlerText(e);
+  }
+  const vorX = await notizText("_smoke-block.md");
+  const vorY = await notizText("_smoke-andere.md");
+  const aktiv = await cdp.evaluate<string | null>(`const l = app.workspace.activeLeaf; return l && l.view ? l.view.getViewType() : null;`);
+  let r: { ok: boolean; snap: Snap } | null = null;
+  try {
+    if (fehler === null) r = await uebernimm();
+  } catch (e) {
+    fehler = fehlerText(e);
+  }
+  await sleep(400);
+  const nachX = await notizText("_smoke-block.md");
+  const nachY = await notizText("_smoke-andere.md");
+  await lauf("uebernehmen-als-block", async () => {
+    if (fehler !== null || r === null) throw new Vorbedingung(`Vorbereitung fehlgeschlagen: ${fehler}`);
+    const ok = r.ok && nachX !== null && nachX.includes("```svg-studio") && nachX.includes('id="tuer"') && /Code block inserted/.test(r.snap.status ?? "") && /_smoke-block/.test(r.snap.target ?? "");
+    record("uebernehmen-als-block", ok, `Übernehmen ${r.ok ? "ok" : "Fehler"}: ${q(r.snap.status)} · Block in der Notiz: ${nachX?.includes("```svg-studio")} · Panel-Ziel danach ${q(r.snap.target)}`);
+  });
+  await lauf("c4a-bediente-notiz", async () => {
+    if (fehler !== null || r === null) throw new Vorbedingung(`Vorbereitung fehlgeschlagen: ${fehler}`);
+    record("c4a-bediente-notiz", aktiv === VIEW_TYPE && nachY === vorY && nachX !== vorX, `beim Übernehmen hatte das Blatt „${aktiv}“ den Fokus · zuletzt bediente Notiz (_smoke-block) ${nachX !== vorX ? "bekam" : "bekam NICHT"} den Block · die andere Notiz blieb ${nachY === vorY ? "unverändert" : "VERÄNDERT"}`);
+  });
+  await lauf("strg-z-nach-block-uebernehmen", async () => {
+    if (fehler !== null || r === null || vorX === null) throw new Vorbedingung(`Vorbereitung fehlgeschlagen: ${fehler}`);
+    await cdp.evaluate(`const l = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === "_smoke-block.md"); l.view.editor.undo(); return true;`);
+    await sleep(300);
+    const nachUndo = await notizText("_smoke-block.md");
+    record("strg-z-nach-block-uebernehmen", nachUndo === vorX, `ein Rückgängig-Schritt (editor.undo) ${nachUndo === vorX ? "stellt die Notiz wieder her" : `lässt die Notiz anders: ${q(nachUndo?.slice(0, 200))}`}`);
+  });
+}
+
+async function punktLesemodus(): Promise<void> {
+  await lauf("uebernehmen-lesemodus", async () => {
+    await raeume();
+    await setzeAcceptAs("block");
+    await oeffneNotiz("_smoke-lesen.md", "Vorher\n\nNachher\n", "preview");
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_ERZEUGEN, ANTWORT_ERZEUGEN]);
+    await frage(PROMPT_ERZEUGEN);
+    const b = await uebernimm();
+    await sleep(300);
+    const nachB = (await notizText("_smoke-lesen.md")) ?? "";
+    const blockOk = b.ok && nachB.trimEnd().endsWith("```") && nachB.includes("```svg-studio") && /end of the note/.test(b.snap.status ?? "");
+    await setzeAcceptAs("file");
+    if (!(await klick(`document.querySelector(".svg-studio-new")`))) throw new Vorbedingung("„New“ nicht klickbar");
+    await warteSnap((s) => s.rounds === 0);
+    await frage("Grundriss zweiter Versuch");
+    const vor = await anhaenge();
+    const f = await uebernimm();
+    await sleep(300);
+    const neu = (await anhaenge()).filter((p) => !vor.includes(p));
+    const name = neu[0]?.split("/").pop() ?? "";
+    const nachF = (await notizText("_smoke-lesen.md")) ?? "";
+    const dateiOk = f.ok && neu.length === 1 && nachF.trimEnd().endsWith(`![[${name}]]`) && /end of the note/.test(f.snap.status ?? "");
+    record("uebernehmen-lesemodus", blockOk && dateiOk, `Block: ${q(b.snap.status)} (Notiz endet auf dem Zaun: ${nachB.trimEnd().endsWith("```")}) · Datei: ${q(f.snap.status)} (neue Datei ${q(neu)}, Verweis am Ende: ${nachF.trimEnd().endsWith(`![[${name}]]`)}) — Prüfpunkt C4 (b), beide Wege`);
+  });
+}
+
+async function punktSperre(): Promise<void> {
+  await lauf("c4c-sperre-ohne-notiz", async () => {
+    await raeume();
+    await setzeAcceptAs("block");
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_ERZEUGEN]);
+    await frage(PROMPT_ERZEUGEN);
+    const ohne = await warteSnap((s) => s.acceptDisabled === true && /needs an open note/.test(s.hint ?? ""), 3000);
+    await oeffneNotiz("_smoke-sperre.md", "Eine Notiz.\n", "source");
+    const mit = await warteSnap((s) => s.acceptDisabled === false && (s.hint ?? "") === "", 4000);
+    await schliesseNotizen();
+    const wieder = await warteSnap((s) => s.acceptDisabled === true && /needs an open note/.test(s.hint ?? ""), 4000);
+    record("c4c-sperre-ohne-notiz", ohne !== null && mit !== null && wieder !== null,
+      `ohne Notiz gesperrt mit Grund: ${ohne !== null} (${q(ohne?.hint)}) · mit Notiz frei: ${mit !== null} · Notiz zu, wieder gesperrt: ${wieder !== null}`);
+  });
+}
+
+async function punktAuswahl(): Promise<void> {
+  await lauf("c4e-auswahl-dialog", async () => {
+    await raeume();
+    await setzeAcceptAs("ask");
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_ERZEUGEN]);
+    await frage(PROMPT_ERZEUGEN);
+    if (!(await klick(`document.querySelector(".svg-studio-accept")`))) throw new Vorbedingung("Übernehmen nicht klickbar");
+    const ohne = await warteDialog(5000);
+    if (ohne !== null) {
+      await dialogKlick(/cancel|abbrechen/i);
+      await sleep(400);
+    }
+    const abg = await snap();
+    await oeffneNotiz("_smoke-wahl.md", "Eine Notiz.\n", "source");
+    await setzeCursor("_smoke-wahl.md", 0);
+    await klick(`document.querySelector(".svg-studio-accept")`);
+    const mit = await warteDialog(5000);
+    if (mit !== null) {
+      await dialogKlick(/cancel|abbrechen/i);
+      await sleep(400);
+    }
+    const ok = ohne !== null && mit !== null
+      && ohne.buttons.length === 2 && ohne.buttons.some((b) => /attachment folder/i.test(b)) && !ohne.buttons.some((b) => /code block/i.test(b)) && ohne.paras.some((p) => /No note is open/.test(p))
+      && mit.buttons.some((b) => /attachment folder/i.test(b)) && mit.buttons.some((b) => /code block/i.test(b));
+    record("c4e-auswahl-dialog", ok && /Cancelled/.test(abg?.status ?? ""), `ohne Notiz: Knöpfe ${q(ohne?.buttons)}, Text ${q(ohne?.paras)} · mit Notiz: Knöpfe ${q(mit?.buttons)} · Status nach Abbrechen ${q(abg?.status)}`);
+  });
+}
+
+/** Eine .svg-Datei im Panel öffnen, über den Befehl „Edit SVG“ (aktive Datei). */
+async function oeffneDateiImPanel(path: string): Promise<Snap> {
+  await cdp.evaluate(`
+    const f = app.vault.getAbstractFileByPath(${q(path)});
+    const leaf = app.workspace.getMostRecentLeaf(app.workspace.rootSplit) || app.workspace.getLeaf(true);
+    await leaf.openFile(f);
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+    return true;
+  `);
+  await sleep(500);
+  await cdp.evaluate(`app.commands.executeCommandById("${PLUGIN_ID}:edit-svg"); return true;`);
+  const name = path.split("/").pop() ?? path;
+  const s = await warteSnap((x) => (x.target ?? "").includes(name), 8000);
+  if (s === null) throw new Vorbedingung(`„Edit SVG“ öffnete das Panel nicht auf ${path}`);
+  return s;
+}
+
+async function punktBestand(): Promise<void> {
+  await lauf("c4f-editor-angaben-entfernen", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneDateiImPanel("inkscape.svg");
+    const mitKarte = await warteSnap((s) => s.notices.some((n) => /editor data/i.test(n.text)), 8000);
+    if (mitKarte === null) throw new Vorbedingung(`Keine Karte „Editor-Angaben“ (Karten: ${q((await snap())?.notices)})`);
+    await nimmBilder("bestand").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
+    if (!(await klickText(".svg-studio-notice", /Remove editor data/))) throw new Vorbedingung("Knopf „Remove editor data“ nicht klickbar");
+    const runde = await warteSnap((s) => s.rounds === 1, 8000);
+    const r = await uebernimm();
+    const text = (await liesDatei("inkscape.svg")) ?? "";
+    const danach = await warteSnap((s) => s.notices.length === 0, 6000);
+    record("c4f-editor-angaben-entfernen",
+      runde !== null && r.ok && !/inkscape:|sodipodi:/.test(text) && text.includes('id="mond"') && danach !== null,
+      `Karten vorher ${q(mitKarte.notices.map((n) => n.button))} · Runde ${q(runde?.labels)} · Übernehmen ${r.ok ? "ok" : q(r.snap.status)} · Datei ohne inkscape:/sodipodi: ${!/inkscape:|sodipodi:/.test(text)} · danach keine Karte mehr: ${danach !== null}`);
+  });
+  await lauf("c4f-namen-vergeben", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneDateiImPanel("unbenannt.svg");
+    const karte = await warteSnap((s) => s.notices.some((n) => /no name/i.test(n.text)), 8000);
+    if (karte === null) throw new Vorbedingung(`Keine Karte „ohne Namen“ (Karten: ${q((await snap())?.notices)})`);
+    if (!(await klickText(".svg-studio-notice", /Assign names/))) throw new Vorbedingung("Knopf „Assign names“ nicht klickbar");
+    const runde = await warteSnap((s) => s.rounds === 1, 8000);
+    const r = await uebernimm();
+    const text = (await liesDatei("unbenannt.svg")) ?? "";
+    const ids = (text.match(/ id="[^"]*"/g) ?? []).length;
+    const byteTreu = text.replace(/ id="[^"]*"/g, "") === fixtur("unbenannt.svg");
+    record("c4f-namen-vergeben", runde !== null && r.ok && ids === 3 && byteTreu, `Karte ${q(karte.notices.map((n) => n.text))} · Runde ${q(runde?.labels)} · Übernehmen ${r.ok ? "ok" : q(r.snap.status)} · ${ids} ids in der Datei · ohne die neuen ids Byte für Byte der Ausgang: ${byteTreu}`);
+  });
+  await lauf("c4f-reparieren", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneDateiImPanel("kaputt.svg");
+    const karte = await warteSnap((s) => s.notices.some((n) => /can't be used/i.test(n.text)), 8000);
+    if (karte === null) throw new Vorbedingung(`Keine Karte „unbrauchbar“ (Karten: ${q((await snap())?.notices)})`);
+    stub.antworten([ANTWORT_REPARATUR]);
+    if (!(await klickText(".svg-studio-notice", /^Repair$/))) throw new Vorbedingung("Knopf „Repair“ nicht klickbar");
+    const runde = await warteSnap((s) => s.rounds === 1, 20000);
+    const chats = chatAnfragen();
+    const frageText = chats[0] ? nachrichten(chats[0]).at(-1)?.content ?? "" : "";
+    const r = await uebernimm();
+    const text = (await liesDatei("kaputt.svg")) ?? "";
+    const wohlgeformt = await cdp.evaluate<boolean>(`return !new DOMParser().parseFromString(${q(text)}, "image/svg+xml").querySelector("parsererror");`);
+    record("c4f-reparieren",
+      runde !== null && r.ok && wohlgeformt && text.includes('id="punkt"') && frageText.includes("nicht wohlgeformt") && frageText.includes('id="kasten"'),
+      `Karte ${q(karte.notices.map((n) => n.text))} · Runde ${q(runde?.labels)} · Anfrage an den Stub nennt das Parserproblem: ${frageText.includes("nicht wohlgeformt")} und enthält den kaputten Text: ${frageText.includes('id="kasten"')} · Übernehmen ${r.ok ? "ok" : q(r.snap.status)} · Datei danach wohlgeformt: ${wohlgeformt}`);
+  });
+}
+
+async function punktNichtzeichen(): Promise<void> {
+  await lauf("c4g-nichtzeichen-im-attribut", async () => {
+    await raeume();
+    const svg = (z: string): string => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect id="a" data-x="a${z}b" x="1" y="1" width="8" height="8"/></svg>`;
+    const FFFE = String.fromCharCode(0xfffe);
+    const FFFF = String.fromCharCode(0xffff);
+    const body = `Zwei Blöcke mit Nichtzeichen im Attribut.\n\n\`\`\`svg-studio\n${svg(FFFE)}\n\`\`\`\n\n\`\`\`svg-studio\n${svg(FFFF)}\n\`\`\`\n`;
+    await oeffneNotiz("_smoke-nichtzeichen.md", body, "preview");
+    const r = await pollUntil<{ fehler: number; bilder: number }>(cdp, `
+      ${SICHTBAR}
+      const fehler = Array.from(document.querySelectorAll(".markdown-preview-view .svg-studio-error")).filter(vis).length;
+      const bilder = Array.from(document.querySelectorAll(".markdown-preview-view img.svg-studio-img")).filter(vis).length;
+      return fehler + bilder >= 2 ? { fehler, bilder } : null;
+    `, 8000, 250);
+    const parser = await cdp.evaluate<boolean[]>(`return [${q(svg(FFFE))}, ${q(svg(FFFF))}].map((t) => !!new DOMParser().parseFromString(t, "image/svg+xml").querySelector("parsererror"));`);
+    record("c4g-nichtzeichen-im-attribut", r !== null && r.fehler === 2 && r.bilder === 0 && parser.every(Boolean),
+      `Blöcke mit U+FFFE und U+FFFF: ${r?.fehler ?? "?"} Fehlerkästen, ${r?.bilder ?? "?"} Bilder · der Parser des Fensters lehnt beide ab: ${q(parser)}`);
+  });
+}
+
+async function punktSchliessen(): Promise<void> {
+  await lauf("schliessen-mit-offener-runde", async () => {
+    await raeume();
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_ERZEUGEN]);
+    await frage(PROMPT_ERZEUGEN);
+    await cdp.evaluate(`for (const l of app.workspace.getLeavesOfType(${q(VIEW_TYPE)})) l.detach(); return true;`);
+    const d1 = await warteDialog(5000);
+    const gesehen = d1 !== null && d1.paras.some((p) => /unapplied round/.test(p)) && d1.buttons.some((b) => /keep/i.test(b)) && d1.buttons.some((b) => /discard/i.test(b));
+    if (d1 !== null) await dialogKlick(/keep/i);
+    await sleep(500);
+    const offen = await cdp.evaluate<number>(`return app.workspace.getLeavesOfType(${q(VIEW_TYPE)}).length;`);
+    await oeffneNeuesPanel();
+    const behalten = await warteSnap((s) => s.rounds === 1, 5000);
+    await cdp.evaluate(`for (const l of app.workspace.getLeavesOfType(${q(VIEW_TYPE)})) l.detach(); return true;`);
+    const d2 = await warteDialog(5000);
+    if (d2 !== null) await dialogKlick(/discard/i);
+    await sleep(500);
+    await oeffneNeuesPanel();
+    const verworfen = await warteSnap((s) => s.rounds === 0, 3000);
+    record("schliessen-mit-offener-runde", gesehen && offen === 0 && behalten !== null && d2 !== null && verworfen !== null,
+      `Blatt zu mit Runde: Dialog ${q(d1?.paras)} Knöpfe ${q(d1?.buttons)} · Behalten: Blatt weg (${offen} offen), neues Panel hat ${behalten?.rounds ?? "keine"} Runde wieder · erneut zu, Verwerfen: Dialog ${d2 !== null}, neues Panel mit ${verworfen?.rounds ?? "?"} Runden`);
+  });
+}
+
+const VERZOEGERE = (ms: number): string => `const orig = app.vault.create.bind(app.vault); app.vault.create = async (...a) => { await new Promise((r) => setTimeout(r, ${ms})); return orig(...a); }; return true;`;
+
+async function punktRandfaelle(): Promise<void> {
+  await lauf("rest10a-behalten-waehrend-uebernehmen", async () => {
+    await raeume();
+    await oeffneNotiz("_smoke-rand.md", "Vorher\n\nNachher\n", "source");
+    await setzeCursor("_smoke-rand.md", 2);
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_ERZEUGEN]);
+    await frage(PROMPT_ERZEUGEN);
+    await cdp.evaluate(VERZOEGERE(2500));
+    try {
+      await klick(`document.querySelector(".svg-studio-accept")`);
+      await sleep(500);
+      await cdp.evaluate(`for (const l of app.workspace.getLeavesOfType(${q(VIEW_TYPE)})) l.detach(); return true;`);
+      const d = await warteDialog(5000);
+      if (d === null) throw new Vorbedingung("Der Schließen-Dialog kam nicht (Runden schon weg?)");
+      await dialogKlick(/keep/i);
+      await sleep(3500);
+    } finally {
+      await cdp.evaluate(`delete app.vault.create; return true;`);
+    }
+    const erste = await anhaenge();
+    await oeffneNeuesPanel();
+    const s = await warteSnap((x) => x.target !== null, 4000);
+    const rundenDa = (s?.rounds ?? 0) > 0;
+    if (rundenDa) {
+      await uebernimm().catch(() => undefined);
+      await sleep(1000);
+    }
+    const zweite = await anhaenge();
+    record("rest10a-behalten-waehrend-uebernehmen", erste.length === 1 && zweite.length === 1,
+      `nach dem ersten Übernehmen (während des Schreibens „Behalten“): ${erste.length} Datei ${q(erste)} · neues Panel zeigt ${s?.rounds ?? "?"} gemerkte Runde(n) · nach erneutem Übernehmen ${zweite.length} Dateien ${q(zweite)} (erwartet: genau eine)`);
+  });
+  await lauf("rest10b-angebotenes-ziel-waehrend-uebernehmen", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneNotiz("_smoke-rand2.md", "Vorher\n\nNachher\n", "source");
+    await oeffneNotiz("Einbettung.md", fixtur("Einbettung.md"), "preview", "split").catch(() => undefined);
+    await sleep(500);
+    await cdp.evaluate(`
+      const alle = []; app.workspace.iterateRootLeaves((l) => alle.push(l));
+      const l = alle.find((x) => x.view.file && x.view.file.path === "_smoke-rand2.md");
+      if (l) { app.workspace.setActiveLeaf(l, { focus: true }); l.view.editor.setCursor({ line: 2, ch: 0 }); }
+      return true;
+    `);
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_ERZEUGEN]);
+    await frage(PROMPT_ERZEUGEN);
+    const knopf = `Array.from(document.querySelectorAll(".markdown-preview-view .internal-embed.image-embed [data-svg-studio-button]")).find((b) => b.getBoundingClientRect().width > 0)`;
+    await pollUntil(cdp, `return (${knopf}) ? true : null;`, 8000, 250);
+    await cdp.evaluate(VERZOEGERE(3000));
+    let nach: Snap | null = null;
+    try {
+      await klick(`document.querySelector(".svg-studio-accept")`);
+      await sleep(500);
+      if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Einbettungsknopf nicht klickbar");
+      await sleep(500);
+      nach = await warteSnap((x) => x.rounds === 0, 12000);
+    } finally {
+      await cdp.evaluate(`delete app.vault.create; return true;`);
+    }
+    const s = await snap();
+    record("rest10b-angebotenes-ziel-waehrend-uebernehmen", nach !== null && (s?.target ?? "").includes("probe.svg"),
+      `während des Schreibens auf „In SVG Studio bearbeiten“ an probe.svg geklickt; nach dem Übernehmen steht im Panel: ${q(s?.target)} (erwartet: probe.svg, nicht die eben angelegte Datei)`);
+  });
+}
+
+async function punktMobil(): Promise<void> {
+  const haenge = async (): Promise<Cdp> => {
+    const c = await attachTo("workspace", port, REPO_NAME);
+    if (c === null) throw new Error("Kein Hauptfenster nach dem Neuladen in der Mobil-Emulation");
+    cdp = c;
+    const v = await bereiteVor(c);
+    console.log(`  (Mobil: ${v.hinweis}; ${v.neu})`);
+    return c;
+  };
+  try {
+    await lauf("mobil-emulation", async () => {
+      cdp = await mobilEin(cdp, haenge);
+      await sleep(800);
+      await raeume();
+      await stelleFixturenHer();
+      if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md rendert in der Mobil-Emulation nicht");
+      const knopf = `Array.from(document.querySelectorAll(".markdown-preview-view .internal-embed.image-embed [data-svg-studio-button]")).find((b) => b.getBoundingClientRect().width > 0)`;
+      await pollUntil(cdp, `return (${knopf}) ? true : null;`, 8000, 250);
+      const groesse = await cdp.evaluate<{ w: number; h: number }>(`const r = (${knopf}).getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) };`);
+      (globalThis as { __knopf?: { w: number; h: number } }).__knopf = groesse;
+      if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Einbettungsknopf in der Mobil-Emulation nicht klickbar");
+      if ((await warteSnap((s) => (s.target ?? "").includes("probe.svg"), 8000)) === null) throw new Vorbedingung("Panel öffnete in der Mobil-Emulation nicht");
+      stub.antworten([ANTWORT_VERFEINERN]);
+      const s = await frage(PROMPT_VERFEINERN);
+      await sleep(500);
+      await nimmBilder("mobil").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
+      const m = await cdp.evaluate<{ mobil: boolean; breite: number; hoehe: number; docUeber: boolean; panelUeber: boolean; ausserhalb: string[]; stage: { w: number; h: number } | null; messzeile: string }>(`
+        const p = document.querySelector(".svg-studio-panel");
+        const aus = [];
+        for (const sel of [".svg-studio-send", ".svg-studio-accept", ".svg-studio-discard", ".svg-studio-new", ".svg-studio-input"]) {
+          const e = document.querySelector(sel);
+          if (!e) { aus.push(sel + " fehlt"); continue; }
+          const r = e.getBoundingClientRect();
+          if (r.left < -0.5 || r.right > window.innerWidth + 0.5) aus.push(sel + " " + Math.round(r.left) + ".." + Math.round(r.right));
+        }
+        const st = document.querySelector(".svg-studio-stage");
+        const sr = st ? st.getBoundingClientRect() : null;
+        return { mobil: document.body.classList.contains("is-mobile"), breite: window.innerWidth, hoehe: window.innerHeight,
+          docUeber: document.documentElement.scrollWidth > window.innerWidth + 1, panelUeber: p ? p.scrollWidth > p.clientWidth + 1 : true,
+          ausserhalb: aus, stage: sr ? { w: Math.round(sr.width), h: Math.round(sr.height) } : null, messzeile: (document.querySelector(".svg-studio-measure") || {}).textContent || "" };
+      `);
+      record("mobil-emulation", m.mobil && m.breite === BREITE && !m.docUeber && !m.panelUeber && m.ausserhalb.length === 0 && m.stage !== null && m.stage.w > 0 && m.stage.h > 0 && m.messzeile !== "" && s.rounds === 1,
+        `Emulation ${m.breite} × ${m.hoehe} (is-mobile ${m.mobil}) · Seitenüberlauf Dokument ${m.docUeber}, Panel ${m.panelUeber} · Knöpfe außerhalb: ${q(m.ausserhalb)} · Vorschau ${q(m.stage)} · Maßzeile ${q(m.messzeile)}`);
+    });
+    await lauf("mobil-trefflaeche-44px", async () => {
+      const g = (globalThis as { __knopf?: { w: number; h: number } }).__knopf;
+      if (g === undefined) throw new Vorbedingung("Der Einbettungsknopf wurde in der Mobil-Emulation nicht vermessen");
+      record("mobil-trefflaeche-44px", g.w >= 44 && g.h >= 44, `Einbettungsknopf ${g.w} × ${g.h} px (Emulation, Plan-Messpunkt M2: mindestens 44 × 44)`);
+    });
+  } finally {
+    await entferneFakeManager(cdp, { pluginId: MANAGER_ID, invalidiere: [PLUGIN_ID] }).catch(() => undefined);
+    await mobilAus(cdp).catch(() => undefined);
+  }
+  void HOEHE;
+}
+
+// ── Hauptlauf ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.has("setup")) {
+    setup();
+    return;
+  }
+  const portArg = args.value("port");
+  if (!portArg || !Number.isInteger(Number(portArg))) throw new Error("--port <Port> ist Pflicht (Zweitinstanz, z. B. --port 9660) — kein Standardport.");
+  port = Number(portArg);
+  bilderDir = args.value("bilder") ?? null;
+  const nurArg = args.value("nur");
+  if (nurArg !== undefined) {
+    nur = new Set(nurArg.split(",").map((x) => x.trim()));
+    for (const n of nur) if (!(PUNKTE as readonly string[]).includes(n)) throw new Error(`--nur: unbekannter Prüfpunkt ${n}`);
+  }
+
+  console.log(`GUI-Smoke svg-studio — Obsidian auf Port ${port}`);
+  const verbunden = await attachTo("workspace", port, REPO_NAME);
+  if (verbunden === null) throw new Error(`Kein Obsidian-Hauptfenster auf Port ${port} für Vault „${REPO_NAME}“. Läuft die Zweitinstanz (Rezept im Dateikopf)?`);
+  cdp = verbunden;
+  await cdp.mitschnitt((z) => { konsole.push(z.slice(0, 400)); });
+  stub = await startLlmStub({ models: ["stub-modell"] });
+  console.log(`LLM-Stub: ${stub.url}`);
+
+  let farbklasse = "";
+  let themaWar: string | null = null;
+  const zustandZurueck = async (): Promise<void> => {
+    try {
+      await cdp.evaluate(`delete app.vault.create; return true;`);
+      if (farbklasse !== "") await cdp.evaluate(`document.body.className = ${q(farbklasse)}; return true;`);
+      void themaWar;
+      await setzeAcceptAs("file");
+      await entferneFakeManager(cdp, { pluginId: MANAGER_ID, invalidiere: [PLUGIN_ID] });
+    } catch { console.log("  ! Aufräumen im Renderer fehlgeschlagen — Staging-Vault von Hand prüfen"); }
+    await stub.stop().catch(() => undefined);
+  };
+  const zustand = beimAbbruch(zustandZurueck, "Panel, Einstellung, Fake-Manager und Stub zurücksetzen");
+  try {
+    const v = await bereiteVor(cdp);
+    farbklasse = await cdp.evaluate<string>(`return document.body.className;`);
+    await setWindowSize(cdp, 1400, 1000);
+    await raeume();
+    await stelleFixturenHer();
+    await lauf("plugin-geladen", async () => {
+      record("plugin-geladen", true, `${v.hinweis} · ${v.neu} · Obsidian ${v.version ?? "?"}${v.versionPasst === false ? " (NICHT 1.15)" : ""}`);
+    });
+
+    await punktBlock();
+    await punktEinbettung();
+    await punktKnopfOeffnetPanel();
+    await punktSchnappschuss();
+    await punktErzeugen();
+    await punktRueckfrage();
+    await punktSchattenwurzel();
+    await punktFokusUndErreichbarkeit();
+    await punktUebernehmenDatei();
+    await punktUebernehmenBlock();
+    await punktLesemodus();
+    await punktSperre();
+    await punktAuswahl();
+    await punktBestand();
+    await punktNichtzeichen();
+    await punktSchliessen();
+    await punktRandfaelle();
+
+    if (gewaehlt("rest11-folgerunde-nach-namen-vergeben")) skipped("rest11-folgerunde-nach-namen-vergeben", "nur von Hand prüfbar: eine Folgerunde nach „Namen vergeben“ braucht ein Modell, das auf den neu vergebenen ids aufbaut, und eine Handänderung dazwischen; der Stub belegt das nicht (C4-Rest 11, mit Johannes durchspielen)");
+    if (gewaehlt("mobil-geraet-tastatur")) skipped("mobil-geraet-tastatur", "am Gerät zu messen (iPhone, Web-Inspektor, Tastatur offen): Auftrag des Masters, Plan „Mobil am Gerät“ M4 bis M6; die Emulation hat keine Bildschirmtastatur");
+
+    await raeume();
+    if (gewaehlt("mobil-emulation", "mobil-trefflaeche-44px")) await punktMobil();
+    if (nur !== null) for (const n of PUNKTE) if (!bilanz.eintraege().some((p) => p.name === n)) skipped(n, "nicht gewählt (--nur, Entwicklungslauf)");
+  } finally {
+    await zustand.schliesse();
+    if (!istAbgebrochen()) {
+      try { await raeume(); } catch { /* die Instanz wird beendet, der Staging-Vault wird beim nächsten Lauf neu gebaut */ }
+    }
+  }
+  if (istAbgebrochen()) return;
+  cdp.close();
+  bilanz.abschluss();
+}
+
+runDriver(main);

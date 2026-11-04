@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10 -10 440 405" data-unit="cm">
+  <title>Grundriss</title>
+  <desc>Ein Raum von 420 cm Breite und 385 cm Tiefe mit einer 90 cm breiten Tür in der Nordwand.</desc>
+  <rect id="raum" x="0" y="0" width="420" height="385" fill="none" stroke="none" />
+  <line id="wand-nord" x1="0" y1="0" x2="420" y2="0" stroke="black" stroke-width="2" />
+  <line id="wand-ost" x1="420" y1="0" x2="420" y2="385" stroke="black" stroke-width="2" />
+  <line id="wand-sued" x1="420" y1="385" x2="0" y2="385" stroke="black" stroke-width="2" />
+  <line id="wand-west" x1="0" y1="385" x2="0" y2="0" stroke="black" stroke-width="2" />
+  <rect id="tuer" x="165" y="-2" width="90" height="4" fill="white" stroke="none" />
+</svg>

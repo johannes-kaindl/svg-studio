@@ -31,6 +31,7 @@ npm run dev        # esbuild im Watch-/Dev-Modus
 npm run build      # Typecheck + Production-Bundle
 npm run deploy     # build + Kopie nach $OBSIDIAN_PLUGIN_DIR
 npm run lab -- --status          # Messlabor (außerhalb des Gates), siehe docs/internal/LAB.md
+npm run smoke:gui -- --port 9660 [--nur <punkt,…>] [--bilder <ordner>]   # GUI-Smoke gegen eine Zweitinstanz (Stub statt Modell), Aufruf in einem Zug: Kopf von scripts/gui-smoke.ts (messlauf.sh des Dachs)
 sh tools/sync-kit.sh [--check]   # Kit vendoren bzw. Drift messen
 ```
 
