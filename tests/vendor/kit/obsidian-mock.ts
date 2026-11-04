@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.79.1, src/testing/obsidian-mock.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.79.2, src/testing/obsidian-mock.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Self-contained Obsidian test double for obsidian-kit.
 // - Zero external imports (NOT from "obsidian", NOT from "vitest").
 // - Consumed via vitest `resolve.alias` as a drop-in for `import ... from "obsidian"`,
@@ -831,11 +831,14 @@ export function getLanguage(): string { return "en"; }
 // ---------------------------------------------------------------------------
 // Welle 19: Zusätze aus den Hand-Kopien (calendar-notes, health-vitals/vault-rag).
 // ---------------------------------------------------------------------------
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/;
+// Gemessen in Obsidian 1.15.1 (`pilot/frontmatter-cursor.ts`, 2026-11-04): die öffnende und die schließende Zeile sind genau `---` (Leerzeichen dahinter, `...`,
+// BOM davor und ein Anfang nicht in Zeile 1 ergeben keinen Block), ein leerer Block (`---` direkt auf `---`) ist ein Block, die schließende Zeile darf das Dateiende sein.
+const FRONTMATTER_RE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---(?:\r?\n|$)/;
 
 /** `getFrontMatterInfo(content)` (calendar-notes, Welle 19): Nachbildung nach `obsidian.d.ts`. Erkennt nur den einfachen
  *  `---\n…\n---`-Block am Dateianfang, ohne YAML zu lesen — gebraucht werden die Offsets (`contentStart` = Beginn des Rumpfes).
- *  Grenzen: ein leerer Block (`---\n---\n`) gilt als „kein Block“, und `frontmatter` ist der Text ohne die Begrenzer.
+ *  Grenzen: `frontmatter` ist der Text ohne die Begrenzer und ohne das Zeilenende davor (die echte Funktion liefert es mit, gemessen 1.15.1: `to` liegt dort eins höher);
+ *  `exists` und `contentStart` stimmen mit der echten Funktion überein (leerer Block = Block, schließende Zeile genau `---`, 0.79.2).
  *  `from`/`to` zählen die Zeichen des Blocktextes im Original, auch bei CRLF (die Hand-Kopie rechnete `from` mit 4 fest). */
 export function getFrontMatterInfo(content: string): { exists: boolean; frontmatter: string; from: number; to: number; contentStart: number } {
   const m = FRONTMATTER_RE.exec(content);

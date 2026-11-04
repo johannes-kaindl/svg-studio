@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.79.1, src/pure/fence-scan.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.79.2, src/pure/fence-scan.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/core/shapes/fence.ts` (`listFences`, `findFenceAt`, Kit-Kandidat aus der Extraktionsprüfung SVG Studio 2026-11-02),
 // hier mit `noUncheckedIndexedAccess`-Zugriffen und ohne die Sprache `shapes` im Namen. Der Zaun-Scanner liegt im obsidian-kit und nicht in
 // code-kit/fences: code-kit nennt ihn ausdrücklich „bleibt beim Träger“, und er gehört zur Domäne dieser Schicht (Zäune einer Notiz als Zeilenbereiche

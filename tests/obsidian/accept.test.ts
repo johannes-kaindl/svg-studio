@@ -476,9 +476,8 @@ describe("Übernehmen am Cursor (Review C4, S2)", () => {
     expect(r).toMatchObject({ ok: true, retarget: { kind: "block", path: "n.md" } });
   });
 
-  // Ein Fehler des Kits (`insertAtCursor`), nicht des Plugins: bei Cursor 0:0 in einer frisch geöffneten Notiz mit Frontmatter landet der Text VOR dem Frontmatter
-  // und zerstört es. Gehört ins obsidian-kit (Rest-Task C4, Punkt 8); `it.fails` hält ihn sichtbar, bis das Kit ihn behebt.
-  it.fails("Cursor 0:0 in einer Notiz mit Frontmatter: die Notiz beginnt weiter mit dem Frontmatter (offener Kit-Fehler)", async () => {
+  // Kit 0.79.2: `insertAtCursor` fügt hinter die schließende ---Zeile ein, wenn der Cursor in oder vor der Frontmatter steht (Befund des Opus-Reviews C4).
+  it("Cursor 0:0 in einer Notiz mit Frontmatter: die Notiz beginnt weiter mit dem Frontmatter", async () => {
     const note = "---\ntags: [plan]\n---\n# Wohnung\n";
     const t = acceptSetup({ "n.md": note }, { cursor: { line: 0, ch: 0 } });
     await run(t.env, newSession());

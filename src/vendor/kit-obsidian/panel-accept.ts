@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.79.1, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.79.2, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -19,6 +19,9 @@
 //   dann `vault.process`, das nur schreibt, wenn die Datei seit dem Lesen unverändert ist. Wirft `beforeWrite`, wird nichts geschrieben: ein
 //   Schreibvorgang ohne Rückweg findet nicht statt.
 // - **Neu:** `acceptAs` der Einstellung (`block`, `file`, `ask` → `env.choose()`); ein Spec ohne `newFile` kennt nur den Block und fragt nie.
+// - **Frontmatter ist Sperrzone (0.79.2):** `insertAtCursor` setzt den Text hinter die schließende `---`-Zeile, wenn der Cursor (bei einer Auswahl: deren Ende) in oder vor der Frontmatter
+//   steht (`0:0`, eine YAML-Zeile). Was Frontmatter ist, sagt Obsidians `getFrontMatterInfo`; gemessen in 1.15.1: Obsidian öffnet eine Notiz mit Frontmatter mit dem Cursor auf der ersten Zeile
+//   DAHINTER, `0:0` ist der Ausnahmefall (Strg+Pos1, Klick in den YAML-Text). Entscheidung „dahinter einfügen statt ablehnen“: Begründung im CHANGELOG 0.79.2.
 // - **Lesemodus:** `view.editor` ist dort nicht der Puffer, den Obsidian zeigt; ein `replaceRange` verpuffte lautlos. `readingMode: "refuse"` lehnt ab,
 //   `"append"` hängt den Text am Notizende über `vault.process` an und sagt das in der Meldung.
 // - **`compute` und die Meldungen:** `problem` aus `compute` (etwa aus `acceptChain` von code-kit `panel-session`, dessen Probleme englisch sind) geht
@@ -32,7 +35,7 @@
 // Nicht Teil des Bausteins: ungespeicherte Puffer einer Plugin-eigenen Dateiansicht (der Aufrufer speichert sie vor `acceptPanel`), die
 // Zwei-Wege-Wahl bei `ask` (`env.choose`, das Kit-`confirm` ist Ja/Nein) und das Zeichnen des Panels.
 
-import { MarkdownView, TFile, type App } from "obsidian";
+import { MarkdownView, TFile, getFrontMatterInfo, type App } from "obsidian";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "../kit/block-writer";
 import { findFenceAt, listFences, type Fence } from "../kit/fence-scan";
 import { closesFence } from "../kit/fences";
@@ -41,7 +44,7 @@ import type { Target } from "../kit/panel-session";
 export type BlockTarget = Extract<Target, { kind: "block" }>;
 
 /** Wo `insertAtCursor` den Text hingesetzt hat. */
-export type InsertWhere = "after-block-at-selection" | "after-block-at-cursor" | "after-selection" | "at-cursor";
+export type InsertWhere = "after-block-at-selection" | "after-block-at-cursor" | "after-frontmatter" | "after-selection" | "at-cursor";
 
 /** Der Zaun am Cursor oder am Ende der Auswahl wird nie geschlossen: hinter ihm einzufügen hieße, im Zaun einzufügen. */
 export class UnclosedFenceError extends Error {
@@ -146,19 +149,26 @@ export async function createAttachmentFile(
 
 /* ── Einfügen am Cursor ─────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 
-/** Einfügen, ohne Nutzerinhalt zu zerstören: ein Zaun unter dem Cursor bzw. am Ende der Auswahl bekommt den Text dahinter (sonst entstünde ein Block
- *  im Block); eine Auswahl außerhalb eines Zauns bleibt (Einfügung an ihrem Ende). Ein Zaun, der nie geschlossen wird, hat kein „dahinter“:
- *  `UnclosedFenceError`, nichts geschrieben. Die Zeilenenden der Notiz bleiben einheitlich. */
+/** Einfügen, ohne Nutzerinhalt zu zerstören: **die Frontmatter ist Sperrzone** (Cursor oder Auswahlende in ihr, auch `0:0` vor ihr: der Text steht hinter ihrer schließenden
+ *  `---`-Zeile, `after-frontmatter`; eine Einfügung davor machte sie zur Nicht-Frontmatter, eine in einer YAML-Zeile zerrisse sie). Was Frontmatter ist, sagt Obsidian
+ *  selbst (`getFrontMatterInfo`, gemessen 1.15.1: erste Zeile genau `---`, schließende Zeile genau `---`, ein leerer Block zählt, ohne schließende Zeile gibt es keine). Ein Zaun unter dem Cursor
+ *  bzw. am Ende der Auswahl bekommt den Text dahinter (sonst entstünde ein Block im Block); eine Auswahl außerhalb von Frontmatter und Zaun bleibt (Einfügung an ihrem Ende). Ein Zaun, der nie
+ *  geschlossen wird, hat kein „dahinter“: `UnclosedFenceError`, nichts geschrieben. Die Zeilenenden der Notiz bleiben einheitlich. */
 export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
   const editor = view.editor;
   const value = editor.getValue();
   const lines = value.split(/\r?\n/);
   const selected = editor.somethingSelected();
   const anchor = selected ? editor.getCursor("to") : editor.getCursor();
+  const eol = value.includes("\r\n") ? "\r\n" : "\n";
+  const fmEnd = frontmatterCloseLine(value);
+  if (fmEnd !== null && anchor.line <= fmEnd) {
+    editor.replaceRange(`${eol}${text.replace(/\r?\n/g, eol)}`, { line: fmEnd, ch: (lines[fmEnd] ?? "").length });
+    return "after-frontmatter";
+  }
   const fence = findFenceAt(value, anchor.line);
   if (fence) {
     if (isUnclosed(fence, lines)) throw new UnclosedFenceError(selected);
-    const eol = value.includes("\r\n") ? "\r\n" : "\n";
     editor.replaceRange(`${eol}${text.replace(/\r?\n/g, eol)}`, { line: fence.closeLine, ch: (lines[fence.closeLine] ?? "").length });
     return selected ? "after-block-at-selection" : "after-block-at-cursor";
   }
@@ -168,6 +178,13 @@ export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
   }
   editor.replaceSelection(text);
   return "at-cursor";
+}
+
+/** 0-basierte Zeile der schließenden `---` der Frontmatter, `null` ohne Frontmatter (Regel und Grenzfälle: `insertAtCursor`). */
+function frontmatterCloseLine(value: string): number | null {
+  const info = getFrontMatterInfo(value);
+  if (!info.exists) return null;
+  return value.slice(0, info.contentStart).replace(/\r?\n$/, "").split("\n").length - 1;
 }
 
 /** Ist der Zaun nie geschlossen? Dann ist seine letzte Zeile Inhalt. */
