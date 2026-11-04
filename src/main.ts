@@ -96,7 +96,10 @@ export default class SvgStudioPlugin extends Plugin {
     }));
     this.addSettingTab(new SvgStudioSettingTab(this.app, this));
     // Die zuletzt aktive Notiz bestimmt, ob ein Codeblock möglich ist: das Panel wertet die Sperre von Übernehmen neu aus, wenn das Blatt wechselt.
-    this.registerEvent(this.app.workspace.on("active-leaf-change", () => { for (const v of this.panels()) v.refreshAccept(); }));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
+      if (leaf?.view instanceof MarkdownView && leaf.view.file !== null) this.lastMarkdown = leaf.view;
+      for (const v of this.panels()) v.refreshAccept();
+    }));
 
     this.addCommand({ id: "new-svg", name: t("cmd.new"), callback: () => { void this.openPanel({ kind: "new" }); } });
     this.addCommand({
@@ -130,7 +133,7 @@ export default class SvgStudioPlugin extends Plugin {
       resolve: (el) => {
         const src = el.getAttribute("src");
         if (src === null || !/\.svg(?:[#|?].*)?$/i.test(src)) return null;
-        const file = this.app.metadataCache.getFirstLinkpathDest(src.replace(/[#|?].*$/, ""), this.app.workspace.getActiveFile()?.path ?? "");
+        const file = this.app.metadataCache.getFirstLinkpathDest(src.replace(/[#|?].*$/, ""), this.sourcePathOf(el));
         return file !== null && file.extension.toLowerCase() === "svg" ? file : null;
       },
       onEdit: (file: TFile) => { void this.openPanel(fileTarget(file)); },
@@ -147,8 +150,28 @@ export default class SvgStudioPlugin extends Plugin {
    *  Seitenleiste (REGISTRY „Panel-Aktionen brauchen den Editor aus dem rootSplit“). Quell- und Lesemodus zählen beide. */
   private lastEditor(): MarkdownView | null {
     const { workspace } = this.app;
+    // Zuerst die zuletzt aktive Notiz, in welchem Fenster auch immer (ein Popout liegt nicht im `rootSplit`); nur, solange ihre Ansicht noch offen ist.
+    const seen = this.lastMarkdown;
+    if (seen !== null && seen.file !== null) {
+      let open = false;
+      workspace.iterateAllLeaves((leaf) => { if (leaf.view === seen) open = true; });
+      if (open) return seen;
+    }
     const recent = workspace.getMostRecentLeaf(workspace.rootSplit)?.view;
     return recent instanceof MarkdownView && recent.file !== null ? recent : null;
+  }
+
+  /** Die zuletzt aktive Notiz-Ansicht, fensterübergreifend (das Panel selbst ist keine). */
+  private lastMarkdown: MarkdownView | null = null;
+
+  /** Die Notiz, in der die Einbettung steht (für relative Links): das Blatt, dessen Ansicht sie enthält; sonst die aktive Datei. Nicht die aktive Datei allein: eine Einbettung im zweiten Bereich, in einer Hover-Vorschau oder in einem Popout gehört einer anderen Notiz. */
+  private sourcePathOf(el: HTMLElement): string {
+    let found = "";
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (found === "" && view instanceof MarkdownView && view.file !== null && view.containerEl.contains(el)) found = view.file.path;
+    });
+    return found !== "" ? found : (this.app.workspace.getActiveFile()?.path ?? "");
   }
 
   private acceptEnv() {

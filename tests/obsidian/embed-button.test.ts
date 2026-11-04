@@ -132,4 +132,31 @@ describe("installEmbedButtons", () => {
     expect(e.querySelector("[data-svg-studio-button]")).toBeNull();
     plugin.unload();
   });
+
+  // Opus-Gesamtreview 2026-11-05, Befund 5: der Knopf band die Datei beim Dekorieren; ändert Obsidian `src` am schon dekorierten Element, öffnete er die alte.
+  it("der Klick löst die Einbettung neu auf: ein geändertes src öffnet die neue Datei", async () => {
+    const { plugin, edits } = setup();
+    const e = embed(document, "alt.svg");
+    document.body.appendChild(e);
+    await flush();
+    e.setAttribute("src", "neu.svg");
+    await flush();
+    (e.querySelector("[data-svg-studio-button]") as HTMLElement).click();
+    expect(edits).toEqual(["neu.svg"]);
+    plugin.unload();
+    e.remove();
+  });
+
+  it("der Klick tut nichts, wenn die Einbettung inzwischen keine .svg mehr ist", async () => {
+    const { plugin, edits } = setup();
+    const e = embed(document, "alt.svg");
+    document.body.appendChild(e);
+    await flush();
+    e.setAttribute("src", "bild.png");
+    await flush();
+    (e.querySelector("[data-svg-studio-button]") as HTMLElement).click();
+    expect(edits).toEqual([]);
+    plugin.unload();
+    e.remove();
+  });
 });

@@ -18,14 +18,15 @@ const MARK = "data-svg-studio-button";
 
 function decorate(embed: HTMLElement, o: EmbedButtonOptions): void {
   if (embed.querySelector(`[${MARK}]`) !== null) return;
-  const file = o.resolve(embed);
-  if (file === null) return;
+  if (o.resolve(embed) === null) return;
   const b = embed.createEl("button", { cls: "clickable-icon svg-studio-embed-button", attr: { [MARK]: "1", type: "button", "aria-label": o.label } });
   setIcon(b, "pencil");
   b.addEventListener("click", (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    o.onEdit(file);
+    // Beim Klick neu auflösen: Obsidian setzt `src` an einem schon dekorierten Element um, und die Datei von vorhin wäre die falsche.
+    const file = o.resolve(embed);
+    if (file !== null) o.onEdit(file);
   });
 }
 
