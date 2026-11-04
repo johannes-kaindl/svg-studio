@@ -3,6 +3,7 @@
 import { HELP_SETTING_TEXTS_DE, HELP_SETTING_TEXTS_EN } from "../vendor/kit-obsidian/help-setting";
 import { defineStrings, getLang, setLang, t, type Lang } from "../vendor/kit/i18n";
 import type { QualityTexts } from "../vendor/kit/measured-quality";
+import type { MeasureTexts } from "../core/measure-line";
 import type { PanelStrings } from "../obsidian/panel/shell";
 
 export type T = (key: string, ...args: (string | number)[]) => string;
@@ -87,6 +88,19 @@ const EN: Record<string, string> = {
   "quality.failureOwn": "In the test this model got {0} of {1} — try a simpler wording or fewer details.",
   "quality.failureBest": "A larger model may do better — measured best: {0} ({1} of {2}).",
   "quality.thinkingNote": "Measured with thinking off; with thinking up to 50 times longer (n = 1).",
+  "preview.bgOn": "Background: on",
+  "preview.bgOff": "Background: off",
+  "preview.bgToggle": "Show a background behind the preview (the image itself is not changed)",
+  "preview.tone": "Preview background",
+  "preview.tone.light": "Light",
+  "preview.tone.dark": "Dark",
+  "preview.tone.custom": "Custom",
+  "preview.hex": "Custom background colour, e.g. #f4f0e8",
+  "measure.area": "Area",
+  "measure.drawing": "Drawing",
+  "measure.at": "at",
+  "measure.units": "units",
+  "measure.ambiguous": "ambiguous id",
   "settings.model": "Language model",
   "help.docs": "https://github.com/johannes-kaindl/svg-studio",
 };
@@ -170,6 +184,19 @@ const DE: Record<string, string> = {
   "quality.failureOwn": "Im Test schaffte dieses Modell {0} von {1} — versuche eine einfachere Formulierung oder weniger Details.",
   "quality.failureBest": "Ein größeres Modell kann es besser — am besten gemessen: {0} ({1} von {2}).",
   "quality.thinkingNote": "Gemessen mit Denken aus; mit Denken bis 50-mal länger (n = 1).",
+  "preview.bgOn": "Hintergrund: an",
+  "preview.bgOff": "Hintergrund: aus",
+  "preview.bgToggle": "Einen Hintergrund hinter der Vorschau zeigen (das Bild selbst ändert sich nicht)",
+  "preview.tone": "Hintergrund der Vorschau",
+  "preview.tone.light": "Hell",
+  "preview.tone.dark": "Dunkel",
+  "preview.tone.custom": "Eigene",
+  "preview.hex": "Eigene Hintergrundfarbe, zum Beispiel #f4f0e8",
+  "measure.area": "Fläche",
+  "measure.drawing": "Zeichnung",
+  "measure.at": "bei",
+  "measure.units": "Einheiten",
+  "measure.ambiguous": "mehrdeutige id",
   "settings.model": "Sprachmodell",
   "help.docs": "https://github.com/johannes-kaindl/svg-studio",
 };
@@ -239,4 +266,9 @@ export function panelStrings(): PanelStrings {
     thinkingOn: (level) => t("panel.thinkingOn", level),
     thinkingPicker: t("panel.thinkingPicker"),
   };
+}
+
+/** Die Wörter der Maßzeile (`core/measure-line.ts`); das Dezimaltrennzeichen folgt der Sprache. */
+export function measureTexts(): MeasureTexts {
+  return { decimal: getLang() === "de" ? "," : ".", area: t("measure.area"), drawing: t("measure.drawing"), at: t("measure.at"), units: t("measure.units"), ambiguous: t("measure.ambiguous") };
 }

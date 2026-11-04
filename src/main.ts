@@ -72,6 +72,8 @@ export default class SvgStudioPlugin extends Plugin {
         },
       },
       thinkingOn: () => thinkingFor(this.settings.llm.request, "transform") !== "off",
+      // Die letzte Stellung bleibt gespeichert (Spec § 7.3); sie betrifft nur die Vorschau.
+      background: { get: () => this.settings.background, set: (s) => { this.settings.background = s; void this.saveSettings(); } },
       readTargetText: (target) => readTargetText(this.app, target),
       // Übernehmen wird mit C4 verdrahtet (Schreibweg über `panel-accept` und `block-writer`).
       accept: () => Promise.resolve({ ok: false, message: t("panel.acceptSoon") }),

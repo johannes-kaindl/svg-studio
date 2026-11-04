@@ -47,4 +47,10 @@ describe("measureCanvas", () => {
     expect(measureCanvas(``)).toBeNull();
     expect(measureCanvas(`<svg></svg>`)).toBeNull();
   });
+
+  it("unendliche Werte (1e309) sind kein Maß: die viewBox fällt weg, dann gilt die Größe", () => {
+    expect(measureCanvas(`<svg viewBox="0 0 1e309 10"/>`)).toBeNull();
+    expect(measureCanvas(`<svg viewBox="0 0 1e309 10" width="7" height="9"/>`)).toMatchObject({ width: 7, height: 9, source: "size" });
+    expect(measureCanvas(`<svg width="1e309" height="5"/>`)).toBeNull();
+  });
 });

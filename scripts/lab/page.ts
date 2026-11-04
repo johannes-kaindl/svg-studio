@@ -1,6 +1,8 @@
 // Browserseite des Messskripts (läuft in chrome-headless-shell, gebündelt von scripts/svg-lab.ts). Lab-Code, nicht Teil des Plugins.
 // Eingabe: JSON in <script id="jobs">; Ausgabe: base64-JSON in <div id="out" data-b64>.
 // Hier läuft, was ein echtes DOM braucht: Bereiniger (checkSvg), Wohlgeformtheit (DOMParser), getBBox/getCTM/getPointAtLength.
+// Die Maße kommen aus `src/obsidian/panel/bbox.ts`, derselben Funktion wie im Panel (Maßzeile).
+import { drawingBox, rootToElement, userBox } from "../../src/obsidian/panel/bbox";
 import { checkSvg } from "../../src/vendor/kit/svg-guard";
 
 interface Job {
@@ -20,18 +22,17 @@ interface JobResult {
   prueft: Check[];
 }
 
-const SVG_NS = "http://www.w3.org/2000/svg";
 const TOL = 1;
 const TOL_DEG = 1;
 
-interface Mounted { svg: SVGSVGElement; probe: SVGGElement }
+interface Mounted { svg: SVGSVGElement }
 
 function parseOk(text: string): boolean {
   const doc = new DOMParser().parseFromString(text, "image/svg+xml");
   return doc.getElementsByTagName("parsererror").length === 0 && doc.documentElement !== null;
 }
 
-/** Bereiniger, dann in die Seite hängen (nie der Text). Ein Messfühler `g` ganz am Ende liefert die Wurzel-Transformation. */
+/** Bereiniger, dann in die Seite hängen (nie der Text). */
 function mount(text: string): { m: Mounted | null; problems: string[] } {
   const r = checkSvg(text);
   if (!r.ok) return { m: null, problems: r.problems.slice(0, 6).map((p) => `${p.code}: ${p.detail}`) };
@@ -42,32 +43,13 @@ function mount(text: string): { m: Mounted | null; problems: string[] } {
   holder.style.cssText = "position:absolute;left:0;top:0;width:800px";
   document.body.appendChild(holder);
   holder.appendChild(svg);
-  const probe = document.createElementNS(SVG_NS, "g") as SVGGElement;
-  svg.appendChild(probe);
-  return { m: { svg, probe }, problems: [] };
+  return { m: { svg }, problems: [] };
 }
 
+/** Ausdehnung im Benutzerraum der Wurzel (Form des Labors: Breite `w`, Höhe `h`); gemessen von `bbox.ts`. */
 interface Box { x: number; y: number; w: number; h: number }
-
-/** Ausdehnung im Benutzerraum der Wurzel (berücksichtigt `transform` am Element und seinen Eltern, nicht die Strichstärke). */
-function userBox(m: Mounted, el: SVGGraphicsElement): Box | null {
-  try {
-    const bb = el.getBBox();
-    const V = m.probe.getCTM();
-    const M = el.getCTM();
-    if (!V || !M) return null;
-    const T = V.inverse().multiply(M);
-    const pts = [[bb.x, bb.y], [bb.x + bb.width, bb.y], [bb.x, bb.y + bb.height], [bb.x + bb.width, bb.y + bb.height]]
-      .map(([x, y]) => new DOMPoint(x, y).matrixTransform(T));
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
-    const x = Math.min(...xs);
-    const y = Math.min(...ys);
-    return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
-  } catch {
-    return null;
-  }
-}
+const labBox = (b: { x: number; y: number; width: number; height: number } | null): Box | null => (b === null ? null : { x: b.x, y: b.y, w: b.width, h: b.height });
+const measureBox = (m: Mounted, el: SVGGraphicsElement): Box | null => labBox(userBox(m.svg, el));
 
 const byId = (m: Mounted, id: string): SVGGraphicsElement | null => m.svg.querySelector(`[id="${id.replace(/"/g, '\\"')}"]`) as SVGGraphicsElement | null;
 const near = (a: number, b: number, tol: number): boolean => Math.abs(a - b) <= tol;
@@ -77,24 +59,15 @@ function texts(m: Mounted): Array<{ t: string; el: SVGGraphicsElement }> {
   return Array.from(m.svg.querySelectorAll("text")).map((el) => ({ t: (el.textContent ?? "").replace(/\s+/g, " ").trim(), el: el as unknown as SVGGraphicsElement }));
 }
 
-/** Union der Ausdehnungen der sichtbaren Zeichen-Kinder der Wurzel (ohne Messfühler, defs, style, title, desc). */
-function contentBox(m: Mounted): Box | null {
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const c of Array.from(m.svg.children)) {
-    if (c === m.probe || ["defs", "style", "title", "desc", "metadata"].includes(c.localName)) continue;
-    const b = userBox(m, c as SVGGraphicsElement);
-    if (!b) continue;
-    x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h);
-  }
-  return Number.isFinite(x0) ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
-}
+/** Union der Ausdehnungen der sichtbaren Zeichen-Kinder der Wurzel (ohne defs, style, title, desc, metadata). */
+const contentBox = (m: Mounted): Box | null => labBox(drawingBox(m.svg));
 
 function measureNamed(m: Mounted, spec: NonNullable<Job["messen"]>): Check[] {
   const out: Check[] = [];
   for (const [name, want] of Object.entries(spec)) {
     const el = byId(m, name);
     if (!el) { out.push({ art: name, ok: false, detail: "fehlt" }); continue; }
-    const b = userBox(m, el);
+    const b = measureBox(m, el);
     if (!b) { out.push({ art: name, ok: false, detail: "nicht messbar" }); continue; }
     const bad: string[] = [];
     if (want.w !== undefined && !near(b.w, want.w, TOL)) bad.push(`w ${f(b.w)} statt ${want.w}`);
@@ -103,9 +76,7 @@ function measureNamed(m: Mounted, spec: NonNullable<Job["messen"]>): Check[] {
       const g = el as unknown as SVGGeometryElement;
       try {
         const L = g.getTotalLength();
-        const V = m.probe.getCTM();
-        const M = el.getCTM();
-        const T = V && M ? V.inverse().multiply(M) : new DOMMatrix();
+        const T = rootToElement(m.svg, el) ?? new DOMMatrix();
         const p0 = g.getPointAtLength(0);
         const p1 = g.getPointAtLength(L);
         const a = new DOMPoint(p0.x, p0.y).matrixTransform(T);
@@ -165,8 +136,8 @@ function runCheck(spec: Record<string, unknown>, a: Mounted, b: Mounted | null):
       const id = String(spec.id);
       const e0 = base ? byId(base, id) : null;
       const e1 = byId(a, id);
-      const b0 = base && e0 ? userBox(base, e0) : null;
-      const b1 = e1 ? userBox(a, e1) : null;
+      const b0 = base && e0 ? measureBox(base, e0) : null;
+      const b1 = e1 ? measureBox(a, e1) : null;
       if (!b0 || !b1) return { art, ok: false, detail: `${id} fehlt oder nicht messbar` };
       const dx = b1.x - b0.x;
       const dy = b1.y - b0.y;
@@ -175,8 +146,8 @@ function runCheck(spec: Record<string, unknown>, a: Mounted, b: Mounted | null):
     case "fenster": {
       const e = byId(a, String(spec.id));
       const w = byId(a, String(spec.wand));
-      const be = e ? userBox(a, e) : null;
-      const bw = w ? userBox(a, w) : null;
+      const be = e ? measureBox(a, e) : null;
+      const bw = w ? measureBox(a, w) : null;
       if (!be || !bw) return { art, ok: false, detail: "Fenster oder Wand fehlt" };
       const dc = be.x + be.w / 2 - (bw.x + bw.w / 2);
       const dy = be.y + be.h / 2 - (bw.y + bw.h / 2);
@@ -200,8 +171,8 @@ function runCheck(spec: Record<string, unknown>, a: Mounted, b: Mounted | null):
       const t = String(spec.text);
       const hit = texts(a).find((x) => x.t === t);
       const room = byId(a, String(spec.raum));
-      const bt = hit ? userBox(a, hit.el) : null;
-      const br = room ? userBox(a, room) : null;
+      const bt = hit ? measureBox(a, hit.el) : null;
+      const br = room ? measureBox(a, room) : null;
       if (!bt || !br) return { art: `${art} ${t}`, ok: false, detail: !hit ? "Text fehlt" : "Raum fehlt" };
       const dx = bt.x + bt.w / 2 - (br.x + br.w / 2);
       const dy = bt.y + bt.h / 2 - (br.y + br.h / 2);

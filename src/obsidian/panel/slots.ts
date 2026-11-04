@@ -1,14 +1,13 @@
 // Die SVG-gebundenen Teile des Panels (Slots für `buildPanelShell`): Sitzung, Beschriftung der Runden, Messzeile, Lauf, Vorschau.
-// Vorschau und Prüfliste sind in C2 einfache Platzhalter: das Bild als `<img>` mit Data-URL (wie der Block), die Änderungen als Liste. Die Vorschau im
-// Shadow Root mit Reglern kommt mit C3, die Prüfliste mit Einzelentscheidungen mit D1.
+// Die Vorschau (Shadow Root, Hintergrund-Regler, Maßzeile, Auswahl) steht in `preview-view.ts`. Die Prüfliste ist noch ein einfacher Platzhalter (die Änderungen
+// als Liste); die Prüfliste mit Einzelentscheidungen kommt mit D1.
 import { svgQualityLine } from "../../core/quality";
 import type { SvgRound, SvgSession } from "../../core/session";
 import { qualityTexts, t } from "../../i18n/strings";
-import { binaryToDataUrl } from "../../vendor/kit/data-url";
 import { EMPTY_ROUNDS } from "../../vendor/kit/rounds";
-import { checkSvg } from "../../vendor/kit/svg-guard";
 import type { Target } from "../../vendor/kit/panel-session";
 import type { LlmConnection } from "../../vendor/kit-obsidian/llm-connection";
+import { renderPreviewView, type PreviewView, type PreviewViewDeps, type Selection } from "./preview-view";
 import { runSvgPrompt } from "./run";
 import type { PanelSlots } from "./shell";
 
@@ -17,6 +16,8 @@ export interface SvgSlotDeps {
   readTargetText: (target: Target) => Promise<string | null>;
   /** Denken an? Die Messzeile gilt für Denken aus und sagt es sonst dazu (Plan 2, Entscheidung 3). */
   thinkingOn: () => boolean;
+  /** Hintergrund der Vorschau: lesen und speichern (nur die Vorschau, nie das SVG). */
+  background: PreviewViewDeps["background"];
 }
 
 export function freshSession(target: Target): SvgSession {
@@ -34,6 +35,8 @@ export function roundMeta(r: SvgRound): string {
 }
 
 export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
+  let view: PreviewView | null = null;
+  const selection: Selection = { id: null, text: null };
   return {
     fresh: freshSession,
     roundLabel: (r) => r.instruction,
@@ -42,12 +45,10 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
     quality: (model, task) => svgQualityLine(model, task, { family: d.llm.source().family, thinking: d.thinkingOn(), texts: qualityTexts() }),
     run: (call) => runSvgPrompt(call, { llm: d.llm, readTargetText: d.readTargetText }),
     renderPreview(host, _round, text) {
+      view?.dispose();
+      view = null;
       if (text === null) return;
-      if (!checkSvg(text).ok) {
-        host.createDiv({ cls: "svg-studio-error", text: t("block.rejected") });
-        return;
-      }
-      host.createEl("img", { cls: "svg-studio-img", attr: { src: binaryToDataUrl(new TextEncoder().encode(text), "svg"), alt: t("block.alt") } });
+      view = renderPreviewView(host, text, { background: d.background }, selection);
     },
     renderChanges(host, round) {
       if (round === null) return;
@@ -55,6 +56,10 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       if (b.form !== "list") return;
       const list = host.createEl("ul", { cls: "svg-studio-change-list" });
       for (const e of b.entries) list.createEl("li", { text: `${e.kind} ${e.key}` });
+    },
+    dispose() {
+      view?.dispose();
+      view = null;
     },
   };
 }

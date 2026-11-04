@@ -5,7 +5,7 @@ describe("loadSettings", () => {
   it("Vorgaben: Übernehmen als Datei, Hintergrund an und hell", () => {
     const { settings, dropped } = loadSettings(undefined);
     expect(settings.acceptAs).toBe("file");
-    expect(settings.background).toEqual({ on: true, shade: "light", hex: null });
+    expect(settings.background).toEqual({ on: true, tone: "light", hex: "#ffffff" });
     expect(dropped).toEqual([]);
     expect(loadSettings(null).settings).toEqual(DEFAULT_SETTINGS);
     expect(loadSettings("Müll").settings).toEqual(DEFAULT_SETTINGS);
@@ -19,18 +19,18 @@ describe("loadSettings", () => {
   });
 
   it("ungültige Werte fallen auf die Vorgabe, melden sich aber", () => {
-    const { settings, dropped } = loadSettings({ acceptAs: "überall", background: { on: "ja", shade: "bunt", hex: "rot" } });
+    const { settings, dropped } = loadSettings({ acceptAs: "überall", background: { on: "ja", tone: "bunt", hex: "rot" } });
     expect(settings.acceptAs).toBe("file");
-    expect(settings.background).toEqual({ on: true, shade: "light", hex: null });
+    expect(settings.background).toEqual({ on: true, tone: "light", hex: "#ffffff" });
     expect(dropped.sort()).toEqual(["acceptAs", "background.hex"]);
   });
 
   it("gültige Werte bleiben, auch der eigene Hex-Wert", () => {
-    const { settings } = loadSettings({ acceptAs: "ask", background: { on: false, shade: "dark", hex: "#abc" } });
+    const { settings } = loadSettings({ acceptAs: "ask", background: { on: false, tone: "custom", hex: "#abc" } });
     expect(settings.acceptAs).toBe("ask");
-    expect(settings.background).toEqual({ on: false, shade: "dark", hex: "#abc" });
+    expect(settings.background).toEqual({ on: false, tone: "custom", hex: "#abc" });
     expect(loadSettings({ background: { hex: "#A1B2C3" } }).settings.background.hex).toBe("#A1B2C3");
-    expect(loadSettings({ background: { hex: "#12345" } }).settings.background.hex).toBeNull();
+    expect(loadSettings({ background: { hex: "#12345" } }).settings.background.hex).toBe("#ffffff");
   });
 
   it("llm: Zeilen, Wahl und Anfrage werden gelesen", () => {

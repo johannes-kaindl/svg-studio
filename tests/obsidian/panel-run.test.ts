@@ -44,7 +44,7 @@ function setup(responders: Responder[], o: { target?: Target; text?: string | nu
   const { llm, complete, requests } = fakeLlm(responders, { model: o.model ?? "qwen/qwen3.8-27b", family: o.family ?? null });
   const root = document.body.createDiv({ cls: "view-content" }).createDiv();
   const read = vi.fn(async () => o.text ?? null);
-  const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => o.thinkingOn === true });
+  const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => o.thinkingOn === true, background: { get: () => ({ on: true, tone: "light", hex: "#ffffff" }), set: () => {} } });
   const deps: PanelDeps<SvgSession> = {
     app: {} as never, llm,
     thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },

@@ -661,9 +661,55 @@
   margin-bottom: var(--size-4-1);
 }
 
-.svg-studio-preview-host .svg-studio-img {
+/* Vorschau im Shadow Root: der Kasten ist der Host; seine Hintergrundfarbe setzt das Plugin als Inline-Stil (Wahl des Nutzers, nur Vorschau). */
+/* Der Wrapper im Licht-DOM schließt das SVG ein: `contain: paint` macht ihn zum Block für `position: fixed` und `absolute` im Shadow Root und schneidet Zeichnen und
+   Treffer ab. Ein `contain` am Host selbst hebt das SVG mit `:host { contain: none !important }` auf. */
+.svg-studio-stage-wrap {
+  position: relative;
+  contain: paint;
+  overflow: hidden;
+  border-radius: var(--radius-s);
+}
+
+.svg-studio-stage {
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
+  padding: var(--size-4-2);
+  max-height: 24em;
+  overflow: auto;
+}
+
+.svg-studio-preview-head {
+  margin-bottom: var(--size-4-1);
+}
+
+.svg-studio-bg-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.svg-studio-bg-toggle {
+  font-size: var(--font-ui-small);
+}
+
+.svg-studio-bg-hex {
+  width: 7em;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}
+
+.svg-studio-bg-hex.is-invalid {
+  border-color: var(--text-error);
+  box-shadow: inset 0 -2px 0 var(--text-error);
+}
+
+.svg-studio-measure {
+  margin-top: var(--size-4-1);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
 }
 
 .svg-studio-change-list {
