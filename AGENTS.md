@@ -24,7 +24,7 @@ Stand 2026-11-05: Version 1 ist gebaut, aber nicht veröffentlicht (Plan 1 und P
 ## Commands
 
 ```bash
-npm run gate       # lint + typecheck + typecheck:test + test + check:pure + check:bundle
+npm run gate       # lint + typecheck + typecheck:test + typecheck:scripts (ohne ../tools übersprungen) + test + check:pure + check:bundle
 npm test           # Pfad-Guard + NUL-Guard + vitest run
 npm run lint       # eslint src (0 Warnungen erlaubt)
 npm run dev        # esbuild im Watch-/Dev-Modus
@@ -53,6 +53,7 @@ Release-Infra steht (`release.yml`, `versions.json`, Remote `github` privat; `np
 - **Gemma antwortet „Entwurf, `<channel|>`, Antwort“** (Denkkanal im `content`); der Leser des Plugins (`protocol.ts` `extractSvg`, Kit `stripThinkBlocks` mit `channel: true`, Rückfall auf den Text davor) nimmt die Antwort, der Labor-Leser früher den Entwurf. Messzeile und Messnote gelten für den Leser des Plugins.
 - **Ein Schreibweg läuft immer über `acceptText` → `acceptPanel` → `checkWrite`:** die Runde wird gegen den Text von JETZT angewendet; eine Runde „ganzes Bild“ oder „Namen vergeben“ mit Folgerunde greift nur, wenn der Text noch ihr Ausgang ist (sonst Abbruch, nichts geschrieben). Vorschau und Felder rendern nur den geprüften Baum (`importNode` in einen Shadow Root mit `contain: paint`-Wrapper).
 - **Das Panel-Bundle trägt die LLM-Verbindung des Kits:** `check-bundle` mit Schranke 400 KB (angehoben 2026-11-05).
+- **Das Gate im Dach ist nicht das Gate der CI.** GitHub klont ohne Dach (kein `../tools`): alles unter `scripts/`, das `../../tools/obsidian-cdp` importiert, gehört nicht in `typecheck:test`, sondern in `typecheck:scripts` (Existenz-Guard). Vor einem Release die CI nachstellen: `git clone` in ein Verzeichnis außerhalb des Dachs, dort `npm ci && npm run gate`; der Dry-Run sieht das nicht (0.1.0 trug deshalb keinen GitHub-Release, 2026-11-05).
 - **Messlabor lädt große lokale Modelle:** vorher Netzteil und Last prüfen und Johannes fragen, Modell per `lms load` mit festem Kontext laden (nicht per JIT), danach sofort entladen. Details `docs/internal/LAB.md`.
 - Nie im Repo: absolute Pfade außerhalb des Repos (`/Users/…`, Vault-Pfade) — Platzhalter nutzen (`$CODING_COCKPIT_VAULT`, repo-relativ). Gate: `scripts/check-no-abs-paths.mjs` (Teil von `npm test`).
 
