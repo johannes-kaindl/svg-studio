@@ -71,6 +71,7 @@ const SMOKE_PRAEFIX = "_smoke-";
 const PUNKTE = [
   "plugin-geladen",
   "block-rendert-als-bild",
+  "block-nur-viewbox-sichtbar",
   "einbettung-hat-knopf",
   "knopf-oeffnet-panel",
   "erzeugen-ersatzendpunkt",
@@ -582,6 +583,26 @@ async function punktBlock(): Promise<void> {
     const modus = await cdp.evaluate<string>(`const l = app.workspace.getMostRecentLeaf(app.workspace.rootSplit); return JSON.stringify({ mode: l.view.getMode(), source: l.view.getState().source });`);
     const gut = (m: typeof lesen): boolean => m !== null && m.n === 1 && m.nw > 0 && m.nh > 0 && m.complete && m.src.startsWith("data:image/svg+xml") && m.edit;
     record("block-rendert-als-bild", gut(lesen) && gut(lp), `Lesemodus ${q(lesen)} · Live Preview ${q(lp)} (Blattzustand ${modus})`);
+  });
+  // Ein SVG nur mit viewBox (so schreiben Modelle) hat keine eigene Größe: als Bild im inline-block mit max-width 100% war es 0 px breit (Bild-Lauf 2026-11-05); die Fixture von oben trägt width und height und sieht den Fall nicht.
+  await lauf("block-nur-viewbox-sichtbar", async () => {
+    await raeume();
+    const quelle = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 160"><rect id="r" x="10" y="10" width="260" height="140" fill="#e8e0d0" stroke="#8b7355"/></svg>`;
+    const body = `# Nur viewBox\n\n\`\`\`svg-studio\n${quelle}\n\`\`\`\n\nText danach.\n`;
+    const messe = (scope: string): Promise<{ n: number; w: number; h: number } | null> =>
+      pollUntil(cdp, `
+        ${SICHTBAR}
+        const imgs = Array.from(document.querySelectorAll(${q(`${scope} img.svg-studio-img`)}));
+        if (imgs.length === 0) return null;
+        const r = imgs[0].getBoundingClientRect();
+        return { n: imgs.length, w: Math.round(r.width), h: Math.round(r.height) };
+      `, 8000, 250);
+    await oeffneNotiz(`${SMOKE_PRAEFIX}viewbox.md`, body, "preview");
+    const lesen = await messe(".markdown-preview-view");
+    await oeffneNotiz(`${SMOKE_PRAEFIX}viewbox.md`, body, "source");
+    const lp = await messe(".markdown-source-view");
+    const ok = (m: typeof lesen): boolean => m !== null && m.n === 1 && m.w >= 200 && m.h >= 100;
+    record("block-nur-viewbox-sichtbar", ok(lesen) && ok(lp), `Lesemodus ${q(lesen)} · Live Preview ${q(lp)} (viewBox 280 × 160, erwartet etwa 280 × 160 px, nicht 0)`);
   });
 }
 

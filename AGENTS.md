@@ -35,7 +35,7 @@ npm run smoke:gui -- --port 9660 [--nur <punkt,…>] [--bilder <ordner>]   # GUI
 sh tools/sync-kit.sh [--check]   # Kit vendoren bzw. Drift messen
 ```
 
-Release-Infra und GitHub-Mirror kommen erst mit dem ersten Release (Skill `plugin-release-setup`, `npm run release` braucht das Dach). `npm run deploy` kopiert den Build nach `$OBSIDIAN_PLUGIN_DIR` (für Messungen am Gerät).
+Release-Infra steht (`release.yml`, `versions.json`, Remote `github` privat; `npm run release` und `npm run preflight` brauchen das Dach, GitHub bekommt Branch und Tag nur über `release.mjs`); das erste Release fährt der Master mit Johannes' Freigabe. README-Bilder: `npm run shots` (Zweitinstanz, Vertrag `docs/images/README.md`), `npm run shots:check` prüft sie. `npm run deploy` kopiert den Build nach `$OBSIDIAN_PLUGIN_DIR` (für Messungen am Gerät).
 
 ## Conventions
 
@@ -73,4 +73,4 @@ Projekt-Memory unter `~/.claude/projects/<slug>/memory/` mit `MEMORY.md`-Index. 
 
 ## Abweichungen von der Leitkonvention
 
-- CORE-META-03/04 (Bilder, Nutzer-Doku nach Diátaxis) und CORE-META-11 (Uplink-Seite): offen bis zum ersten Release; das Plugin hat noch keine Oberfläche.
+- CORE-META-11 (Uplink-Seite): offen, Vorschlag liegt beim Master (Dach/Website); die Seite entsteht nach dem ersten Release.

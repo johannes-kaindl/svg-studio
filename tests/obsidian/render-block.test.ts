@@ -57,6 +57,28 @@ describe("renderSvgBlock", () => {
     expect(img.alt).toBe("Mond");
   });
 
+  // Ein SVG nur mit `viewBox` (so schreiben Modelle) hat keine eigene Größe; als Bild in einem `inline-block` mit `max-width: 100%` wurde es 0 px breit und war unsichtbar (Messung im Bild-Lauf 2026-11-05).
+  describe("Größe eines Bildes ohne width und height", () => {
+    const img = (svg: string): HTMLImageElement => mk(svg).el.querySelector("img.svg-studio-img")!;
+    it("nur viewBox: die Breite der viewBox wird als width gesetzt (height folgt aus dem Seitenverhältnis)", () => {
+      const i = img(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 320"><rect id="r" width="5" height="5"/></svg>`);
+      expect(i.getAttribute("width")).toBe("580");
+      expect(i.hasAttribute("height")).toBe(false);
+    });
+    it("viewBox mit Ursprung und Dezimalzahlen: die dritte Zahl zählt", () => {
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="-10, -5.5 48.5 24"><rect id="r" width="5" height="5"/></svg>`).getAttribute("width")).toBe("48.5");
+    });
+    it("mit width oder height am SVG bleibt das Bild, wie es ist", () => {
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg" height="50" viewBox="0 0 24 24"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
+    });
+    it("keine brauchbare viewBox: nichts wird erfunden", () => {
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0 10"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="a b c d"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
+    });
+  });
+
   it("ohne <title> heißt das Bild 'SVG'", () => {
     const { el } = mk(OK.replace("<title>Mond</title>", ""));
     expect((el.querySelector("img") as HTMLImageElement).alt).toBe("SVG");

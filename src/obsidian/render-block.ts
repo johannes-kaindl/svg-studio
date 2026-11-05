@@ -47,6 +47,15 @@ function textButton(parent: HTMLElement, cls: string, label: string, onClick: ()
   return b;
 }
 
+/** Die Breite der `viewBox` als Text, wenn das SVG weder `width` noch `height` trägt (so schreiben Modelle): ein Bild ohne eigene Größe in einem `inline-block` mit `max-width: 100%` wird 0 px breit und ist unsichtbar
+ *  (gemessen im Bild-Lauf 2026-11-05, 0 statt 272 px). Die Breite der viewBox gilt als CSS-Pixel, die Höhe folgt aus dem Seitenverhältnis; `max-width: 100%` begrenzt sie. `null`, wenn nichts zu setzen ist. */
+function viewBoxWidth(svg: Element): string | null {
+  if (svg.hasAttribute("width") || svg.hasAttribute("height")) return null;
+  const parts = (svg.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
+  const w = parts[2];
+  return parts.length === 4 && parts.every(Number.isFinite) && w !== undefined && w > 0 && (parts[3] ?? 0) > 0 ? String(w) : null;
+}
+
 export function renderSvgBlock(source: string, el: HTMLElement, o: RenderBlockOptions): "image" | "held" | "error" {
   el.empty();
   const wrap = el.createDiv({ cls: "svg-studio-block" });
@@ -80,6 +89,8 @@ export function renderSvgBlock(source: string, el: HTMLElement, o: RenderBlockOp
     const title = checked.svg.querySelector(":scope > title")?.textContent?.trim();
     const alt = title !== undefined && title !== "" ? title : o.t("block.alt");
     const img = wrap.createEl("img", { cls: "svg-studio-img", attr: { alt } });
+    const natural = viewBoxWidth(checked.svg);
+    if (natural !== null) img.setAttribute("width", natural);
     img.addEventListener("load", () => { ticket?.settle(); });
     img.addEventListener("error", () => { ticket?.abort(); });
     // Der Bereiniger hat ein führendes BOM abgetrennt (`bom`) und genau den Text ohne BOM geprüft: gezeichnet wird derselbe Text, nicht die Quelle mit BOM.
