@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-11-05
+
 ### Fixed
 
 - Internal: the type check of the scripts (`scripts/gui-smoke.ts`, `scripts/shots.ts`, which import the central CDP bridge of the maintainer's workspace) moved out of `typecheck:test` into its own `typecheck:scripts`, which is skipped without that bridge. 0.1.0 carried no GitHub release because the CI gate failed on those imports (TS2307); 0.1.0 stays as a tag, the release follows as 0.1.1.
