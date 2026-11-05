@@ -115,6 +115,7 @@ const PUNKTE = [
   "mobil-trefflaeche-44px",
   "mobil-pruefliste-trefflaeche-44px",
   "mobil-felder",
+  "mobil-tastaturabstand",
   "mobil-geraet-tastatur",
 ] as const;
 type Name = (typeof PUNKTE)[number];
@@ -1758,6 +1759,34 @@ async function punktMobil(): Promise<void> {
       record("mobil-felder", f.fields.length >= 4 && zahlen.length >= 3 && zahlen.every((x) => x.inputmode === "decimal") && !m.docUeber && !m.panelUeber && m.ausserhalb.length === 0,
         `${f.fields.length} Felder (${q(f.fields.map((x) => x.name))}), Zahlenfelder mit inputmode decimal: ${zahlen.every((x) => x.inputmode === "decimal")} · Seitenüberlauf Dokument ${m.docUeber}, Panel ${m.panelUeber} · außerhalb: ${q(m.ausserhalb)} · Höhen ${q(m.hoehen)} px, Breiten ${q(m.breiten)} px (Emulation, ohne Bildschirmtastatur)`);
     });
+    // Geometrie, nicht Gerät: Obsidian setzt --keyboard-height bei offener Tastatur; die Emulation hat keine Bildschirmtastatur, der Punkt setzt die Variable von Hand
+    // (iPhone-Messung 2026-11-05: Tastatur 272 px hoch, „Übernehmen“ lag darunter). Gegenprobe: ohne Variable bleibt der Abstand klein.
+    await lauf("mobil-tastaturabstand", async () => {
+      await einschalten();
+      await raeume();
+      await stelleFixturenHer();
+      await oeffneDateiImPanel("felder.svg");
+      if ((await warteSnap((x) => !x.previewHidden && x.svgIds !== null, 8000)) === null) throw new Vorbedingung("Keine Vorschau am Bestand felder.svg in der Mobil-Emulation");
+      const m = await cdp.evaluate<{ ohne: number; mit: number; tastatur: number; knopf: boolean; unterKante: number | null; kante: number }>(`
+        const p = document.querySelector(".svg-studio-panel");
+        const pad = () => parseFloat(getComputedStyle(p).paddingBottom);
+        document.body.style.removeProperty("--keyboard-height");
+        const ohne = pad();
+        const tastatur = 272;
+        document.body.style.setProperty("--keyboard-height", tastatur + "px");
+        const mit = pad();
+        // Wie weit lässt sich das Panel scrollen, und wo endet „Übernehmen“ dann? Der scrollende Vorfahr ist je nach Obsidian-Version das Panel oder sein Blatt.
+        let s = p; while (s && s.scrollHeight <= s.clientHeight + 1 && s.parentElement) s = s.parentElement;
+        if (s) s.scrollTop = s.scrollHeight;
+        const k = document.querySelector(".svg-studio-accept");
+        const r = k ? k.getBoundingClientRect() : null;
+        const out = { ohne, mit, tastatur, knopf: k !== null, unterKante: r ? Math.round(r.bottom) : null, kante: window.innerHeight - tastatur };
+        document.body.style.removeProperty("--keyboard-height");
+        return out;
+      `);
+      record("mobil-tastaturabstand", m.ohne < 100 && m.mit >= m.tastatur && m.knopf && m.unterKante !== null && m.unterKante <= m.kante,
+        `Abstand unten im Panel ohne Tastatur ${m.ohne} px, mit --keyboard-height ${m.tastatur} px: ${m.mit} px · „Übernehmen“ endet bei y ${m.unterKante} nach dem Scrollen, Tastaturoberkante ${m.kante} (Geometrie-Simulation, am Gerät zu messen)`);
+    });
     await lauf("mobil-emulation", async () => {
       await einschalten();
       await raeume();
@@ -1896,7 +1925,7 @@ async function main(): Promise<void> {
     if (gewaehlt("mobil-geraet-tastatur")) skipped("mobil-geraet-tastatur", "am Gerät zu messen (iPhone, Web-Inspektor, Tastatur offen): Auftrag des Masters, Plan „Mobil am Gerät“ M4 bis M6; die Emulation hat keine Bildschirmtastatur");
 
     await raeume();
-    if (gewaehlt("mobil-emulation", "mobil-trefflaeche-44px", "mobil-pruefliste-trefflaeche-44px", "mobil-felder")) await punktMobil();
+    if (gewaehlt("mobil-emulation", "mobil-trefflaeche-44px", "mobil-pruefliste-trefflaeche-44px", "mobil-felder", "mobil-tastaturabstand")) await punktMobil();
     // Zuletzt: der Punkt beendet die Instanz hart und startet sie neu; alles danach liefe gegen eine andere Instanz.
     neuGestartet = await punktBeendenImWachfenster();
     neuGestartet = (await punktAbsturzNeustart()) || neuGestartet;

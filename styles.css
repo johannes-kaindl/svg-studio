@@ -631,6 +631,11 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
   display: none;
 }
 
+/* Zahlenfeld am Handy (iPhone, gemessen 2026-11-05): Die Dezimaltastatur hat keine Fertig-Taste und Obsidian verkleinert das Blatt der Seitenleiste nicht, „Übernehmen“ lag unter der Tastatur und das Blatt
+   ließ sich nur 21 px weiter scrollen. Der Abstand unten in Höhe der Tastatur macht den Rest erreichbar (--keyboard-height ist 0px, solange keine Tastatur offen ist). Vier Klassen schlagen Obsidians
+   .workspace-leaf-content .view-content, ohne dass die Reihenfolge der Stylesheets zählt. Kit-Regel CHAT_HOST_CSS gilt nur im Hauptbereich. Am Gerät nachzumessen (die Zweitinstanz simuliert nur die Geometrie). */
+.is-mobile .workspace-leaf-content .view-content.svg-studio-panel { padding-bottom: max(var(--size-4-8), var(--keyboard-height, 0px)); }
+
 .svg-studio-shell {
   display: flex;
   flex-direction: column;

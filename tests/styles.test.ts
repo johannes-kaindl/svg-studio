@@ -26,6 +26,14 @@ describe("eigene Regeln", () => {
   it("die Knöpfe sind auf Touch-Geräten sichtbar", () => {
     expect(own).toMatch(/\.is-mobile \.svg-studio-block > \.svg-studio-edit[\s\S]*?opacity:\s*1/);
   });
+  it("das Panel gibt am Handy unten Platz in Höhe der offenen Tastatur (Zahlentastatur ohne Fertig-Taste, Messung iPhone 2026-11-05)", () => {
+    const rule = own.replace(/\/\*[\s\S]*?\*\//g, "").match(/([^{}]*\.svg-studio-panel[^{}]*)\{([^}]*padding-bottom[^}]*)\}/g)?.find((r) => /\.is-mobile/.test(r));
+    expect(rule, "Regel .is-mobile … .svg-studio-panel mit padding-bottom").toBeDefined();
+    expect(rule).toMatch(/padding-bottom:\s*max\(var\(--size-4-8\),\s*var\(--keyboard-height,\s*0px\)\)/);
+    // Obsidians eigene Regel (.workspace-leaf-content .view-content) trägt zwei Klassen, die Panel-Regel braucht mehr, sonst entscheidet die Reihenfolge der Stylesheets.
+    const selector = rule!.slice(0, rule!.indexOf("{")).trim();
+    expect(selector.match(/\.[\w-]+/g)!.length).toBeGreaterThan(2);
+  });
   it("die Knöpfe an Block und Einbettung sind am Handy mindestens 44 × 44 (40 + 4 aus Theme-Größen, Plan M2)", () => {
     const rule = own.replace(/\/\*[\s\S]*?\*\//g, "").match(/\.is-mobile \.svg-studio-block > \.svg-studio-edit,\s*\.is-mobile \.internal-embed > \.svg-studio-embed-button\s*\{([^}]*)\}/);
     expect(rule, "Regel für Block- und Einbettungsknopf unter .is-mobile").not.toBeNull();
