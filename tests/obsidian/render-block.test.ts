@@ -72,6 +72,18 @@ describe("renderSvgBlock", () => {
       expect(img(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
       expect(img(`<svg xmlns="http://www.w3.org/2000/svg" height="50" viewBox="0 0 24 24"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
     });
+    it("width und height in Prozent zählen als keine Angabe (Chromium nimmt sie nicht als Größe des Bildes: gemessen 0 px)", () => {
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 280 160"><rect id="r" width="5" height="5"/></svg>`).getAttribute("width")).toBe("280");
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg" width="50%" viewBox="0 0 280 160"><rect id="r" width="5" height="5"/></svg>`).getAttribute("width")).toBe("280");
+    });
+    it("eine Angabe in Prozent neben einer festen Höhe oder Breite bleibt, wie sie ist (das Seitenverhältnis liefert den Rest)", () => {
+      expect(img(`<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="80" viewBox="0 0 280 160"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
+    });
+    it("Längen mit Einheit (em, px, mm) sind feste Größen", () => {
+      for (const w of ["10em", "96px", "25.4mm", " 3in "]) {
+        expect(img(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" viewBox="0 0 280 160"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width"), w).toBe(false);
+      }
+    });
     it("keine brauchbare viewBox: nichts wird erfunden", () => {
       expect(img(`<svg xmlns="http://www.w3.org/2000/svg"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);
       expect(img(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0 10"><rect id="r" width="5" height="5"/></svg>`).hasAttribute("width")).toBe(false);

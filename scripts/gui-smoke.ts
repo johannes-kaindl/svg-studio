@@ -72,6 +72,7 @@ const PUNKTE = [
   "plugin-geladen",
   "block-rendert-als-bild",
   "block-nur-viewbox-sichtbar",
+  "einbettung-nur-viewbox-sichtbar",
   "einbettung-hat-knopf",
   "knopf-oeffnet-panel",
   "erzeugen-ersatzendpunkt",
@@ -584,25 +585,49 @@ async function punktBlock(): Promise<void> {
     const gut = (m: typeof lesen): boolean => m !== null && m.n === 1 && m.nw > 0 && m.nh > 0 && m.complete && m.src.startsWith("data:image/svg+xml") && m.edit;
     record("block-rendert-als-bild", gut(lesen) && gut(lp), `Lesemodus ${q(lesen)} · Live Preview ${q(lp)} (Blattzustand ${modus})`);
   });
-  // Ein SVG nur mit viewBox (so schreiben Modelle) hat keine eigene Größe: als Bild im inline-block mit max-width 100% war es 0 px breit (Bild-Lauf 2026-11-05); die Fixture von oben trägt width und height und sieht den Fall nicht.
+  // Ein SVG ohne eigene Größe (nur viewBox, oder width und height in Prozent) war als Bild im inline-block mit max-width 100% 0 px breit und unsichtbar (Bild-Lauf 2026-11-05); die Fixture von oben trägt
+  // width und height und sieht den Fall nicht. Jede Form schreiben Modelle, jede steht hier als Block derselben Notiz; die Einbettung `![[x.svg]]` zeichnet Obsidian selbst und kommt dazu.
   await lauf("block-nur-viewbox-sichtbar", async () => {
     await raeume();
-    const quelle = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 160"><rect id="r" x="10" y="10" width="260" height="140" fill="#e8e0d0" stroke="#8b7355"/></svg>`;
-    const body = `# Nur viewBox\n\n\`\`\`svg-studio\n${quelle}\n\`\`\`\n\nText danach.\n`;
-    const messe = (scope: string): Promise<{ n: number; w: number; h: number } | null> =>
+    const rect = `<rect id="r" x="10" y="10" width="260" height="140" fill="#e8e0d0" stroke="#8b7355"/>`;
+    const svg = (attrs: string, box = ` viewBox="0 0 280 160"`): string => `<svg xmlns="http://www.w3.org/2000/svg"${attrs}${box}>${rect}</svg>`;
+    // erwartete Breite (px) je Form: viewBox allein 280 (die Breite der viewBox), width allein / height allein nach den Angaben, Prozent wie „keine Angabe“, em nach der Schrift (16 px), ohne alles Chromiums Vorgabe 300.
+    const formen: { name: string; quelle: string; erwartet: number }[] = [
+      { name: "nur viewBox", quelle: svg(""), erwartet: 280 },
+      { name: "width allein", quelle: svg(` width="200"`), erwartet: 200 },
+      { name: "height allein", quelle: svg(` height="80"`), erwartet: 140 },
+      { name: "Prozent", quelle: svg(` width="100%" height="100%"`), erwartet: 280 },
+      { name: "em", quelle: svg(` width="10em" height="5em"`), erwartet: 160 },
+      { name: "ohne alles", quelle: svg("", ""), erwartet: 300 },
+    ];
+    const body = `# Größen\n\n${formen.map((f) => `\`\`\`svg-studio\n${f.quelle}\n\`\`\``).join("\n\n")}\n\nText danach.\n`;
+    const messe = (scope: string): Promise<number[] | null> =>
       pollUntil(cdp, `
         ${SICHTBAR}
         const imgs = Array.from(document.querySelectorAll(${q(`${scope} img.svg-studio-img`)}));
-        if (imgs.length === 0) return null;
-        const r = imgs[0].getBoundingClientRect();
-        return { n: imgs.length, w: Math.round(r.width), h: Math.round(r.height) };
+        if (imgs.length < ${formen.length} || imgs.some((i) => !i.complete)) return null;
+        return imgs.map((i) => Math.round(i.getBoundingClientRect().width));
       `, 8000, 250);
-    await oeffneNotiz(`${SMOKE_PRAEFIX}viewbox.md`, body, "preview");
+    await oeffneNotiz(`${SMOKE_PRAEFIX}groessen.md`, body, "preview");
     const lesen = await messe(".markdown-preview-view");
-    await oeffneNotiz(`${SMOKE_PRAEFIX}viewbox.md`, body, "source");
+    await oeffneNotiz(`${SMOKE_PRAEFIX}groessen.md`, body, "source");
     const lp = await messe(".markdown-source-view");
-    const ok = (m: typeof lesen): boolean => m !== null && m.n === 1 && m.w >= 200 && m.h >= 100;
-    record("block-nur-viewbox-sichtbar", ok(lesen) && ok(lp), `Lesemodus ${q(lesen)} · Live Preview ${q(lp)} (viewBox 280 × 160, erwartet etwa 280 × 160 px, nicht 0)`);
+    const ok = (m: number[] | null): boolean => m !== null && formen.every((f, k) => Math.abs(m[k]! - f.erwartet) <= 2);
+    record("block-nur-viewbox-sichtbar", ok(lesen) && ok(lp), `Formen ${q(formen.map((f) => `${f.name} ${f.erwartet}`))} · Lesemodus ${q(lesen)} · Live Preview ${q(lp)}`);
+  });
+  // Die Einbettung zeichnet Obsidian selbst (ein Bild mit Obsidians CSS, nicht unseres): ein SVG nur mit viewBox muss auch dort Breite haben.
+  await lauf("einbettung-nur-viewbox-sichtbar", async () => {
+    await raeume();
+    await schreibe(`${SMOKE_PRAEFIX}nurbox.svg`, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 160"><rect id="r" x="10" y="10" width="260" height="140" fill="#e8e0d0"/></svg>`);
+    await oeffneNotiz(`${SMOKE_PRAEFIX}einbettung-nurbox.md`, `# Einbettung\n\n![[${SMOKE_PRAEFIX}nurbox.svg]]\n\nText danach.\n`, "preview");
+    const m = await pollUntil<{ w: number; h: number }>(cdp, `
+      ${SICHTBAR}
+      const i = document.querySelector(".markdown-preview-view .internal-embed img");
+      if (!i || !i.complete) return null;
+      const r = i.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    `, 8000, 250);
+    record("einbettung-nur-viewbox-sichtbar", m !== null && m.w >= 100 && m.h >= 50, `Einbettung ${q(m)} (viewBox 280 × 160, erwartet eine Breite über 0; Obsidian zeichnet sie selbst)`);
   });
 }
 

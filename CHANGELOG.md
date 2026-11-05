@@ -48,6 +48,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- An `svg-studio` block whose SVG has only a `viewBox` (no `width` or `height`, how models usually write it) was drawn 0 px wide and so invisible in the note; the width of the `viewBox` now sets the image width (the height follows, `max-width: 100%` still caps it).
+- An `svg-studio` block whose SVG has only a `viewBox` (no `width` or `height`, how models usually write it) or has `width="100%" height="100%"` was drawn 0 px wide and so invisible in the note; the width of the `viewBox` now sets the image width (the height follows, `max-width: 100%` still caps it). A fixed `width` or `height` (also with a unit such as `em`) is left as it is; an embedded `![[name.svg]]` was never affected.
 - On a phone, the panel keeps free space at the bottom as high as the open keyboard, so "Apply" can be scrolled above the decimal keypad after typing in a number field (the keypad has no Done key; measured on an iPhone: the button sat under the keyboard).
 

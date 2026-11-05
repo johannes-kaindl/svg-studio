@@ -47,10 +47,14 @@ function textButton(parent: HTMLElement, cls: string, label: string, onClick: ()
   return b;
 }
 
-/** Die Breite der `viewBox` als Text, wenn das SVG weder `width` noch `height` trägt (so schreiben Modelle): ein Bild ohne eigene Größe in einem `inline-block` mit `max-width: 100%` wird 0 px breit und ist unsichtbar
- *  (gemessen im Bild-Lauf 2026-11-05, 0 statt 272 px). Die Breite der viewBox gilt als CSS-Pixel, die Höhe folgt aus dem Seitenverhältnis; `max-width: 100%` begrenzt sie. `null`, wenn nichts zu setzen ist. */
+/** Eine feste Länge (Zahl, mit oder ohne Einheit); Prozent und Unbrauchbares nicht. */
+const FIXED_LENGTH = /^\s*\+?(?:\d+\.?\d*|\.\d+)(?:px|pt|pc|mm|cm|in|em|ex)?\s*$/i;
+
+/** Die Breite der `viewBox` als Text, wenn das SVG keine feste Größe trägt (so schreiben Modelle: nur `viewBox`, oder `width="100%" height="100%"`): ein Bild ohne eigene Größe in einem `inline-block` mit
+ *  `max-width: 100%` wird 0 px breit und ist unsichtbar (gemessen im Bild-Lauf 2026-11-05, 0 statt 272 px; Prozentangaben zählen für Chromium nicht als Größe des Bildes, gemessen 0 px). Eine feste `width` oder
+ *  `height` genügt dagegen, das Seitenverhältnis der viewBox liefert den Rest. Die Breite der viewBox gilt als CSS-Pixel, `max-width: 100%` begrenzt sie. `null`, wenn nichts zu setzen ist. */
 function viewBoxWidth(svg: Element): string | null {
-  if (svg.hasAttribute("width") || svg.hasAttribute("height")) return null;
+  if (FIXED_LENGTH.test(svg.getAttribute("width") ?? "") || FIXED_LENGTH.test(svg.getAttribute("height") ?? "")) return null;
   const parts = (svg.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
   const w = parts[2];
   return parts.length === 4 && parts.every(Number.isFinite) && w !== undefined && w > 0 && (parts[3] ?? 0) > 0 ? String(w) : null;
