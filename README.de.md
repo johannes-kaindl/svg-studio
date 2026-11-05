@@ -11,14 +11,28 @@
 
 Ein Sprachmodell schreibt das SVG, SVG Studio hält es exakt. Das SVG selbst ist die Quelle (keine eigene Zeichensprache), jede Änderung ersetzt eine Textspanne gegen den aktuellen Text, und was du nicht ändern wolltest, bleibt Byte für Byte gleich. Es arbeitet mit einem lokalen oder beliebigen OpenAI-kompatiblen Modell und trägt keine eigenen Schlüssel.
 
+<p align="center"><img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/hero.png" width="820" alt="SVG Studio neben einer Notiz mit einem Grundriss-Block: Das Panel zeigt die Vorschau einer Änderungsrunde und eine Prüfliste mit drei Änderungen zum Annehmen oder Ablehnen."></p>
+
 ## Features
 
 - **Aus Worten erzeugen** — beschreibe ein Icon, ein Schema oder einen Grundriss mit Maßen und bekomme ein bereinigtes SVG mit Vorschau und Maßzeile.
+
+<img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/create.png" width="820" alt="Das SVG-Studio-Panel nach einem Prompt: Ein Grundriss erscheint als Vorschau mit seinen Maßen, bereit zum Übernehmen oder Verwerfen.">
+
 - **In Runden verbessern** — jede Antwort ist eine Runde; jedes geänderte Element ist eine Karte, die du einzeln annimmst oder ablehnst, mit Kommentar, der bei deiner nächsten Anfrage zum Modell geht.
+
+<img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/review.png" width="820" alt="Drei vorgeschlagene Änderungen als Karten mit durchgestrichenem altem und daneben neuem Wert; zwei sind angenommen, eine abgelehnt, die Vorschau zeigt das Ergebnis.">
+
 - **Zahlen von Hand ändern** — klicke ein Element in der Vorschau an und ändere Koordinaten, Größe, Farben, Text, Position oder Drehung ohne Modell.
+
+<img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/fields.png" width="820" alt="Ein in der Vorschau angeklicktes Element zeigt seine Zahlenfelder (x, y, Breite, Höhe, Füllung, Kontur und mehr) für genaue Änderungen von Hand.">
+
 - **Exakt und byte-treu** — Änderungen gelten ganz oder gar nicht gegen den aktuellen Text und werden zurückgelesen; eine Handänderung geht nie verloren.
 - **Sicher gebaut** — fremdes SVG wird vor dem Zeichnen geparst und bereinigt; der Bereiniger lehnt ab, statt Teile still zu entfernen.
 - **Arbeitet am Bestand** — öffne eine `.svg`-Datei, einen `svg-studio`-Codeblock oder ein eingebettetes `![[name.svg]]`; repariere ein SVG aus Inkscape oder gib jedem Element einen Namen, mit oder ohne Modell.
+
+<img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/repair.png" width="820" alt="Ein Codeblock, den der Bereiniger ablehnt: Die Notiz nennt den Grund und bietet Reparieren und Bearbeiten an.">
+
 - **Übernehmen als Datei oder Block** — ein neues SVG wird zur Datei im Anhangordner (mit Link am Cursor) oder zum Codeblock in der Notiz.
 
 ## Voraussetzungen

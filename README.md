@@ -11,14 +11,28 @@
 
 A language model writes the SVG; SVG Studio keeps it exact. The SVG itself is the source (no private drawing language), every change is a replacement of a span of text against the current text, and what you did not ask to change stays byte for byte the same. It works with a local or any OpenAI-compatible model and carries no keys of its own.
 
+<p align="center"><img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/hero.png" width="820" alt="SVG Studio next to a note with a floor-plan block: the panel shows the preview of a change round and a checklist of three changes to accept or reject."></p>
+
 ## Features
 
 - **Create from words** — describe an icon, a diagram or a floor plan with measurements and get a sanitized SVG with a preview and a measure line.
+
+<img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/create.png" width="820" alt="The SVG Studio panel after a prompt: a floor plan appears as a preview with its measurements, ready to apply or discard.">
+
 - **Refine in rounds** — each answer is a round; every changed element is a card you accept or reject on its own, with a comment that goes to the model with your next request.
+
+<img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/review.png" width="820" alt="Three proposed changes as cards with the old value struck through and the new one next to it; two are accepted, one rejected, and the preview shows the result.">
+
 - **Edit numbers by hand** — click an element in the preview and change its coordinates, size, colours, text, position or rotation without a model.
+
+<img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/fields.png" width="820" alt="An element clicked in the preview shows its numeric fields (x, y, width, height, fill, stroke and more) for exact edits by hand.">
+
 - **Exact and byte-faithful** — changes are applied all or nothing against the current text and read back; a hand edit is never lost.
 - **Safe by construction** — another tool's SVG is parsed and sanitized before it is drawn; the sanitizer rejects instead of silently removing parts.
 - **Works on what you have** — open an `.svg` file, an `svg-studio` code block or an embedded `![[name.svg]]`; repair an SVG from Inkscape or give every element a name, with or without a model.
+
+<img src="https://raw.githubusercontent.com/johannes-kaindl/svg-studio/main/docs/images/repair.png" width="820" alt="A code block that the sanitizer rejects: the note names the reason and offers Repair and Edit.">
+
 - **Apply as file or block** — a new SVG becomes a file in your attachment folder (with its link at the cursor) or a code block in the note.
 
 ## Requirements
