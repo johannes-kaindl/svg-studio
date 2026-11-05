@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-11-05
+
 ### Added
 
 - Code blocks with the language `svg-studio` are shown as an image (the SVG is checked by the sanitizer first; a rejected SVG shows the reasons and buttons to repair or edit it instead of a picture). The image never runs scripts and its styles cannot reach Obsidian.
