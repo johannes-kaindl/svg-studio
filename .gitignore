@@ -6,3 +6,4 @@ main.js
 data.json
 *.log
 .gui-smoke.mjs
+.shots.mjs
