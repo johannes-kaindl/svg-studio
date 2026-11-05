@@ -292,7 +292,7 @@ const EN: Record<string, string> = {
   "tag.marker": "Marker",
   "tag.filter": "Filter",
   "settings.model": "Language model",
-  "help.docs": "https://github.com/johannes-kaindl/svg-studio",
+  "help.docs": "https://github.com/johannes-kaindl/svg-studio/blob/main/docs/README.md",
 };
 
 const DE: Record<string, string> = {
@@ -574,7 +574,7 @@ const DE: Record<string, string> = {
   "tag.marker": "Marker",
   "tag.filter": "Filter",
   "settings.model": "Sprachmodell",
-  "help.docs": "https://github.com/johannes-kaindl/svg-studio",
+  "help.docs": "https://github.com/johannes-kaindl/svg-studio/blob/main/docs/README.md",
 };
 
 export const STRINGS: Record<Lang, Record<string, string>> = { en: EN, de: DE };
