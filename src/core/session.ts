@@ -290,6 +290,9 @@ function applyChained(s: SvgSession, text: string | null, r: SvgRound, index: nu
   return applyRound(text, r);
 }
 
+/** Das Zeichen, das ein BOM am Anfang einer Datei ist (U+FEFF). */
+const BOM = "\uFEFF";
+
 /** Der Text, den Übernehmen schreibt: die angenommenen Einträge aller Runden bis zur aktiven, in Reihenfolge, auf den Text, der jetzt gilt. */
 export function acceptText(s: SvgSession, current: string | null): SvgStep {
   // Die Kette der Runden kommt vom Kit (`chainOf`); die Schleife ist eigen, weil das Kit-`acceptChain` nur Zeichenketten durchreicht und „round n:“ englisch voranstellt.
@@ -304,7 +307,9 @@ export function acceptText(s: SvgSession, current: string | null): SvgStep {
     if (!step.ok) return { ok: false, problem: { ...step.problem, round: index + 1 } };
     text = step.text;
   }
-  return text === null ? fail("nothing-to-apply") : { ok: true, text };
+  if (text === null) return fail("nothing-to-apply");
+  // Ein führendes BOM der Datei bleibt (code-kit 0.58.0 nimmt es an und meldet `bom`): Spannen-Runden fassen es nicht an, eine Runde „ganzes Bild“ und die Reparatur ersetzen den Text und ließen es fallen.
+  return { ok: true, text: current !== null && current.startsWith(BOM) && !text.startsWith(BOM) ? BOM + text : text };
 }
 
 /** Der Text, auf dem die nächste Verfeinerung aufsetzt: der der aktiven Runde (nur Angenommenes), sonst der aktuelle. */

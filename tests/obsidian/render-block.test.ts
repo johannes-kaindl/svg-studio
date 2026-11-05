@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 import { installObsidianDom } from "../helpers/obsidian-dom";
+import { CLICK_COST, COST_LIMIT } from "../../src/core/render-guard";
 import { initStrings, t } from "../../src/i18n/strings";
 import { renderSvgBlock } from "../../src/obsidian/render-block";
 import { base64ToBytes } from "../../src/vendor/kit/data-url";
@@ -16,7 +17,33 @@ const mk = (src: string): { el: HTMLElement; result: "image" | "held" | "error";
   return { el, result, get edits() { return c.edits; }, get repairs() { return c.repairs; } };
 };
 
+/** Klein und wohlgeformt, aber teuer: eine Polylinie mit 2000 Punkten und `marker-mid` auf einem Marker mit 1000 Kreisen (Kostenmodell von code-kit 0.58.0, weit über der Grenze von 1 Mio.). */
+const COSTLY = (() => {
+  const pts = Array.from({ length: 2000 }, (_, i) => `${i % 100},${(i * 7) % 100}`).join(" ");
+  const dots = Array.from({ length: 1000 }, (_, i) => `<circle cx="${i % 10}" cy="${Math.floor(i / 10) % 10}" r="0.2"/>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><marker id="m" markerWidth="10" markerHeight="10">${dots}</marker></defs><polyline points="${pts}" fill="none" stroke="black" marker-mid="url(#m)"/></svg>`;
+})();
+
 describe("renderSvgBlock", () => {
+  it("zu teuer (too-costly) → Fehlerkasten mit dem eigenen Satz statt „code: detail“, nichts gezeichnet", () => {
+    const { el, result } = mk(COSTLY);
+    expect(result).toBe("error");
+    expect(el.querySelector("img")).toBeNull();
+    const items = [...el.querySelectorAll(".svg-studio-error li")].map((li) => li.textContent ?? "");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatch(/^too-costly: this SVG would take too long to draw \(estimated render cost \d+ exceeds the limit of 1000000/);
+    expect(items[0]).toContain("fewer nested masks, markers or filters");
+  });
+
+  it("ein führendes BOM wird angenommen, gezeichnet wird der Text OHNE BOM (der Text, den der Bereiniger geprüft hat)", () => {
+    const { el, result } = mk(`\uFEFF${OK}`);
+    expect(result).toBe("image");
+    const src = el.querySelector("img")!.getAttribute("src")!;
+    const bytes = base64ToBytes(src.slice("data:image/svg+xml;base64,".length));
+    expect(new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes)).toBe(OK);
+    expect(bytes[0]).toBe(0x3c);
+  });
+
   it("gültig → genau ein Bild, Data-URL dekodiert zum Quelltext, alt aus <title>", () => {
     const { el, result } = mk(OK);
     expect(result).toBe("image");
@@ -168,6 +195,67 @@ describe("renderSvgBlock", () => {
       const before = f.log.length;
       (cleanup as unknown as () => void)();
       expect(f.log.slice(before)).toEqual(["abort"]);
+    });
+
+    // Klick-zum-Rendern nach Kostenwert (code-kit 0.58.0, `cost` im ok-Ergebnis): ab `clickCost` Platzhalter, erst der Klick zeichnet; die Marke fällt, es wurde nichts gezeichnet.
+    describe("Kostenschwelle", () => {
+      const cost = (svg: string): number => { const r = checkSvg(svg); if (!r.ok) throw new Error("erwartet ok"); return r.cost; };
+      /** Eine Polylinie mit `marker-mid` und einem Marker aus Kreisen: der Kostenwert wächst mit Punkten × Kreisen. */
+      const MID = (() => {
+        const pts = Array.from({ length: 700 }, (_, i) => `${i % 100},${(i * 7) % 100}`).join(" ");
+        const dots = Array.from({ length: 500 }, (_, i) => `<circle cx="${i % 10}" cy="${Math.floor(i / 10) % 10}" r="0.2"/>`).join("");
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><marker id="m" markerWidth="10" markerHeight="10">${dots}</marker></defs><polyline points="${pts}" fill="none" stroke="black" marker-mid="url(#m)"/></svg>`;
+      })();
+      const run = (src: string, extra: Partial<Parameters<typeof renderSvgBlock>[2]> = {}) => {
+        const f = fakeGuard(false);
+        const el = document.createElement("div");
+        const result = renderSvgBlock(src, el, { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard, ...extra });
+        return { f, el, result };
+      };
+
+      it("der Probekörper liegt zwischen Schwelle und Grenze (echter Kostenwert des Bereinigers)", () => {
+        const c = cost(MID);
+        expect(c).toBeGreaterThanOrEqual(CLICK_COST);
+        expect(c).toBeLessThan(COST_LIMIT);
+        expect(cost(OK)).toBeLessThan(CLICK_COST);
+      });
+
+      it("ab der Schwelle: Platzhalter mit Prozentangabe, kein Bild, die Marke fällt wieder; der Klick zeichnet", () => {
+        const { f, el, result } = run(MID);
+        expect(result).toBe("held");
+        expect(el.querySelector("img")).toBeNull();
+        expect(el.querySelector(".svg-studio-held p")?.textContent).toMatch(/^This SVG is expensive to draw \(about \d+ % of the allowed cost\), so it is shown only after a click\.$/);
+        expect(el.querySelector("button.svg-studio-show")?.textContent).toBe("Show");
+        expect(f.log).toEqual(["begin", "abort"]);
+        (el.querySelector("button.svg-studio-show") as HTMLElement).click();
+        expect(el.querySelector("img.svg-studio-img")).not.toBeNull();
+        expect(el.querySelector(".svg-studio-held")).toBeNull();
+        expect(f.log).toEqual(["begin", "abort", "begin", "settle"]);
+      });
+
+      it("knapp unter der Schwelle wird gezeichnet, genau auf der Schwelle nicht (Grenzwert zählt zum Platzhalter)", () => {
+        const c = cost(MID);
+        expect(run(MID, { clickCost: c + 1 }).result).toBe("image");
+        expect(run(MID, { clickCost: c }).result).toBe("held");
+      });
+
+      it("ein billiges Bild bleibt ein Bild (keine Marke weniger, kein Platzhalter)", () => {
+        const { f, result } = run(OK);
+        expect(result).toBe("image");
+        expect(f.log).toEqual(["begin", "settle"]);
+      });
+
+      it("der Klick umgeht die Schwelle nur für diesen Block; ein abgelehntes SVG bleibt abgelehnt (forced zeichnet nichts Abgelehntes)", () => {
+        expect(run(COSTLY, { forced: true }).result).toBe("error");
+      });
+
+      it("Reihenfolge: eine Absturzmarke und der Notausschalter gehen der Kostenschwelle vor (Platzhalter ohne Bereiniger, ohne begin)", () => {
+        const f = fakeGuard(true);
+        const el = document.createElement("div");
+        expect(renderSvgBlock(MID, el, { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard })).toBe("held");
+        expect(el.querySelector(".svg-studio-held")?.textContent).toContain("blocked the display");
+        expect(f.log).toEqual([]);
+      });
     });
 
     const BAD = `<svg xmlns="http://www.w3.org/2000/svg"><script>x</script></svg>`;

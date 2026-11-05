@@ -49,6 +49,11 @@ describe("bestandProblems", () => {
     expect(repairProblem(b)).toMatch(/^Das SVG ist nicht wohlgeformt: .*\(Offset \d+\)\.$/);
   });
 
+  it("repairProblem: bei too-costly mit dem Hinweis für das Modell", () => {
+    const b = { parse: null, guard: [{ code: "too-costly" as const, detail: "d" }], unnamed: 0, editorMetadata: false };
+    expect(repairProblem(b)).toBe("Der Bereiniger lehnt ab: too-costly: d. Das SVG ist zu aufwendig zu zeichnen; nimm weniger verschachtelte Masken, Marker, Filter und Weichzeichner.");
+  });
+
   it("repairProblem: ohne Parserfehler die Bereiniger-Befunde", () => {
     expect(repairProblem(bestandProblems(INKSCAPE, checkSvg))).toMatch(/^Der Bereiniger lehnt ab: .*sodipodi|inkscape/);
   });

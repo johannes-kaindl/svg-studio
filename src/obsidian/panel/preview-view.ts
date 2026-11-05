@@ -4,7 +4,7 @@ import { backgroundColor, type BackgroundState } from "../../core/background";
 import { scanElements } from "../../core/elements";
 import { measureCanvas } from "../../core/measure";
 import { formatMeasureLine } from "../../core/measure-line";
-import { measureTexts, t } from "../../i18n/strings";
+import { guardProblemText, measureTexts, t } from "../../i18n/strings";
 import { checkSvg } from "../../vendor/kit/svg-guard";
 import type { RenderGuard } from "../render-guard";
 import { buildBackgroundBar } from "./background-bar";
@@ -99,7 +99,7 @@ export function renderPreviewView(host: HTMLElement, text: string, d: PreviewVie
     const err = host.createDiv({ cls: "svg-studio-error" });
     err.createEl("p", { cls: "svg-studio-error-head", text: t("block.rejected") });
     const list = err.createEl("ul");
-    for (const p of shown.problems.slice(0, SHOWN_PROBLEMS)) list.createEl("li", { text: t("block.problem", p.code, p.detail) });
+    for (const p of shown.problems.slice(0, SHOWN_PROBLEMS)) list.createEl("li", { text: guardProblemText(p) });
     return { dispose: () => undefined, select: () => undefined, localBoxOf: () => null };
   }
   preview.select(selection.id);

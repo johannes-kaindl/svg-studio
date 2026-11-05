@@ -4,8 +4,9 @@
 import { applyChanges } from "../../core/changes";
 import { stripEditorMetadata } from "../../core/editor-metadata";
 import { scanElements } from "../../core/elements";
+import { guardProblemsLine } from "../../core/protocol";
 import { canRefine } from "../../core/session";
-import { problemText, t } from "../../i18n/strings";
+import { guardProblemText, problemText, t } from "../../i18n/strings";
 import type { SvgProblem, checkSvg } from "../../vendor/kit/svg-guard";
 
 export interface BestandProblems {
@@ -40,7 +41,7 @@ export function bestandProblems(text: string, guard: typeof checkSvg): BestandPr
 /** Der Befund, mit dem die Reparatur ans Modell geht: das Parserproblem, sonst die Befunde des Bereinigers (Wortlaut wie in `protocol.ts`). */
 export function repairProblem(b: BestandProblems): string {
   if (b.parse !== null) return `Das SVG ist nicht wohlgeformt: ${b.parse.message} (Offset ${String(b.parse.offset)}).`;
-  return `Der Bereiniger lehnt ab: ${b.guard.map((p) => `${p.code}: ${p.detail}`).join("; ")}.`;
+  return guardProblemsLine(b.guard);
 }
 
 export interface BestandActions {
@@ -74,7 +75,7 @@ export function renderBestandNotice(host: HTMLElement, b: BestandProblems, a: Be
     card((box) => {
       box.createDiv({ text: t("bestand.unusableHead") });
       const list = box.createEl("ul", { cls: "svg-studio-notice-list" });
-      for (const p of b.guard.slice(0, LISTED)) list.createEl("li", { text: `${p.code}: ${p.detail}` });
+      for (const p of b.guard.slice(0, LISTED)) list.createEl("li", { text: guardProblemText(p) });
       if (b.guard.length > LISTED) list.createEl("li", { text: t("bestand.more", b.guard.length - LISTED) });
     }, t("bestand.repair"), t("bestand.repair.hint"), tooBig ? null : a.repair);
   }

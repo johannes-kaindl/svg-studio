@@ -95,6 +95,7 @@ const PUNKTE = [
   "c4g-nichtzeichen-im-attribut",
   "laufzeit-marke-verhindert-wiederholung",
   "laufzeit-notausschalter",
+  "block-bom-und-kosten-im-block",
   "laufzeit-absturz-neustart",
   "laufzeit-beenden-im-wachfenster",
   "pruefliste-kartenbeschriftung",
@@ -660,6 +661,66 @@ async function punktLaufzeitSchutz(): Promise<void> {
     } finally {
       await setzeAutoShow(true);
     }
+  });
+}
+
+/** Eine Polylinie mit `marker-mid` und einem Marker aus Kreisen: der Kostenwert wächst mit Punkten × Kreisen (code-kit 0.58.0). 700 × 500 liegt etwa bei 35 % der Grenze (ab 25 % wartet der Block auf einen Klick), 2000 × 1000 weit darüber (`too-costly`). */
+function kostenSvg(punkte: number, kreise: number): string {
+  const pts = Array.from({ length: punkte }, (_, i) => `${String(i % 100)},${String((i * 7) % 100)}`).join(" ");
+  const dots = Array.from({ length: kreise }, (_, i) => `<circle cx="${String(i % 10)}" cy="${String(Math.floor(i / 10) % 10)}" r="0.2"/>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><title>Kosten ${String(punkte)}x${String(kreise)}</title><defs><marker id="m" markerWidth="10" markerHeight="10">${dots}</marker></defs><polyline points="${pts}" fill="none" stroke="black" marker-mid="url(#m)"/></svg>`;
+}
+
+/**
+ * Code-kit 0.58.0 im echten Obsidian: ein führendes BOM im Block kommt beim Plugin an und wird gezeichnet,
+ * ein zu teures SVG zeigt den Meldetext `too-costly` statt „code: detail“, eines nahe der Kostengrenze wartet auf einen Klick und wird dann gezeichnet, ein kleines sofort.
+ */
+async function punktBomUndKosten(): Promise<void> {
+  await lauf("block-bom-und-kosten-im-block", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await setPluginSetting(cdp, PLUGIN_ID, "autoShow", true);
+    await cdp.evaluate(`${PLUGIN_MARKEN}.write([]); return true;`);
+    const klein = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><title>klein</title><circle id="c" cx="5" cy="5" r="4"/></svg>`;
+    const bloecke = [`\uFEFF${klein}`, `\uFEFF\uFEFF${klein}`, kostenSvg(2000, 1000), kostenSvg(700, 500), klein];
+    await schreibe("Guard.md", `# Guard\n\n${bloecke.map((b) => `\`\`\`svg-studio\n${b}\n\`\`\``).join("\n\n")}\n`);
+    await requireVisible(cdp);
+    // Was der Block-Prozessor wirklich bekommt: die ersten Zeichen jeder Quelle, die `begin` der Marke sieht (reicht Obsidian das BOM durch, und wie oft?).
+    await cdp.evaluate(`const g = app.plugins.plugins[${q(PLUGIN_ID)}].renderGuard; if (!g.__orig) { g.__orig = g.begin; } window.__quellen = []; g.begin = (text, win) => { window.__quellen.push(Array.from(text.slice(0, 3)).map((c) => c.charCodeAt(0).toString(16)).join(",") + "|" + text.length); return g.__orig(text, win); }; return true;`);
+    await cdp.evaluate(`const f = app.vault.getAbstractFileByPath("Guard.md"); setTimeout(() => { app.workspace.getLeaf("tab").openFile(f, { state: { mode: "preview" } }); }, 50); return true;`);
+    const zustand = (n: number): Promise<Array<{ imgs: number; nw: number; held: string | null; knopf: string | null; fehler: string[] }> | null> => pollUntil(cdp, `
+      const bs = Array.from(document.querySelectorAll(".markdown-preview-view .svg-studio-block"));
+      if (bs.length < ${String(n)}) return null;
+      return bs.map((b) => { const i = b.querySelector("img.svg-studio-img"); const h = b.querySelector(".svg-studio-held p"); const k = b.querySelector("button.svg-studio-show");
+        return { imgs: b.querySelectorAll("img.svg-studio-img").length, nw: i ? i.naturalWidth : 0, held: h ? h.innerText : null, knopf: k ? k.innerText : null, fehler: Array.from(b.querySelectorAll(".svg-studio-error li")).map((l) => l.innerText) }; });
+    `, 10000, 250);
+    const erst = await zustand(bloecke.length);
+    if (erst === null) throw new Vorbedingung("Guard.md: nicht alle fünf Blöcke wurden gerendert");
+    // Der Block nahe der Grenze wartet; sein Klick zeichnet ihn (gemessen: kein Hänger, das Bild hat eine Breite).
+    const geklickt = await klick(`document.querySelectorAll(".markdown-preview-view .svg-studio-block")[3].querySelector("button.svg-studio-show")`);
+    await sleep(1500);
+    const nach = await zustand(bloecke.length);
+    const quellen = await cdp.evaluate<string>(`return JSON.stringify(window.__quellen);`);
+    const imVault = await liesDatei("Guard.md");
+    const bomImVault = (imVault?.match(/\uFEFF/g) ?? []).length;
+    const parser = await cdp.evaluate<string>(`
+      const kl = '<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/></svg>';
+      const p = (t) => { const d = new DOMParser().parseFromString(t, "image/svg+xml"); return d.getElementsByTagName("parsererror").length ? "parse-error" : "ok"; };
+      return JSON.stringify({ ua: navigator.userAgent.replace(/^.*(Obsidian\\/\\S+).*(Chrome\\/\\S+).*$/, "$1 $2"), keins: p(kl), eins: p("\\uFEFF" + kl), zwei: p("\\uFEFF\\uFEFF" + kl), leerraumDavor: p(" " + kl), leerraumNachBom: p("\\uFEFF " + kl) });`);
+    console.log(`  DOMParser in Obsidian (Text mit führendem U+FEFF): ${parser}`);
+    console.log(`  Quellen beim Prozessor (erste drei Zeichen | Länge): ${quellen} · BOM im Vault-Text: ${String(bomImVault)}`);
+    const [bom, bom2, teuer, nah, kl] = erst;
+    // Das BOM kommt wirklich beim Plugin an (die Quelle, die `begin` sieht, beginnt mit U+FEFF) und der Block wird gezeichnet. Das zweite BOM ist keine Gegenprobe mehr: Obsidians Electron
+    // (Chrome 142) lässt `DOMParser` ein einzelnes führendes U+FEFF durch, Chrome 153 (Messung des Kits) nicht; der Bereiniger nimmt den Block mit zwei BOM dort an (gemessen, siehe Ausgabe oben).
+    const quellenListe = JSON.parse(quellen) as string[];
+    const bomAngekommen = quellenListe.some((x) => x.startsWith("feff,3c,"));
+    const gutBom = bomAngekommen && bom.imgs === 1 && bom.nw > 0 && bom.held === null && bom.fehler.length === 0;
+    record("block-bom-und-kosten-im-block", gutBom
+      && teuer.imgs === 0 && teuer.fehler.length === 1 && /^too-costly: this SVG would take too long to draw \(estimated render cost \d+ exceeds the limit of 1000000/.test(teuer.fehler[0]) && teuer.fehler[0].includes("fewer nested masks")
+      && nah.imgs === 0 && nah.held !== null && /expensive to draw \(about \d+ % of the allowed cost\)/.test(nah.held) && nah.knopf === "Show"
+      && kl.imgs === 1 && kl.nw > 0 && kl.held === null
+      && geklickt && nach !== null && nach[3].imgs === 1 && nach[3].nw > 0 && nach[3].held === null,
+    `ein BOM (angekommen: ${String(bomAngekommen)}): ${q(bom)} · zwei BOM (Hinweis, Ergebnis hängt von der Chromium-Version ab): ${q(bom2)} · zu teuer: ${q(teuer)} · nahe der Grenze: ${q(nah)} → nach Klick (${String(geklickt)}) ${q(nach?.[3])} · klein: ${q(kl)}`);
   });
 }
 
@@ -1741,6 +1802,7 @@ async function main(): Promise<void> {
 
     await punktBlock();
     await punktLaufzeitSchutz();
+    await punktBomUndKosten();
     await punktEinbettung();
     await punktKnopfOeffnetPanel();
     await punktSchnappschuss();

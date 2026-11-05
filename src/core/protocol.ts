@@ -125,6 +125,15 @@ export interface RefineValue {
 
 const NO_SVG = "Die Antwort enthält kein <svg>…</svg>.";
 
+/** Zusatz für das Modell, wenn der Bereiniger `too-costly` meldet (code-kit 0.58.0: das SVG ist klein und wohlgeformt, würde aber die Anzeige einfrieren). */
+export const COST_HINT = "Das SVG ist zu aufwendig zu zeichnen; nimm weniger verschachtelte Masken, Marker, Filter und Weichzeichner.";
+
+/** Der Satz für das Modell zu den Befunden des Bereinigers (Rückfrage und Reparatur). */
+export function guardProblemsLine(problems: ReadonlyArray<{ code: string; detail: string }>): string {
+  const list = problems.map((p) => `${p.code}: ${p.detail}`).join("; ");
+  return `Der Bereiniger lehnt ab: ${list}.${problems.some((p) => p.code === "too-costly") ? ` ${COST_HINT}` : ""}`;
+}
+
 /** Gemeinsame Prüfung: SVG finden, wohlgeformt, vom Bereiniger angenommen. Liefert das SVG oder das Problem (deutsch, geht ans Modell). */
 function check(raw: string, guard: GuardFn): { svg: string } | { problem: string } {
   const svg = extractSvg(raw);
@@ -132,7 +141,7 @@ function check(raw: string, guard: GuardFn): { svg: string } | { problem: string
   const syntax = scanElements(svg).issues.find((i) => i.kind === "syntax");
   if (syntax !== undefined) return { problem: `Das SVG ist nicht wohlgeformt: ${syntax.message} (Offset ${syntax.offset}).` };
   const g = guard(svg);
-  if (!g.ok) return { problem: `Der Bereiniger lehnt ab: ${g.problems.map((p) => `${p.code}: ${p.detail}`).join("; ")}.` };
+  if (!g.ok) return { problem: guardProblemsLine(g.problems) };
   return { svg };
 }
 

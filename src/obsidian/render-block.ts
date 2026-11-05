@@ -3,7 +3,8 @@
 import { setIcon } from "obsidian";
 import { binaryToDataUrl } from "../vendor/kit/data-url";
 import type { checkSvg } from "../vendor/kit/svg-guard";
-import type { T } from "../i18n/strings";
+import { CLICK_COST, COST_LIMIT } from "../core/render-guard";
+import { guardProblemText, type T } from "../i18n/strings";
 import type { RenderGuard } from "./render-guard";
 
 export const VIEW_TYPE_SVG_STUDIO = "svg-studio-panel";
@@ -19,7 +20,9 @@ export interface RenderBlockOptions {
   autoShow?: () => boolean;
   /** Der Block meldet hier eine Aufräum-Funktion an, die beim Abbau des Blocks (Notizwechsel, erneutes Rendern) läuft: sie beendet den Wächter der Absturzmarke. */
   onDispose?: (cleanup: () => void) => void;
-  /** Nach „Anzeigen“ oder „Trotzdem anzeigen“: Marke und Notausschalter nicht erneut prüfen. */
+  /** Kostenwert ab dem der Block erst nach einem Klick gezeichnet wird; Vorgabe `CLICK_COST`. */
+  clickCost?: number;
+  /** Nach „Anzeigen“ oder „Trotzdem anzeigen“: Marke, Notausschalter und Kostenschwelle nicht erneut prüfen. */
   forced?: boolean;
 }
 
@@ -68,12 +71,18 @@ export function renderSvgBlock(source: string, el: HTMLElement, o: RenderBlockOp
   if (ticket !== undefined) o.onDispose?.(() => { ticket.abort(); });
   const checked = o.guard(source);
   if (checked.ok) {
+    // Nahe der Kostengrenze erst nach einem Klick (der Kostenwert ist erst nach dem Bereiniger bekannt); die Marke fällt wieder, es wurde nichts gezeichnet.
+    if (o.forced !== true && checked.cost >= (o.clickCost ?? CLICK_COST)) {
+      ticket?.abort();
+      return hold(o.t("block.costly", Math.round((checked.cost / COST_LIMIT) * 100)), o.t("block.show"), () => undefined);
+    }
     const title = checked.svg.querySelector(":scope > title")?.textContent?.trim();
     const alt = title !== undefined && title !== "" ? title : o.t("block.alt");
     const img = wrap.createEl("img", { cls: "svg-studio-img", attr: { alt } });
     img.addEventListener("load", () => { ticket?.settle(); });
     img.addEventListener("error", () => { ticket?.abort(); });
-    img.setAttribute("src", binaryToDataUrl(new TextEncoder().encode(source), "svg"));
+    // Der Bereiniger hat ein führendes BOM abgetrennt (`bom`) und genau den Text ohne BOM geprüft: gezeichnet wird derselbe Text, nicht die Quelle mit BOM.
+    img.setAttribute("src", binaryToDataUrl(new TextEncoder().encode(checked.bom === true ? source.slice(1) : source), "svg"));
     iconButton(wrap, "svg-studio-edit", "pencil", o.t("block.edit"), o.onEdit);
     return "image";
   }
@@ -82,7 +91,7 @@ export function renderSvgBlock(source: string, el: HTMLElement, o: RenderBlockOp
   const box = wrap.createDiv({ cls: "svg-studio-error" });
   box.createEl("p", { cls: "svg-studio-error-head", text: o.t("block.rejected") });
   const list = box.createEl("ul");
-  for (const p of checked.problems) list.createEl("li", { text: o.t("block.problem", p.code, p.detail) });
+  for (const p of checked.problems) list.createEl("li", { text: guardProblemText(p, o.t) });
   const row = box.createDiv({ cls: "svg-studio-error-actions" });
   textButton(row, "svg-studio-repair mod-cta", o.t("block.repair"), o.onRepair);
   textButton(row, "svg-studio-edit-text", o.t("block.editShort"), o.onEdit);

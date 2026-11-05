@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { diffSvg } from "../src/core/diff";
 import { PROBLEM_CODES, type Problem } from "../src/core/problem";
 import { acceptText, addRound, decide, type SvgRound, type SvgSession } from "../src/core/session";
-import { initStrings, problemText, STRINGS } from "../src/i18n/strings";
+import { guardProblemText, initStrings, problemText, STRINGS } from "../src/i18n/strings";
 import { EMPTY_ROUNDS } from "../src/vendor/kit/rounds";
 
 const S = (inner: string): string => `<svg xmlns="http://www.w3.org/2000/svg">\n${inner}\n</svg>\n`;
@@ -85,5 +85,26 @@ describe("Probleme des Kerns erscheinen in der Sprache der Oberfläche, ohne fre
     expect(problemText(p)).toBe("mond: fill has changed since the round (now not set, the round assumed red).");
     initStrings("de");
     expect(problemText(p)).toBe("mond: fill hat sich seit der Runde geändert (jetzt nicht gesetzt, die Runde ging von red aus).");
+  });
+});
+
+describe("guardProblemText (Befunde des Bereinigers für den Nutzer)", () => {
+  const costly = { code: "too-costly", detail: "estimated render cost 2000000 exceeds the limit of 1000000" };
+  it("too-costly: ein eigener Satz in beiden Sprachen, mit dem Detail des Kits", () => {
+    initStrings("en");
+    expect(guardProblemText(costly)).toBe("too-costly: this SVG would take too long to draw (estimated render cost 2000000 exceeds the limit of 1000000). Use fewer nested masks, markers or filters and fewer blurred shapes.");
+    initStrings("de");
+    expect(guardProblemText(costly)).toBe("too-costly: dieses SVG wäre zu aufwendig zu zeichnen (estimated render cost 2000000 exceeds the limit of 1000000). Nimm weniger verschachtelte Masken, Marker oder Filter und weniger weichgezeichnete Formen.");
+  });
+  it("jeder andere Code bleibt „code: detail“", () => {
+    initStrings("de");
+    expect(guardProblemText({ code: "unsafe-css", detail: "d" })).toBe("unsafe-css: d");
+  });
+  it("beide Sprachen tragen dieselben Schlüssel und dieselben Platzhalter für die neuen Texte", () => {
+    for (const k of ["block.problem.too-costly", "block.costly"]) {
+      expect(STRINGS.en[k], k).toBeDefined();
+      expect(STRINGS.de[k], k).toBeDefined();
+      expect([...(STRINGS.en[k] ?? "").matchAll(/\{\d\}/g)].map((m) => m[0])).toEqual([...(STRINGS.de[k] ?? "").matchAll(/\{\d\}/g)].map((m) => m[0]));
+    }
   });
 });

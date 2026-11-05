@@ -21,6 +21,15 @@ export interface Mark {
 }
 
 /** So viele Marken hält die Liste; es fallen zuerst eigene laufende Marken heraus, `slow`-Marken und die einer früheren Sitzung bleiben am längsten. */
+/** Die Grenze des Bereinigers (`maxRenderCost`, Vorgabe von code-kit 0.58.0): das Plugin ändert sie nicht, die Anzeige „x % der erlaubten Kosten“ rechnet gegen sie. */
+export const COST_LIMIT = 1_000_000;
+/** Kostenwert (`cost` im ok-Ergebnis des Bereinigers), ab dem ein Block in einer Notiz erst nach einem Klick gezeichnet wird. Das ergänzt die Absturzmarke, es ersetzt sie nicht.
+ *  Herkunft (code-kit 0.58.0, `docs/internal/svg-guard-cost.md`): der Kostenwert ist etwa eine Mikrosekunde Chromium-Zeichenzeit bei 600 px Breite, die Grenze 1 Mio. etwa eine Sekunde
+ *  (Messrechner Apple M5 Pro). Die Randfälle des Kits zeichnen bei 138 729 in 48 ms, bei 549 756 in 415 ms, bei 799 601 in 332 ms und bei 820 202 in 601 ms (bis 0,76 ms je 1000);
+ *  die 38 echten SVG-Dateien des Kits liegen höchstens bei 38 794 (3,9 % der Grenze), ein üblicher Schlagschatten bei 33 232. 250 000 ist ein Viertel der Grenze: rund 0,2 s auf dem
+ *  Messrechner im schlechtesten gemessenen Verhältnis, mehr als das Sechsfache des teuersten echten Bildes (kein Platzhalter für Icons, Logos, Diagramme). Auf einem Telefon, das
+ *  drei- bis fünfmal langsamer sein dürfte (geschätzt, nicht gemessen), wäre es rund eine Sekunde. */
+export const CLICK_COST = 250_000;
 export const MAX_MARKS = 50;
 /** Kommt `load` später als so viele ms nach dem Setzen der Marke (Stilkosten vor dem Laden), ist das Bild sofort `slow`. */
 export const SLOW_MS = 1500;

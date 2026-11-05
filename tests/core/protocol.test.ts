@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  buildCreateMessages, buildRefineMessages, buildRepairMessages, CREATE_SYSTEM, extractSvg, hasRealMeasures, promptFingerprint,
+  buildCreateMessages, buildRefineMessages, buildRepairMessages, COST_HINT, CREATE_SYSTEM, extractSvg, guardProblemsLine, hasRealMeasures, promptFingerprint,
   REFINE_SYSTEM, RETRY_INSTRUCTION, validateCreate, validateRefine, validateRepair, type GuardFn,
 } from "../../src/core/protocol";
 
@@ -159,5 +159,22 @@ describe("validateRepair", () => {
     const v = validateRepair(SVG, { guard: okGuard, base: broken });
     expect(v.ok).toBe(true);
     expect(v.ok && v.value.diff).toEqual({ decomposable: false, why: "Ausgang nicht lesbar" });
+  });
+});
+
+describe("guardProblemsLine (Satz für das Modell zu den Befunden des Bereinigers)", () => {
+  it("andere Codes: nur die Liste, ohne Zusatz", () => {
+    expect(guardProblemsLine([{ code: "unsafe-css", detail: "x" }, { code: "doctype", detail: "y" }])).toBe("Der Bereiniger lehnt ab: unsafe-css: x; doctype: y.");
+  });
+  it("too-costly: die Liste und der Hinweis, weniger Masken, Marker und Filter zu nehmen (einmal, auch bei mehreren Befunden)", () => {
+    const line = guardProblemsLine([{ code: "too-costly", detail: "estimated render cost 2000000 exceeds the limit" }, { code: "too-costly", detail: "b" }]);
+    expect(line).toBe(`Der Bereiniger lehnt ab: too-costly: estimated render cost 2000000 exceeds the limit; too-costly: b. ${COST_HINT}`);
+    expect(line.split(COST_HINT)).toHaveLength(2);
+    expect(COST_HINT).toContain("Masken, Marker, Filter");
+  });
+  it("validateCreate reicht den Hinweis an die Rückfrage durch", () => {
+    const g: GuardFn = () => ({ ok: false, problems: [{ code: "too-costly", detail: "d" }] });
+    const v = validateCreate(`<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/></svg>`, { guard: g, prompt: "x" });
+    expect(v).toEqual({ ok: false, problem: `Der Bereiniger lehnt ab: too-costly: d. ${COST_HINT}` });
   });
 });

@@ -6,7 +6,7 @@
 import type { App, MarkdownView } from "obsidian";
 import type { AcceptAs } from "../core/settings";
 import { acceptText, type SvgSession } from "../core/session";
-import { acceptStrings, problemText, t } from "../i18n/strings";
+import { acceptStrings, guardProblemText, problemText, t } from "../i18n/strings";
 import { listFences } from "../vendor/kit/fence-scan";
 import { wrapInFence } from "../vendor/kit/fences";
 import { slugify } from "../vendor/kit/slug";
@@ -112,7 +112,7 @@ export async function acceptSvgSession(env: AcceptEnv, s: SvgSession, o: { guard
     },
     checkWrite: (text) => {
       const r = o.guard(text);
-      return r.ok ? null : t("accept.invalid", r.problems.map((p) => `${p.code}: ${p.detail}`).join("; "));
+      return r.ok ? null : t("accept.invalid", r.problems.map((p) => guardProblemText(p)).join("; "));
     },
     beforeWrite: (path, oldText) => backup(env.app, o.pluginId, path, oldText),
   };

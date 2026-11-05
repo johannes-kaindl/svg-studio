@@ -27,8 +27,10 @@ const EN: Record<string, string> = {
   "block.showAnyway": "Show anyway",
   "block.manual": "This SVG is not shown automatically.",
   "block.show": "Show",
+  "block.costly": "This SVG is expensive to draw (about {0} % of the allowed cost), so it is shown only after a click.",
   "block.rejected": "This SVG cannot be shown: the sanitizer rejected it.",
   "block.problem": "{0}: {1}",
+  "block.problem.too-costly": "too-costly: this SVG would take too long to draw ({0}). Use fewer nested masks, markers or filters and fewer blurred shapes.",
   "embed.edit": "Edit in SVG Studio",
   "notice.noTarget": "Open an .svg file, or put the cursor in a svg-studio block or on an embedded .svg file.",
   "settings.acceptAs": "Apply new SVG as",
@@ -305,8 +307,10 @@ const DE: Record<string, string> = {
   "block.showAnyway": "Trotzdem anzeigen",
   "block.manual": "Dieses SVG wird nicht automatisch angezeigt.",
   "block.show": "Anzeigen",
+  "block.costly": "Dieses SVG ist aufwendig zu zeichnen (rund {0} % der erlaubten Kosten) und wird erst nach einem Klick gezeigt.",
   "block.rejected": "Dieses SVG lässt sich nicht anzeigen: der Bereiniger hat es abgelehnt.",
   "block.problem": "{0}: {1}",
+  "block.problem.too-costly": "too-costly: dieses SVG wäre zu aufwendig zu zeichnen ({0}). Nimm weniger verschachtelte Masken, Marker oder Filter und weniger weichgezeichnete Formen.",
   "embed.edit": "In SVG Studio bearbeiten",
   "notice.noTarget": "Öffne eine .svg-Datei oder setze den Cursor in einen svg-studio-Block oder auf eine eingebettete .svg-Datei.",
   "settings.acceptAs": "Neues SVG übernehmen als",
@@ -684,6 +688,11 @@ export function problemText(p: Problem): string {
   const params = p.code === "field-readonly" ? [p.params[0] ?? null, t(`fields.readonly.${String(p.params[1])}`)] : p.params;
   const text = t(`problem.${p.code}`, ...params.map((v) => (v === null ? t("problem.unset") : v)));
   return p.round === undefined ? text : t("problem.round", p.round, text);
+}
+
+/** Ein Befund des Bereinigers für den Nutzer: `too-costly` (code-kit 0.58.0) mit einem Satz in der Sprache der Oberfläche, jeder andere Code als `code: detail`. `tr` ist die Übersetzung, die der Aufrufer schon hat. */
+export function guardProblemText(p: { code: string; detail: string }, tr: T = t): string {
+  return p.code === "too-costly" ? tr("block.problem.too-costly", p.detail) : tr("block.problem", p.code, p.detail);
 }
 
 /** Die Wörter der Beschriftung von Einträgen (`core/diff-labels.ts`). */

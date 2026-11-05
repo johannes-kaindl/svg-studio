@@ -393,3 +393,30 @@ describe("acceptText: „Namen vergeben“ mit Folgerunde (Review C4, B2)", () =
     expect(r.ok && r.text).toContain(`id="rect-3"`);
   });
 });
+
+describe("acceptText: ein führendes BOM der Datei bleibt (code-kit 0.58.0 nimmt es an)", () => {
+  const BOM = "\uFEFF";
+  const answer = BASE.replace(`r="40"`, `r="60"`);
+
+  it("Spannen-Runde: das BOM bleibt, weil nur die Spanne ersetzt wird", () => {
+    const s = ok(addRound(open(BOM + BASE), prompt(BASE, answer)));
+    const r = acceptText(s, BOM + BASE);
+    expect(r).toEqual({ ok: true, text: BOM + answer });
+  });
+
+  it("Runde „ganzes Bild“ (Modellantwort ohne BOM): das BOM wird wieder vorangestellt", () => {
+    const s = ok(addRound(open(BOM + BASE), { art: "prompt", instruction: "x", basedOn: null, body: { form: "whole", text: answer, decision: "accepted" } }));
+    expect(acceptText(s, BOM + BASE)).toEqual({ ok: true, text: BOM + answer });
+  });
+
+  it("Erzeugen ohne Vorlage (current null) und Datei ohne BOM: kein BOM dazu", () => {
+    const s = ok(addRound(open(null), { art: "create", instruction: "Mond", basedOn: null, body: { form: "whole", text: BASE, decision: "accepted" } }));
+    expect(acceptText(s, null)).toEqual({ ok: true, text: BASE });
+    expect(acceptText(s, BASE)).toEqual({ ok: true, text: BASE });
+  });
+
+  it("trägt der Text der Runde selbst schon ein BOM, kommt keines dazu (nie zwei)", () => {
+    const s = ok(addRound(open(null), { art: "create", instruction: "Mond", basedOn: null, body: { form: "whole", text: BOM + BASE, decision: "accepted" } }));
+    expect(acceptText(s, BOM + BASE)).toEqual({ ok: true, text: BOM + BASE });
+  });
+});
