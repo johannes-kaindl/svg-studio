@@ -25,6 +25,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { cwd } from "node:process";
 
 import { stampedName } from "../src/vendor/kit/rotation";
@@ -90,6 +91,8 @@ const PUNKTE = [
   "c4f-namen-vergeben",
   "c4f-reparieren",
   "c4g-nichtzeichen-im-attribut",
+  "laufzeit-marke-verhindert-wiederholung",
+  "laufzeit-notausschalter",
   "pruefliste-kartenbeschriftung",
   "pruefliste-ablehnen",
   "pruefliste-annehmen",
@@ -572,6 +575,82 @@ async function punktBlock(): Promise<void> {
     const modus = await cdp.evaluate<string>(`const l = app.workspace.getMostRecentLeaf(app.workspace.rootSplit); return JSON.stringify({ mode: l.view.getMode(), source: l.view.getState().source });`);
     const gut = (m: typeof lesen): boolean => m !== null && m.n === 1 && m.nw > 0 && m.nh > 0 && m.complete && m.src.startsWith("data:image/svg+xml") && m.edit;
     record("block-rendert-als-bild", gut(lesen) && gut(lp), `Lesemodus ${q(lesen)} · Live Preview ${q(lp)} (Blattzustand ${modus})`);
+  });
+}
+
+/** Der Quelltext des ersten ```svg-studio-Blocks einer Notiz, wie ihn der Codeblock-Prozessor bekommt (Zeilen zwischen den Zäunen, ohne den letzten Umbruch). */
+function blockQuelle(note: string): string {
+  const m = /```svg-studio\n([\s\S]*?)\n```/.exec(note);
+  if (m === null) throw new Vorbedingung("Block.md enthält keinen svg-studio-Block");
+  return m[1];
+}
+
+/** Zustand des Blocks in der geöffneten Notiz: Bild(er), Platzhalter, Knopf, Marken im App-Speicher. */
+const blockZustand = (): Promise<{ imgs: number; naturalWidth: number; held: string | null; knopf: string | null; marken: number } | null> =>
+  pollUntil(cdp, `
+    const block = document.querySelector(".markdown-preview-view .svg-studio-block");
+    if (!block) return null;
+    const img = block.querySelector("img.svg-studio-img");
+    const held = block.querySelector(".svg-studio-held");
+    const knopf = block.querySelector("button.svg-studio-show");
+    const marken = app.loadLocalStorage("svg-studio:render-marks");
+    return { imgs: block.querySelectorAll("img.svg-studio-img").length, naturalWidth: img ? img.naturalWidth : 0, held: held ? held.innerText : null, knopf: knopf ? knopf.innerText : null, marken: Array.isArray(marken) ? marken.length : 0 };
+  `, 8000, 250);
+
+/** Eine andere Notiz und dann Block.md öffnen, damit der Block sicher neu gerendert wird (Zustand der Marke am Start). */
+async function oeffneBlockNeu(): Promise<void> {
+  if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md rendert nicht");
+  if (!(await openExisting(cdp, "Block.md", "preview"))) throw new Vorbedingung("Block.md (Lesemodus) rendert nicht");
+}
+
+async function punktLaufzeitSchutz(): Promise<void> {
+  const setzeAutoShow = (v: boolean): Promise<void> => setPluginSetting(cdp, PLUGIN_ID, "autoShow", v);
+  await lauf("laufzeit-marke-verhindert-wiederholung", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await setzeAutoShow(true);
+    const quelle = blockQuelle(fixtur("Block.md"));
+    const loescheMarken = (): Promise<unknown> => cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", null); return true;`);
+    await loescheMarken();
+    // Gegenprobe ohne Marke: das Bild erscheint, und die Marke fällt wieder.
+    await oeffneBlockNeu();
+    const ohne = await blockZustand();
+    await sleep(800);
+    const ohneNach = await blockZustand();
+    // Der Absturz-Zustand: eine Marke einer früheren Sitzung für genau diesen Block steht (wie nach einem eingefrorenen und beendeten Obsidian).
+    const fp = createHash("sha256").update(quelle, "utf8").digest("hex");
+    await cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", [{ fp: ${q(fp)}, at: Date.now(), session: "frueher" }]); return true;`);
+    const gesetzt = await cdp.evaluate<boolean>(`return Array.isArray(app.loadLocalStorage("svg-studio:render-marks")) && app.loadLocalStorage("svg-studio:render-marks").length === 1;`);
+    await oeffneBlockNeu();
+    const mit = await blockZustand();
+    const geklickt = await klick(`document.querySelector(".markdown-preview-view .svg-studio-block button.svg-studio-show")`);
+    await sleep(800);
+    const danach = await blockZustand();
+    const gut = ohne !== null && ohne.imgs === 1 && ohne.naturalWidth > 0 && ohne.held === null
+      && ohneNach !== null && ohneNach.marken === 0
+      && gesetzt
+      && mit !== null && mit.imgs === 0 && mit.held !== null && mit.knopf !== null && mit.marken >= 1
+      && geklickt
+      && danach !== null && danach.imgs === 1 && danach.naturalWidth > 0 && danach.held === null && danach.marken === 0;
+    record("laufzeit-marke-verhindert-wiederholung", gut, `ohne Marke ${q(ohne)} → nach 0,8 s ${q(ohneNach)} · Marke gesetzt ${String(gesetzt)} · Neustart des Blocks ${q(mit)} · nach „Trotzdem anzeigen“ (Klick ${String(geklickt)}) ${q(danach)}`);
+  });
+
+  await lauf("laufzeit-notausschalter", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    try {
+      await cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", null); return true;`);
+      await setzeAutoShow(false);
+      await oeffneBlockNeu();
+      const aus = await blockZustand();
+      const geklickt = await klick(`document.querySelector(".markdown-preview-view .svg-studio-block button.svg-studio-show")`);
+      await sleep(800);
+      const nach = await blockZustand();
+      const gut = aus !== null && aus.imgs === 0 && aus.held !== null && aus.knopf !== null && aus.marken === 0 && geklickt && nach !== null && nach.imgs === 1 && nach.naturalWidth > 0 && nach.held === null;
+      record("laufzeit-notausschalter", gut, `aus ${q(aus)} · nach „Anzeigen“ (Klick ${String(geklickt)}) ${q(nach)}`);
+    } finally {
+      await setzeAutoShow(true);
+    }
   });
 }
 
@@ -1448,6 +1527,7 @@ async function main(): Promise<void> {
     });
 
     await punktBlock();
+    await punktLaufzeitSchutz();
     await punktEinbettung();
     await punktKnopfOeffnetPanel();
     await punktSchnappschuss();
