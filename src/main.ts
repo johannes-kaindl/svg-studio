@@ -8,7 +8,8 @@ import { BLOCK_LANG, fileTarget, registerFileMenu, targetFromContext } from "./o
 import { SvgStudioView } from "./obsidian/panel/view";
 import { readTargetText } from "./obsidian/read-target";
 import { renderSvgBlock, VIEW_TYPE_SVG_STUDIO } from "./obsidian/render-block";
-import { appMarkStore, createRenderGuard } from "./obsidian/render-guard";
+import { openMarkStore, type MarkStore } from "./obsidian/mark-store";
+import { createRenderGuard, type RenderGuard } from "./obsidian/render-guard";
 import { SvgStudioSettingTab } from "./obsidian/settings-tab";
 import type { Target } from "./vendor/kit/panel-session";
 import { pickLang } from "./vendor/kit/i18n";
@@ -31,6 +32,9 @@ export default class SvgStudioPlugin extends Plugin {
     initStrings(pickLang(getLanguage()));
     const { settings } = loadSettings(await this.loadData());
     this.settings = settings;
+    // Die Absturzmarken vor dem ersten Block lesen (IndexedDB): ein Block, der beim Start wiederhergestellt wird, muss die Marke eines getöteten Prozesses schon sehen.
+    this.markStore = await openMarkStore(this.app);
+    this.renderGuard = createRenderGuard(this.markStore);
 
     // Sampling wie in der Messung (Plan 2, Entscheidung 2): Modus `transform` (Temperatur 0,2, Denken aus als Vorgabe), `max_tokens` 16384.
     this.llm = createLlmConnection({
@@ -164,7 +168,9 @@ export default class SvgStudioPlugin extends Plugin {
   }
 
   /** Absturzmarken für Block und Panel-Vorschau (App-lokaler Speicher, für alle Fenster gemeinsam). */
-  private readonly renderGuard = createRenderGuard(appMarkStore(this.app));
+  private renderGuard!: RenderGuard;
+  /** Der Speicher der Marken (IndexedDB, sonst Hauptspeicher); öffentlich für den GUI-Smoke, der Marken eines getöteten Prozesses prüft. */
+  markStore!: MarkStore;
 
   /** Die zuletzt aktive Notiz-Ansicht, fensterübergreifend (das Panel selbst ist keine). */
   private lastMarkdown: MarkdownView | null = null;
