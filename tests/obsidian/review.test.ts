@@ -36,7 +36,7 @@ const open = (startText: string | null): SvgSession => ({ target: startText === 
 const withRound = (): SvgSession => ok(addRound(open(BASE), { art: "prompt", instruction: "größer", basedOn: null, body: entriesOf(BASE, ANSWER) }));
 
 // ---- Ohne Shell: die Prüfliste mit einem Kontext, der die Sitzung hält ------------------------------------------------------------
-function harness(start: SvgSession, o: { busy?: boolean; busyNow?: () => boolean; comment?: (initial: string) => Promise<string | null> } = {}) {
+function harness(start: SvgSession, o: { busy?: boolean; busyNow?: () => boolean; comment?: (initial: string) => Promise<string | null>; track?: (destroy: () => void) => void } = {}) {
   let session = start;
   const host = document.body.createDiv();
   const statuses: string[] = [];
@@ -49,7 +49,7 @@ function harness(start: SvgSession, o: { busy?: boolean; busyNow?: () => boolean
   };
   function draw(): void {
     host.empty();
-    renderReview(host, activeRound(session.rounds), session, ctx, { background: BG, jump: (id) => { jumps.push(id); }, ...(o.comment === undefined ? {} : { comment: o.comment }) });
+    renderReview(host, activeRound(session.rounds), session, ctx, { background: BG, ...(o.track === undefined ? {} : { track: o.track }), jump: (id) => { jumps.push(id); }, ...(o.comment === undefined ? {} : { comment: o.comment }) });
   }
   draw();
   const cards = (): HTMLElement[] => [...host.querySelectorAll<HTMLElement>(".okit-review-card")];
@@ -269,6 +269,29 @@ describe("Prüfliste: Runde „ganzes Bild“", () => {
     expect(shadows[0]!.querySelector("#tuer")).not.toBeNull();
     expect(shadows[1]!.querySelector("#g #mond")).not.toBeNull();
     expect(shadows[0]!.querySelector("#g")).toBeNull();
+  });
+
+  it("jede kleine Vorschau meldet ihren Abbau (track); der Aufrufer baut sie beim Neuzeichnen und Schließen ab", () => {
+    const destroys: Array<() => void> = [];
+    const h = harness(whole(), { track: (d) => { destroys.push(d); } });
+    expect(destroys).toHaveLength(2); // Vorher und Nachher
+    expect(h.host.querySelectorAll(".svg-studio-stage-wrap")).toHaveLength(2);
+    for (const d of destroys) d();
+    expect(h.host.querySelectorAll(".svg-studio-stage-wrap")).toHaveLength(0);
+  });
+
+  it("svgSlots: renderChanges baut die kleinen Vorschauen der letzten Zeichnung ab, dispose die der letzten", () => {
+    const { llm } = fakeLlm([]);
+    const slots = svgSlots({ llm, readTargetText: () => Promise.resolve(null), thinkingOn: () => false, background: BG });
+    const session = whole();
+    const ctx: ChangesCtx<SvgSession> = { busy: () => false, session: () => session, setSession: () => undefined, setStatus: () => undefined };
+    const host = document.body.createDiv();
+    const round = activeRound(session.rounds);
+    slots.renderChanges(host, round, session, ctx);
+    slots.renderChanges(host, round, session, ctx); // der Aufrufer (Shell) leert den Host; hier bewusst nicht: übrig bleiben nur die Vorschauen der zweiten Zeichnung
+    expect(host.querySelectorAll(".svg-studio-stage-wrap")).toHaveLength(2);
+    slots.dispose?.();
+    expect(host.querySelectorAll(".svg-studio-stage-wrap")).toHaveLength(0);
   });
 
   it("Reparatur: „Repair: whole image“; ist der Ausgang kaputt, steht bei Vorher der Hinweis statt einer Vorschau", () => {

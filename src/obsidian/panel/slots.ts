@@ -49,6 +49,8 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
   const focus: { name: string | null } = { name: null };
   /** Zeichnet die Zahlenfelder des gewählten Elements neu (eine Auswahl im Bild ändert nur sie, nicht das Panel). */
   let paintFields: (() => void) | null = null;
+  /** Abbau-Funktionen der kleinen Vorschauen (Vergleich Vorher/Nachher) der letzten Zeichnung der Prüfliste. */
+  const comparePreviews: Array<() => void> = [];
   return {
     fresh: freshSession,
     roundLabel: (r) => r.instruction,
@@ -99,7 +101,9 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       paintFields();
     },
     renderChanges(host, round, session, ctx) {
-      renderReview(host, round, session, ctx, { background: d.background, ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }), jump: (id) => { view?.select(id); }, ...(d.comment === undefined ? {} : { comment: d.comment }) });
+      // Die kleinen Vorschauen der letzten Zeichnung abbauen (ihre Wächter der Absturzmarke enden dabei), dann neu.
+      for (const destroy of comparePreviews.splice(0)) destroy();
+      renderReview(host, round, session, ctx, { background: d.background, track: (destroy) => { comparePreviews.push(destroy); }, ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }), jump: (id) => { view?.select(id); }, ...(d.comment === undefined ? {} : { comment: d.comment }) });
     },
     notices(host, ctx) {
       void renderNotices(host, ctx, d);
@@ -108,6 +112,7 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       view?.dispose();
       view = null;
       paintFields = null;
+      for (const destroy of comparePreviews.splice(0)) destroy();
     },
   };
 }

@@ -114,14 +114,17 @@ svg { display: block; max-width: 100%; height: auto; }
   return {
     show(text) {
       clear();
-      const r = o.guard(text);
-      if (!r.ok) return { ok: false, problems: r.problems };
+      // Marke zuerst: ein blockierter Text läuft nicht einmal durch den Bereiniger, und die Marke steht schon vor ihm (er kann selbst hängen).
       if (o.renderGuard?.isMarked(text) === true) return { ok: false, problems: [], blocked: true };
+      const t = o.renderGuard?.begin(text, doc.defaultView ?? window);
+      const r = o.guard(text);
+      if (!r.ok) {
+        t?.abort();
+        return { ok: false, problems: r.problems };
+      }
       svg = doc.importNode(r.svg, true);
       // Ein Element, das schon unseren Markennamen trägt, stammt nicht von uns (der Name ist zufällig, also nur ein Zufallstreffer): weg damit.
       for (const el of Array.from(svg.querySelectorAll(`[${mark}]`))) el.removeAttribute(mark);
-      // Die Marke steht, BEVOR der Baum im Dokument hängt: Layout und Zeichnen folgen erst danach und können den Hauptthread blockieren.
-      const t = o.renderGuard?.begin(text, doc.defaultView ?? window);
       ticket = t;
       shadow.appendChild(svg);
       t?.settle();

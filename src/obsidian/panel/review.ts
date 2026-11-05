@@ -29,6 +29,8 @@ export interface ReviewDeps {
   background: PreviewViewDeps["background"];
   /** Absturzmarken (Laufzeit-Schutz): auch die kleinen Vorschauen zeichnen nicht, solange eine Marke steht. */
   renderGuard?: PreviewViewDeps["renderGuard"];
+  /** Jede kleine Vorschau meldet hier, wie sie abgebaut wird: der Aufrufer ruft es beim Neuzeichnen und Schließen (sonst bliebe der Wächter ihrer Marke bis zum Fensterende). */
+  track?: (destroy: () => void) => void;
   /** Die große Vorschau springt zu diesem Element (Klick auf den Kartenrumpf). */
   jump: (id: string) => void;
   /** Fragt den Kommentartext (mit dem bisherigen als Vorbelegung); `null` heißt Abbruch. Fehlt die Funktion, gibt es keine Kommentar-Taste. */
@@ -170,6 +172,7 @@ function renderCompare(parent: HTMLElement, before: string, after: string, d: Re
     const cell = grid.createDiv({ cls: "svg-studio-compare-cell" });
     cell.createDiv({ cls: "svg-studio-compare-label", text: label });
     const preview = buildPreview(cell, { guard: checkSvg, onSelect: () => undefined, ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }) });
+    d.track?.(() => { preview.destroy(); });
     if (preview.show(text).ok) preview.setBackground(backgroundColor(d.background.get()));
     else {
       preview.destroy();

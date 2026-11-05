@@ -96,6 +96,7 @@ const PUNKTE = [
   "laufzeit-marke-verhindert-wiederholung",
   "laufzeit-notausschalter",
   "laufzeit-absturz-neustart",
+  "laufzeit-beenden-im-wachfenster",
   "pruefliste-kartenbeschriftung",
   "pruefliste-ablehnen",
   "pruefliste-annehmen",
@@ -673,12 +674,25 @@ function haengerSvg(): string {
 const PLUGIN_MARKEN = `app.plugins.plugins[${q(PLUGIN_ID)}].markStore`;
 
 /** Die eigene Zweitinstanz hart beenden (`kill -9` über den vollen Profilpfad, nie die reguläre Instanz) und neu starten; liefert die neue Verbindung. */
-async function hartNeustart(ud: string): Promise<Cdp> {
+async function hartNeustart(ud: string, signal: "-9" | "-TERM" | "browser-close" = "-9"): Promise<Cdp> {
   const beende = (sig: string): void => { try { execFileSync("pkill", [sig, "-f", `user-data-dir=${ud}`]); } catch { /* nichts mehr da */ } };
-  beende("-9");
-  for (let i = 0; i < 30; i++) {
-    try { execFileSync("pgrep", ["-f", `user-data-dir=${ud}`]); await sleep(500); } catch { break; }
+  if (signal === "browser-close") {
+    // Geordnetes Beenden über das DevTools-Protokoll des Browser-Ziels (wie ein „Beenden“ aus dem Programm, nicht wie ein Signal).
+    try {
+      const v = (await (await fetch(`http://127.0.0.1:${String(port)}/json/version`)).json()) as { webSocketDebuggerUrl: string };
+      const ws = new WebSocket(v.webSocketDebuggerUrl);
+      await new Promise<void>((res) => { ws.onopen = () => { res(); }; ws.onerror = () => { res(); }; });
+      ws.send(JSON.stringify({ id: 1, method: "Browser.close" }));
+    } catch { /* der Aufrufer sieht, ob der Prozess lebt */ }
   }
+  const lebt = (): boolean => { try { execFileSync("pgrep", ["-f", `user-data-dir=${ud}`]); return true; } catch { return false; } };
+  if (signal !== "browser-close") beende(signal);
+  // Geordnetes Beenden (SIGTERM) darf dauern; ein Prozess, der nach 15 s noch lebt, wird dann doch hart beendet (der Aufrufer kennt das über `geordnet`).
+  for (let i = 0; i < 30; i++) {
+    if (!lebt()) break;
+    await sleep(500);
+  }
+  if (lebt()) { beende("-9"); for (let i = 0; i < 30 && lebt(); i++) await sleep(500); }
   const app = spawn("/Applications/Obsidian.app/Contents/MacOS/Obsidian", [`--user-data-dir=${ud}`, `--remote-debugging-port=${String(port)}`, "--lang=en-US"], { detached: true, stdio: "ignore" });
   app.unref();
   let neu: Cdp | null = null;
@@ -688,6 +702,58 @@ async function hartNeustart(ud: string): Promise<Cdp> {
   }
   if (neu === null) throw new Vorbedingung("Die Zweitinstanz kam nach dem Beenden nicht wieder");
   return neu;
+}
+
+/**
+ * Beenden im Wachfenster (Opus-Review 2026-11-05, Befund 4): ein harmloses Bild wird gezeichnet, Obsidian wird geordnet beendet (SIGTERM und `Browser.close`), solange der Wächter
+ * noch beobachtet (700 ms von rund 2 s). Das Review hatte in Headless-Chromium gemessen, dass das Löschen der Marke in IndexedDB beim Schließen des Fensters verloren geht
+ * (`beforeunload` + `window.close()` 0 von 3) und einen Fehlalarm beim nächsten Start vermutet. In Obsidian ist es nicht so: die Fenster-Ereignisse laufen (beforeunload,
+ * pagehide, visibilitychange, unload), und die Marke der alten Sitzung ist nach dem Neustart weg. Dieser Punkt hält das fest. Kontrollschlüssel: ein Schlüssel in localStorage
+ * zeigt, dass das Beenden geordnet war (sonst „nichts gemessen“). Die Marke des NEUEN Prozesses zählt nicht (er stellt die Notiz wieder her und setzt eine eigene).
+ */
+async function punktBeendenImWachfenster(): Promise<boolean> {
+  let neuGestartet = false;
+  await lauf("laufzeit-beenden-im-wachfenster", async () => {
+    const ud = process.env.UD ?? "";
+    if (!ud.startsWith("/tmp/obs-test-")) throw new Vorbedingung("nur über messlauf.sh (UD fehlt oder ist kein Wegwerfprofil)");
+    const quelle = blockQuelle(fixtur("Block.md"));
+    const fp = createHash("sha256").update(quelle, "utf8").digest("hex");
+    const ergebnisse: string[] = [];
+    let alleGut = true;
+    let geordnet = 0;
+    for (const art of ["-TERM", "browser-close"] as const) {
+      await raeume();
+      await stelleFixturenHer();
+      await setPluginSetting(cdp, PLUGIN_ID, "autoShow", true);
+      await requireVisible(cdp);
+      // Fühler: welche Fenster-Ereignisse laufen beim Beenden wirklich (roher localStorage, damit er nichts mit dem Plugin teilt), und ein Kontrollschlüssel für das geordnete Festschreiben.
+      await cdp.evaluate(`
+        ${PLUGIN_MARKEN}.write([]);
+        localStorage.setItem("sstudio-quit-events", "[]");
+        app.saveLocalStorage("svg-studio:quit-probe", ${q(String(Date.now()))});
+        const log = (n) => { try { const a = JSON.parse(localStorage.getItem("sstudio-quit-events") || "[]"); a.push(n); localStorage.setItem("sstudio-quit-events", JSON.stringify(a)); } catch (e) { /* nichts */ } };
+        for (const e of ["beforeunload", "pagehide", "unload", "visibilitychange"]) window.addEventListener(e, () => log(e));
+        return true;`);
+      await cdp.evaluate(`const f = app.vault.getAbstractFileByPath("Block.md"); setTimeout(() => { app.workspace.getLeaf("tab").openFile(f, { state: { mode: "preview" } }); }, 0); return true;`);
+      await sleep(700);
+      const alt = JSON.parse(await cdp.evaluate<string>(`return JSON.stringify(${PLUGIN_MARKEN}.read().map((m) => ({ fp: m.fp, session: m.session })));`)) as Array<{ fp: string; session: string }>;
+      const sAlt = alt.find((m) => m.fp === fp)?.session ?? null;
+      if (sAlt === null) throw new Vorbedingung(`Vor dem Beenden stand keine Marke für den Block: ${JSON.stringify(alt)}`);
+      neuGestartet = true;
+      cdp = await hartNeustart(ud, art);
+      const z = await cdp.evaluate<string>(`return JSON.stringify({ kontrolle: app.loadLocalStorage("svg-studio:quit-probe"), ereignisse: localStorage.getItem("sstudio-quit-events"), marken: ${PLUGIN_MARKEN}.read().map((m) => ({ fp: m.fp, slow: m.slow === true, session: m.session })) });`);
+      const o = JSON.parse(z) as { kontrolle: string | null; ereignisse: string | null; marken: Array<{ fp: string; session: string; slow: boolean }> };
+      const marke = o.marken.some((x) => x.fp === fp && x.session === sAlt);
+      ergebnisse.push(`${art}: Ereignisse ${o.ereignisse ?? "—"}, Kontrollschlüssel ${o.kontrolle === null ? "FEHLT" : "da"}, Marke der alten Sitzung ${sAlt} nach dem Neustart ${marke ? "DA (Fehlalarm)" : "weg"}`);
+      await bereiteVor(cdp);
+      if (o.kontrolle === null) continue; // das Beenden schrieb nichts fest: für diese Art nichts zu messen
+      geordnet++;
+      if (marke) alleGut = false;
+    }
+    if (geordnet === 0) throw new Vorbedingung(`Kein Beenden war geordnet (Kontrollschlüssel fehlt überall): ${ergebnisse.join(" · ")}`);
+    record("laufzeit-beenden-im-wachfenster", alleGut, ergebnisse.join(" · "));
+  });
+  return neuGestartet;
 }
 
 /**
@@ -1701,7 +1767,8 @@ async function main(): Promise<void> {
     await raeume();
     if (gewaehlt("mobil-emulation", "mobil-trefflaeche-44px", "mobil-pruefliste-trefflaeche-44px", "mobil-felder")) await punktMobil();
     // Zuletzt: der Punkt beendet die Instanz hart und startet sie neu; alles danach liefe gegen eine andere Instanz.
-    neuGestartet = await punktAbsturzNeustart();
+    neuGestartet = await punktBeendenImWachfenster();
+    neuGestartet = (await punktAbsturzNeustart()) || neuGestartet;
     if (nur !== null) for (const n of PUNKTE) if (!bilanz.eintraege().some((p) => p.name === n)) skipped(n, "nicht gewählt (--nur, Entwicklungslauf)");
   } finally {
     await zustand.schliesse();

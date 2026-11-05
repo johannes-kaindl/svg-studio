@@ -19,6 +19,8 @@ export interface RenderBlockOptions {
   autoShow?: () => boolean;
   /** Der Block meldet hier eine Aufräum-Funktion an, die beim Abbau des Blocks (Notizwechsel, erneutes Rendern) läuft: sie beendet den Wächter der Absturzmarke. */
   onDispose?: (cleanup: () => void) => void;
+  /** Nach „Anzeigen“ oder „Trotzdem anzeigen“: Marke und Notausschalter nicht erneut prüfen. */
+  forced?: boolean;
 }
 
 /** Ein Knopf mit Icon und zugänglichem Namen; `createEl` am Elternknoten erzeugt ihn im Dokument des Elternknotens (auch in einem Popout-Fenster). */
@@ -45,35 +47,38 @@ function textButton(parent: HTMLElement, cls: string, label: string, onClick: ()
 export function renderSvgBlock(source: string, el: HTMLElement, o: RenderBlockOptions): "image" | "held" | "error" {
   el.empty();
   const wrap = el.createDiv({ cls: "svg-studio-block" });
+  const win = el.ownerDocument.defaultView ?? window;
+  /** Der Block nach einem Klick auf „Anzeigen“: ohne erneute Prüfung von Marke und Notausschalter, aber mit dem vollen Weg (Marke, Bereiniger, Bild). */
+  const again = (): void => { renderSvgBlock(source, el, { ...o, forced: true }); };
+  // Statt des Bildes ein Platzhalter mit einem Knopf: nach einer Absturzmarke oder bei ausgeschaltetem Notausschalter. Der Bereiniger läuft dann gar nicht erst: er ist selbst
+  // ein Teil des Zeichnens, das hängen kann (verschachtelte Selektoren im DOMParser).
+  const hold = (text: string, button: string, before: () => void): "held" => {
+    const box = wrap.createDiv({ cls: "svg-studio-held" });
+    box.createEl("p", { text });
+    textButton(box, "svg-studio-show", button, () => { before(); again(); });
+    iconButton(wrap, "svg-studio-edit", "pencil", o.t("block.edit"), o.onEdit);
+    return "held";
+  };
+  if (o.forced !== true) {
+    if (o.marks?.isMarked(source) === true) return hold(o.t("block.blocked"), o.t("block.showAnyway"), () => { o.marks?.clear(source); });
+    if (o.autoShow !== undefined && !o.autoShow()) return hold(o.t("block.manual"), o.t("block.show"), () => undefined);
+  }
+  // Die Marke steht VOR dem Bereiniger und vor der `src` des Bildes: beides kann den Hauptthread blockieren, und eine danach gesetzte Marke käme zu spät.
+  const ticket = o.marks?.begin(source, win);
+  if (ticket !== undefined) o.onDispose?.(() => { ticket.abort(); });
   const checked = o.guard(source);
   if (checked.ok) {
     const title = checked.svg.querySelector(":scope > title")?.textContent?.trim();
     const alt = title !== undefined && title !== "" ? title : o.t("block.alt");
-    const win = el.ownerDocument.defaultView ?? window;
-    // Die Marke steht, BEVOR das Bild eine `src` hat: das Zeichnen kann den Hauptthread blockieren, und eine danach gesetzte Marke käme zu spät.
-    const mount = (): void => {
-      wrap.empty();
-      const img = wrap.createEl("img", { cls: "svg-studio-img", attr: { alt } });
-      const ticket = o.marks?.begin(source, win);
-      img.addEventListener("load", () => { ticket?.settle(); });
-      img.addEventListener("error", () => { ticket?.abort(); });
-      if (ticket !== undefined) o.onDispose?.(() => { ticket.abort(); });
-      img.setAttribute("src", binaryToDataUrl(new TextEncoder().encode(source), "svg"));
-      iconButton(wrap, "svg-studio-edit", "pencil", o.t("block.edit"), o.onEdit);
-    };
-    // Statt des Bildes ein Platzhalter mit einem Knopf: nach einer Absturzmarke oder bei ausgeschaltetem Notausschalter.
-    const hold = (text: string, button: string, before: () => void): "held" => {
-      const box = wrap.createDiv({ cls: "svg-studio-held" });
-      box.createEl("p", { text });
-      textButton(box, "svg-studio-show", button, () => { before(); mount(); });
-      iconButton(wrap, "svg-studio-edit", "pencil", o.t("block.edit"), o.onEdit);
-      return "held";
-    };
-    if (o.marks?.isMarked(source) === true) return hold(o.t("block.blocked"), o.t("block.showAnyway"), () => { o.marks?.clear(source); });
-    if (o.autoShow !== undefined && !o.autoShow()) return hold(o.t("block.manual"), o.t("block.show"), () => undefined);
-    mount();
+    const img = wrap.createEl("img", { cls: "svg-studio-img", attr: { alt } });
+    img.addEventListener("load", () => { ticket?.settle(); });
+    img.addEventListener("error", () => { ticket?.abort(); });
+    img.setAttribute("src", binaryToDataUrl(new TextEncoder().encode(source), "svg"));
+    iconButton(wrap, "svg-studio-edit", "pencil", o.t("block.edit"), o.onEdit);
     return "image";
   }
+  // Abgelehnt: es wird nichts gezeichnet, die Marke fällt (mit Lückenprüfung: hat der Bereiniger gehangen, bleibt sie).
+  ticket?.abort();
   const box = wrap.createDiv({ cls: "svg-studio-error" });
   box.createEl("p", { cls: "svg-studio-error-head", text: o.t("block.rejected") });
   const list = box.createEl("ul");

@@ -170,10 +170,39 @@ describe("renderSvgBlock", () => {
       expect(f.log.slice(before)).toEqual(["abort"]);
     });
 
-    it("ein abgelehntes SVG bleibt ein Fehlerkasten, mit oder ohne Marke und Notausschalter", () => {
+    const BAD = `<svg xmlns="http://www.w3.org/2000/svg"><script>x</script></svg>`;
+
+    // Pläne 2 / Review: der Bereiniger ist selbst ein Teil des Zeichnens, das hängen kann (DOMParser bei verschachtelten Selektoren).
+    it("die Marke steht VOR dem Bereiniger (begin vor guard); der Bereiniger läuft bei markiertem Text oder ausgeschaltetem Schalter gar nicht", () => {
+      const f = fakeGuard(false);
+      const order: string[] = [];
+      const begin = f.guard.begin;
+      f.guard.begin = (text, win) => { order.push("begin"); return begin(text, win); };
+      const guard = ((text: string) => { order.push("guard"); return checkSvg(text); }) as typeof checkSvg;
+      renderSvgBlock(OK, document.createElement("div"), { guard, onEdit() {}, onRepair() {}, t, marks: f.guard });
+      expect(order).toEqual(["begin", "guard"]);
+      for (const mk of [fakeGuard(true), fakeGuard(false)]) {
+        order.length = 0;
+        renderSvgBlock(OK, document.createElement("div"), { guard, onEdit() {}, onRepair() {}, t, marks: mk.guard, autoShow: () => false });
+        expect(order).toEqual([]);
+      }
+    });
+
+    it("ein vom Bereiniger abgelehntes SVG bleibt ein Fehlerkasten; die Marke wird beendet (abort), das Bild entsteht nie", () => {
+      const f = fakeGuard(false);
       const el = document.createElement("div");
+      expect(renderSvgBlock(BAD, el, { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard })).toBe("error");
+      expect(f.log).toEqual(["begin", "abort"]);
+      expect(el.querySelector("img")).toBeNull();
+    });
+
+    it("ein markiertes oder ausgeschaltetes Bild zeigt den Platzhalter, auch wenn der Text vom Bereiniger abgelehnt würde; erst „Anzeigen“ läuft der volle Weg bis zum Fehlerkasten", () => {
       const f = fakeGuard(true);
-      expect(renderSvgBlock(`<svg xmlns="http://www.w3.org/2000/svg"><script>x</script></svg>`, el, { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard, autoShow: () => false })).toBe("error");
+      const el = document.createElement("div");
+      expect(renderSvgBlock(BAD, el, { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard, autoShow: () => false })).toBe("held");
+      (el.querySelector("button.svg-studio-show") as HTMLElement).click();
+      expect(el.querySelector(".svg-studio-error")).not.toBeNull();
+      expect(f.log.slice(0, 2)).toEqual(["clear", "begin"]);
     });
   });
 });

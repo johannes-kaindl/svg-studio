@@ -490,11 +490,29 @@ describe("buildPreview: Absturzmarke", () => {
     expect(f.log).toEqual([]);
   });
 
-  it("ein abgelehntes SVG meldet Probleme (nicht blocked), auch wenn eine Marke steht", () => {
-    const m = build(fake(true).guard);
-    const r = m.handle.show(`<svg ${NS}><script>x</script></svg>`);
+  it("ein markierter Text läuft nicht einmal durch den Bereiniger (blocked, begin und guard unberührt)", () => {
+    const calls: string[] = [];
+    const f = fake(true);
+    const parent = document.body.appendChild(document.createElement("div"));
+    const handle = buildPreview(parent, { guard: ((text: string) => { calls.push("guard"); return checkSvg(text); }) as typeof checkSvg, onSelect: () => undefined, renderGuard: f.guard });
+    const r = handle.show(`<svg ${NS}><script>x</script></svg>`);
+    expect(r).toMatchObject({ ok: false, blocked: true });
+    expect(calls).toEqual([]);
+    expect(f.log).toEqual([]);
+  });
+
+  it("die Marke steht vor dem Bereiniger; ein abgelehnter Text meldet Probleme (nicht blocked) und beendet die Marke (abort)", () => {
+    const f = fake(false);
+    const order: string[] = [];
+    const begin = f.guard.begin;
+    f.guard.begin = () => { order.push("begin"); return begin(); };
+    const parent = document.body.appendChild(document.createElement("div"));
+    const handle = buildPreview(parent, { guard: ((text: string) => { order.push("guard"); return checkSvg(text); }) as typeof checkSvg, onSelect: () => undefined, renderGuard: f.guard });
+    const r = handle.show(`<svg ${NS}><script>x</script></svg>`);
     expect(r).toMatchObject({ ok: false });
     expect("blocked" in r).toBe(false);
+    expect(order).toEqual(["begin", "guard"]);
+    expect(f.log).toEqual(["begin", "abort"]);
   });
 
   it("ohne Wächter wie bisher", () => {
