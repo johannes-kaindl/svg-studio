@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.80.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.80.1, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -14,7 +14,9 @@
 // - **Block:** der Block wird nur geschrieben, wenn seine Zeilen, seine Sprache UND sein Rumpf noch die sind, die der Nutzer angeklickt hat
 //   (`locateBlock`, Fingerabdruck wie in REGISTRY „Zeilenbasiertes Ziel braucht einen Inhalts-Fingerabdruck“): Zeilennummern allein treffen nach
 //   einer Änderung darüber einen anderen Block. Geschrieben wird über `writeBlockBody` (Editor mit Strg+Z, sonst `vault.process`), das den Rumpf
-//   ein zweites Mal vor dem Schreiben prüft.
+//   ein zweites Mal vor dem Schreiben prüft. **Wiederfinden (0.80.1):** steht der Block unverändert woanders (der Nutzer tippt während des Laufs eine Zeile
+//   darüber), findet `locateBlock` ihn nach Inhalt, aber nur bei **genau einem** Zaun gleicher Sprache, Länge und gleichen Rumpfs; die neue Lage kommt als
+//   `retarget` zurück (auch bei `unchanged`). Zwei gleiche Blöcke bleiben `blockMoved`, ein geänderter Rumpf bleibt `blockChanged`.
 // - **Datei:** lesen, `compute(aktueller Text)`, `checkWrite`, dann `beforeWrite(path, alterText)` (der Haken für den Schnappschuss, `file-snapshot`),
 //   dann `vault.process`, das nur schreibt, wenn die Datei seit dem Lesen unverändert ist. Wirft `beforeWrite`, wird nichts geschrieben: ein
 //   Schreibvorgang ohne Rückweg findet nicht statt.
@@ -227,7 +229,8 @@ export async function processGuarded(
 
 /* ── Block finden ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 
-export type Located = { fence: Fence; text: string } | { problem: "moved" | "changed" };
+/** `relocated`: der Block stand nicht mehr auf den gemerkten Zeilen und wurde an `fence.openLine`/`closeLine` wiedergefunden (0.80.1). */
+export type Located = { fence: Fence; text: string; relocated: boolean } | { problem: "moved" | "changed" };
 
 /** Notiztext aus derselben Quelle wie der Schreiber: offener Quell-Editor, sonst Vault. */
 async function readNoteText(ports: WritePorts, path: string): Promise<string> {
@@ -236,13 +239,26 @@ async function readNoteText(ports: WritePorts, path: string): Promise<string> {
 
 /** Zaun des Blocks finden UND prüfen, dass es noch der Block ist, den der Nutzer angeklickt hat: gleiche Öffnungs- und Schlusszeile, gleiche Sprache,
  *  gleicher Rumpf (Fingerabdruck `t.body`). Zeilennummern allein tragen nicht: nach dem Löschen eines Blocks darüber trifft eine veraltete Position
- *  einen anderen. `moved`: an der Stelle steht kein Block dieser Sprache mit diesen Zeilen; `changed`: es ist derselbe Ort, aber ein anderer Rumpf. */
+ *  einen anderen. `moved`: an der Stelle steht kein Block dieser Sprache mit diesen Zeilen; `changed`: es ist derselbe Ort, aber ein anderer Rumpf.
+ *
+ *  **Wiederfinden (0.80.1):** Tippt der Nutzer während eines Panel-Laufs eine Zeile über den Block, steht er unverändert eine Zeile tiefer, und die gemerkten
+ *  Zeilen zeigen ins Leere. Das ist kein `moved`: steht auf den gemerkten Zeilen KEIN Block dieser Sprache und Länge, wird der Block nach Inhalt gesucht
+ *  (Sprache, Länge in Zeilen, Rumpf, der Zaun muss geschlossen sein) und genau dann wiedergefunden (`relocated: true`), wenn es **genau einen** solchen Zaun gibt.
+ *  Zwei oder mehr gleiche Blöcke bleiben `moved`: eine falsche Zuordnung überschriebe einen fremden Block, ein verlorener Lauf kostet nur eine Runde
+ *  (REGISTRY „Zeilenbasiertes Ziel braucht einen Inhalts-Fingerabdruck“). Ebenso bleibt `changed`, wenn auf den gemerkten Zeilen ein Block gleicher Sprache und
+ *  Länge mit anderem Rumpf steht: ob der Nutzer ihn geändert hat oder ein Nachbar nachgerutscht ist, sagt der Text nicht, und die Umlenkung träfe im ersten Fall
+ *  eine Kopie. Welcher Zaun die Zeilen schließt (Backtick, Tilde), ist für das Wiederfinden gleich: der Schreiber ersetzt nur Zeilen zwischen den Zäunen. */
 export async function locateBlock(ports: WritePorts, t: BlockTarget, lang: string): Promise<Located> {
   const text = await readNoteText(ports, t.path);
-  const fence = listFences(text).find((f) => f.openLine === t.lineStart && f.lang === lang.toLowerCase() && f.closeLine === t.lineEnd);
-  if (!fence) return { problem: "moved" };
-  if (normBody(fence.body) !== normBody(t.body)) return { problem: "changed" };
-  return { fence, text };
+  const want = lang.toLowerCase();
+  const fences = listFences(text);
+  const here = fences.find((f) => f.openLine === t.lineStart && f.lang === want && f.closeLine === t.lineEnd);
+  if (here) return normBody(here.body) === normBody(t.body) ? { fence: here, text, relocated: false } : { problem: "changed" };
+  const lines = text.split(/\r?\n/);
+  const span = t.lineEnd - t.lineStart;
+  const same = fences.filter((f) => f.lang === want && f.closeLine - f.openLine === span && !isUnclosed(f, lines) && normBody(f.body) === normBody(t.body));
+  const only = same.length === 1 ? same[0] : undefined;
+  return only ? { fence: only, text, relocated: true } : { problem: "moved" };
 }
 
 /** Der Rumpf des Blocks jetzt (LF-normalisiert) für das Panel; `null`, wenn Block oder Notiz nicht (mehr) auffindbar oder verändert sind. Wirft nie. */
@@ -284,7 +300,9 @@ async function acceptIntoBlock(env: AcceptEnv, spec: AcceptSpec, t: BlockTarget)
   const { fence, text } = found;
   const result = spec.compute(fence.body);
   if (!result.ok) return { ok: false, message: strings.notApplied(result.problem) };
-  if (normBody(result.text) === normBody(fence.body)) return { ok: true, message: strings.unchanged };
+  // Wiedergefundener Block: auch ohne Schreiben bekommt der Aufrufer die neue Lage, sonst sucht das Panel in der nächsten Runde wieder an der alten Stelle.
+  const moved: Target | undefined = found.relocated ? { ...t, lineStart: fence.openLine, lineEnd: fence.closeLine, body: fence.body } : undefined;
+  if (normBody(result.text) === normBody(fence.body)) return moved ? { ok: true, message: strings.unchanged, retarget: moved } : { ok: true, message: strings.unchanged };
   const refused = refuse(env, spec, result.text);
   if (refused) return refused;
   if (closesFence(text.split(/\r?\n/)[fence.openLine] ?? "", result.text)) return { ok: false, message: strings.closesFence };

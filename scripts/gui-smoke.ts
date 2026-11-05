@@ -83,6 +83,7 @@ const PUNKTE = [
   "uebernehmen-als-block",
   "c4a-bediente-notiz",
   "strg-z-nach-block-uebernehmen",
+  "block-verschoben-uebernehmen-trifft-block",
   "uebernehmen-lesemodus",
   "c4c-sperre-ohne-notiz",
   "c4d-schnappschuss",
@@ -933,6 +934,32 @@ async function punktUebernehmenBlock(): Promise<void> {
   });
 }
 
+/** Kit 0.80.1: eine Zeile über dem Block, während eine Runde offen ist, kostet die Runde nicht mehr; Übernehmen findet den Block wieder und schreibt dorthin. */
+async function punktBlockVerschoben(): Promise<void> {
+  await lauf("block-verschoben-uebernehmen-trifft-block", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    const pfad = "_smoke-wanderblock.md";
+    const svg = fixtur("unbenannt.svg").trimEnd();
+    await oeffneNotiz(pfad, `Kopf\n\n\`\`\`svg-studio\n${svg}\n\`\`\`\n\nEnde\n`, "preview", "tab");
+    const knopf = `Array.from(document.querySelectorAll(".markdown-preview-view .svg-studio-block > .svg-studio-edit")).find((b) => b.getBoundingClientRect().width > 0)`;
+    await pollUntil(cdp, `return (${knopf}) ? true : null;`, 8000, 250);
+    if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Blockknopf nicht klickbar");
+    if ((await warteSnap((x) => (x.target ?? "").includes("_smoke-wanderblock"), 8000)) === null) throw new Vorbedingung("Das Panel öffnete nicht auf dem Block");
+    if ((await warteSnap((x) => x.notices.some((n) => /no name/i.test(n.text)), 8000)) === null) throw new Vorbedingung("Keine Karte „ohne Namen“ am Block");
+    if (!(await klickText(".svg-studio-notice", /Assign names/))) throw new Vorbedingung("Knopf „Assign names“ nicht klickbar");
+    const runde = await warteSnap((x) => x.rounds === 1, 8000);
+    // Der Nutzer tippt über dem Block eine Zeile, die Runde steht noch offen.
+    await cdp.evaluate(`const f = app.vault.getAbstractFileByPath(${q(pfad)}); await app.vault.modify(f, "Neue Zeile oben\\n\\n" + await app.vault.read(f)); return true;`);
+    await sleep(600);
+    const r = await uebernimm();
+    const text = (await liesDatei(pfad)) ?? "";
+    const ids = (text.match(/ id="[^"]*"/g) ?? []).length;
+    const gut = runde !== null && r.ok && text.startsWith("Neue Zeile oben") && (text.match(/```svg-studio/g) ?? []).length === 1 && ids === 3 && text.includes("Ende");
+    record("block-verschoben-uebernehmen-trifft-block", gut, `Runde ${q(runde?.labels)} · Zeile über dem Block eingefügt · Übernehmen ${r.ok ? "ok" : `Fehler ${q(r.snap.status)}`} · Notiz beginnt mit der neuen Zeile: ${text.startsWith("Neue Zeile oben")} · ein Block: ${(text.match(/```svg-studio/g) ?? []).length === 1} · ${ids} ids im Block`);
+  });
+}
+
 async function punktLesemodus(): Promise<void> {
   await lauf("uebernehmen-lesemodus", async () => {
     await raeume();
@@ -1537,6 +1564,7 @@ async function main(): Promise<void> {
     await punktFokusUndErreichbarkeit();
     await punktUebernehmenDatei();
     await punktUebernehmenBlock();
+    await punktBlockVerschoben();
     await punktLesemodus();
     await punktSperre();
     await punktAuswahl();

@@ -172,11 +172,22 @@ describe("Übernehmen: bestehender Block", () => {
     expect(r.ok && r.retarget?.kind === "block" && r.retarget.body).toContain(`r="60"`);
   });
 
-  it("ein verschobener Block (Zeile darüber eingefügt) → „Block geändert“, nichts geschrieben", async () => {
+  // Kit 0.80.1: genau ein Block gleicher Sprache, Länge und Rumpf wird wiedergefunden; die Runden gehen nicht verloren.
+  it("ein weitergewanderter Block (Zeile darüber eingefügt) wird wiedergefunden: dorthin geschrieben, neues Ziel mit der neuen Lage", async () => {
     const t = acceptSetup({ "n.md": `eine neue Zeile\n${NOTE}` });
     const r = await run(t.env, refineSession(BLOCK));
+    expect(r).toMatchObject({ ok: true, retarget: { kind: "block", lineStart: 3 } });
+    expect(t.store["n.md"].split("\n").slice(0, 2)).toEqual(["eine neue Zeile", "intro"]);
+    expect(t.store["n.md"]).toContain(`r="60"`);
+    expect(t.store["n.md"].match(/```svg-studio/g)).toHaveLength(1);
+  });
+
+  it("zwei gleiche Blöcke nach dem Verschieben: nicht eindeutig → „Block geändert“, nichts geschrieben", async () => {
+    const doppelt = `eine neue Zeile\n${NOTE}\n\n${NOTE}`;
+    const t = acceptSetup({ "n.md": doppelt });
+    const r = await run(t.env, refineSession(BLOCK));
     expect(r).toEqual({ ok: false, message: "Block changed: it moved or was deleted since the panel opened; nothing was written." });
-    expect(t.store["n.md"]).toBe(`eine neue Zeile\n${NOTE}`);
+    expect(t.store["n.md"]).toBe(doppelt);
     expect(t.order).toEqual([]);
   });
 
