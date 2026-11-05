@@ -172,6 +172,12 @@ export default class SvgStudioPlugin extends Plugin {
   /** Der Speicher der Marken (IndexedDB, sonst Hauptspeicher); öffentlich für den GUI-Smoke, der Marken eines getöteten Prozesses prüft. */
   markStore!: MarkStore;
 
+  override onunload(): void {
+    // Laufende Tickets enden mit Lückenprüfung (ein Neuladen des Plugins lässt keine Marke und keinen Zähler zurück), dann die Verbindung schließen.
+    this.renderGuard.dispose();
+    this.markStore.close();
+  }
+
   /** Die zuletzt aktive Notiz-Ansicht, fensterübergreifend (das Panel selbst ist keine). */
   private lastMarkdown: MarkdownView | null = null;
 

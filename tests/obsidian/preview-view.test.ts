@@ -149,7 +149,8 @@ describe("renderPreviewView: Absturzmarke", () => {
   const guard = (marked: boolean) => {
     const log: string[] = [];
     let isMarked = marked;
-    return { log, guard: { isMarked: () => isMarked, clear: () => { isMarked = false; log.push("clear"); }, begin: () => { log.push("begin"); return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } }; } } };
+    return { log, guard: { isMarked: () => isMarked, clear: () => { isMarked = false; log.push("clear"); },
+        dispose: () => undefined, begin: () => { log.push("begin"); return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } }; } } };
   };
   const mount = (g: ReturnType<typeof guard>["guard"]) => {
     const host = document.body.createDiv();

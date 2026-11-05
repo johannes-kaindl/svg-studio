@@ -458,6 +458,7 @@ describe("buildPreview: Absturzmarke", () => {
       guard: {
         isMarked: () => isMarked,
         clear: () => { isMarked = false; log.push("clear"); },
+        dispose: () => undefined,
         begin: () => { log.push("begin"); return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } }; },
       },
     };

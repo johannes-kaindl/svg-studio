@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { CALM_MS, MAX_MARKS, MAX_WATCH_MS, SLOW_GAP_MS, SLOW_MS, SLOW_SUM_MS, TICK_MS, type Mark } from "../../src/core/render-guard";
+import { describe, expect, it, vi } from "vitest";
+import { CALM_MS, MARK_MAX_AGE_MS, MAX_MARKS, MAX_WATCH_MS, SLOW_GAP_MS, SLOW_MS, TICK_MS, type Mark } from "../../src/core/render-guard";
 import type { MarkStore } from "../../src/obsidian/mark-store";
 import { createRenderGuard } from "../../src/obsidian/render-guard";
 
@@ -7,7 +7,7 @@ const SVG = `<svg xmlns="http://www.w3.org/2000/svg"><circle id="a" r="1"/></svg
 const OTHER = `<svg xmlns="http://www.w3.org/2000/svg"><circle id="b" r="2"/></svg>`;
 
 function memStore(): MarkStore & { marks: Mark[] } {
-  const s = { marks: [] as Mark[], read: () => s.marks, write: (m: Mark[]) => { s.marks = m; } };
+  const s = { marks: [] as Mark[], read: () => s.marks, write: (m: Mark[]) => { s.marks = m; }, close: () => undefined };
   return s;
 }
 
@@ -19,12 +19,17 @@ function fakeWin() {
   let visibility = "visible";
   const timers: Array<{ id: number; at: number; cb: () => void }> = [];
   const listeners = new Map<string, Array<() => void>>();
+  const docListeners = new Map<string, Array<() => void>>();
   const win = {
     setTimeout: (cb: () => void, ms: number) => { const id = nextId++; timers.push({ id, at: now + ms, cb }); return id; },
     clearTimeout: (id: number) => { const i = timers.findIndex((t) => t.id === id); if (i >= 0) timers.splice(i, 1); },
     addEventListener: (type: string, cb: () => void) => { listeners.set(type, [...(listeners.get(type) ?? []), cb]); },
     removeEventListener: (type: string, cb: () => void) => { listeners.set(type, (listeners.get(type) ?? []).filter((x) => x !== cb)); },
-    document: { get visibilityState() { return visibility; } },
+    document: {
+      get visibilityState() { return visibility; },
+      addEventListener: (type: string, cb: () => void) => { docListeners.set(type, [...(docListeners.get(type) ?? []), cb]); },
+      removeEventListener: (type: string, cb: () => void) => { docListeners.set(type, (docListeners.get(type) ?? []).filter((x) => x !== cb)); },
+    },
   } as unknown as Window;
   const runDue = (until: number): void => {
     for (;;) {
@@ -45,8 +50,9 @@ function fakeWin() {
     hang(ms: number) { now += ms; },
     emit(type: string) { for (const cb of listeners.get(type) ?? []) cb(); },
     pending: () => timers.length,
-    listenerCount: () => [...listeners.values()].reduce((n, l) => n + l.length, 0),
-    setVisibility(v: string) { visibility = v; },
+    listenerCount: () => [...listeners.values(), ...docListeners.values()].reduce((n, l) => n + l.length, 0),
+    /** Wie das Fenster: Zustand ändern und `visibilitychange` melden. */
+    setVisibility(v: string) { visibility = v; for (const cb of docListeners.get("visibilitychange") ?? []) cb(); },
   };
 }
 
@@ -110,19 +116,38 @@ describe("createRenderGuard: Wächter nach dem Setzen der Marke", () => {
     expect(store.marks).toEqual([]);
   });
 
-  // Opus-Review 2026-11-05, Befund 3: Dauerlast knapp unter der Ruhegrenze (jeder Frame 450–530 ms) galt als Ruhe, die Marke fiel nach 2,3 s.
-  it("Dauerlast, deren einzelne Verspätungen unter der Ruhegrenze bleiben, summiert sich zu slow", () => {
+  // Opus-Review 2026-11-05: Dauerlast knapp unter der Ruhegrenze galt als Ruhe (Marke fiel nach 2,3 s); eine absolute Summe kippte schon bei EINER Lücke von 0,8 s.
+  it("Dauerlast (Frames von etwa 450 ms): der Anteil verspäteter Zeit macht die Marke slow", () => {
     const { w, g } = setup();
     g.begin(SVG, w.win).settle();
-    for (let i = 0; i < 20; i++) w.blockAndRun(TICK_MS + 200); // je 200 ms Verspätung: nie über 300
+    for (let i = 0; i < 6; i++) w.blockAndRun(TICK_MS + 220);
     expect(g.isMarked(SVG)).toBe(true);
-    expect(SLOW_SUM_MS).toBeLessThanOrEqual(20 * 200);
   });
 
-  it("kleine Verspätungen, die in der Summe unter SLOW_SUM_MS bleiben, sind Ruhe", () => {
+  it("eine einzelne Spitze unter der Hängergrenze (0,85 s) macht ein ruhiges Bild nicht slow", () => {
     const { store, w, g } = setup();
     g.begin(SVG, w.win).settle();
-    for (let i = 0; i < 4; i++) w.blockAndRun(TICK_MS + 100);
+    w.advance(240);
+    w.blockAndRun(850);
+    w.advance(CALM_MS + 2 * TICK_MS);
+    expect(store.marks).toEqual([]);
+  });
+
+  it("zwei Spitzen von 0,6 s im Abstand sind keine Dauerlast", () => {
+    const { store, w, g } = setup();
+    g.begin(SVG, w.win).settle();
+    w.advance(500);
+    w.blockAndRun(600);
+    w.advance(1200);
+    w.blockAndRun(600);
+    w.advance(CALM_MS + 2 * TICK_MS);
+    expect(store.marks).toEqual([]);
+  });
+
+  it("kleine Verspätungen (viele Blöcke, GC) bleiben Ruhe", () => {
+    const { store, w, g } = setup();
+    g.begin(SVG, w.win).settle();
+    for (let i = 0; i < 7; i++) w.blockAndRun(TICK_MS + 60);
     w.advance(CALM_MS + TICK_MS);
     expect(store.marks).toEqual([]);
   });
@@ -244,17 +269,6 @@ describe("createRenderGuard: Wächter nach dem Setzen der Marke", () => {
     expect(store.marks).toEqual([]);
   });
 
-  it("eine Lücke, die bei verdecktem Fenster begann und sichtbar endet, zählt nicht", () => {
-    const { w, g } = setup();
-    g.begin(SVG, w.win).settle();
-    w.advance(300);
-    w.setVisibility("hidden");
-    w.advance(TICK_MS);
-    w.setVisibility("visible");
-    w.blockAndRun(3000);
-    expect(g.isMarked(SVG)).toBe(false);
-  });
-
   it("zwei Blöcke mit demselben Text gleichzeitig: der zweite wird nicht blockiert, die Marke fällt erst mit dem letzten Bild", () => {
     const { store, w, g } = setup();
     const a = g.begin(SVG, w.win);
@@ -302,14 +316,14 @@ describe("createRenderGuard: Wächter nach dem Setzen der Marke", () => {
     expect(store.marks).toHaveLength(1);
   });
 
-  it("eine Marke, die älter als eine Stunde ist, sperrt nicht mehr; eine mit unbekannter Sitzung auch nicht", () => {
+  it("eine Marke, die älter als MARK_MAX_AGE_MS ist (eine Woche), sperrt nicht mehr", () => {
     const store = memStore();
     const w = fakeWin();
     const alt = createRenderGuard(store, w.clock, "s1", () => 0);
     alt.begin(SVG, w.win);
-    const spaeter = createRenderGuard(store, w.clock, "s2", () => 61 * 60 * 1000);
+    const spaeter = createRenderGuard(store, w.clock, "s2", () => MARK_MAX_AGE_MS + 1);
     expect(spaeter.isMarked(SVG)).toBe(false);
-    const nah = createRenderGuard(store, w.clock, "s2", () => 59 * 60 * 1000);
+    const nah = createRenderGuard(store, w.clock, "s2", () => MARK_MAX_AGE_MS - 1);
     expect(nah.isMarked(SVG)).toBe(true);
   });
 
@@ -334,6 +348,114 @@ describe("createRenderGuard: Wächter nach dem Setzen der Marke", () => {
     g.begin(SVG, w.win).settle();
     wall += 3_600_000 * 5; // die Wanduhr springt fünf Stunden vor
     w.advance(CALM_MS + TICK_MS);
+    expect(store.marks).toEqual([]);
+  });
+
+  it("end() wertet auch die Dauerlast: Frames von 500 ms, der Nutzer wechselt nach 2 s die Notiz → slow statt gelöscht", () => {
+    const { w, g } = setup();
+    const t = g.begin(SVG, w.win);
+    t.settle();
+    for (let i = 0; i < 3; i++) w.blockAndRun(TICK_MS + 230);
+    w.hang(500); // der nächste Frame läuft noch
+    t.abort();
+    expect(g.isMarked(SVG)).toBe(true);
+  });
+
+  it("abort mit einer offenen Lücke zwischen Ruhe- und Hängergrenze (400 ms) löscht die Marke (kein Hänger)", () => {
+    const { store, w, g } = setup();
+    const t = g.begin(SVG, w.win);
+    t.settle();
+    w.advance(100);
+    w.hang(TICK_MS + 400);
+    t.abort();
+    expect(store.marks).toEqual([]);
+  });
+
+  // Opus-Review, Befund 3: der Block wird bei verdecktem Fenster gezeichnet, das Fenster kommt nach vorn und hängt erst dann.
+  it("Hänger beim Wechsel von verdeckt nach sichtbar: er beginnt beim Sichtbarwerden und zählt", () => {
+    const { w, g } = setup();
+    g.begin(SVG, w.win).settle();
+    w.setVisibility("hidden");
+    w.advance(3000);
+    w.setVisibility("visible"); // visibilitychange
+    w.blockAndRun(5000);
+    expect(g.isMarked(SVG)).toBe(true);
+  });
+
+  it("dasselbe beim Abbau: abort nach einem Hänger seit dem Sichtbarwerden macht slow", () => {
+    const { w, g } = setup();
+    const t = g.begin(SVG, w.win);
+    t.settle();
+    w.setVisibility("hidden");
+    w.advance(3000);
+    w.setVisibility("visible");
+    w.hang(4000);
+    t.abort();
+    expect(g.isMarked(SVG)).toBe(true);
+  });
+
+  it("abort bei verdecktem Fenster nach langer Pause ist kein Hänger", () => {
+    const { store, w, g } = setup();
+    const t = g.begin(SVG, w.win);
+    t.settle();
+    w.setVisibility("hidden");
+    w.hang(6000);
+    t.abort();
+    expect(store.marks).toEqual([]);
+  });
+
+  it("dispose beendet alle laufenden Tickets (Plugin wird entladen): ruhige fallen, ein offener Hänger macht slow; danach bleibt nichts zurück", () => {
+    const store = memStore();
+    const w = fakeWin();
+    const g = createRenderGuard(store, w.clock, "s1", () => 1_000_000);
+    g.begin(SVG, w.win).settle();
+    g.begin(OTHER, w.win).settle();
+    w.advance(500);
+    w.hang(3000);
+    g.dispose();
+    expect(g.isMarked(SVG)).toBe(true);
+    expect(g.isMarked(OTHER)).toBe(true);
+    expect(w.pending()).toBe(0);
+    expect(w.listenerCount()).toBe(0);
+    const g2 = createRenderGuard(memStore(), w.clock, "s1", () => 1_000_000);
+    g2.begin(SVG, w.win).settle();
+    w.advance(500);
+    g2.dispose();
+    expect(g2.isMarked(SVG)).toBe(false);
+  });
+
+  it("eine eigene slow-Marke überlebt eine Rotation durch viele eigene laufende Marken", () => {
+    const { store, w, g } = setup();
+    g.begin(SVG, w.win).settle();
+    w.blockAndRun(2000);
+    for (let i = 0; i < MAX_MARKS + 5; i++) g.begin(`${OTHER}<!--${String(i)}-->`, w.win);
+    expect(g.isMarked(SVG)).toBe(true);
+    expect(store.marks).toHaveLength(MAX_MARKS);
+  });
+
+  it("die Standarduhr ist monoton: ohne Uhr-Argument folgt der Wächter performance.now, nicht Date.now", () => {
+    const store = memStore();
+    const w = fakeWin();
+    const g = createRenderGuard(store, undefined, "s1", () => 1_000_000);
+    g.begin(SVG, w.win).settle();
+    const spy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10 * 3_600_000); // die Wanduhr springt 10 Stunden vor
+    w.advance(CALM_MS + 2 * TICK_MS); // die Fake-Timer laufen ohne echte Zeit: performance.now rückt kaum vor
+    spy.mockRestore();
+    expect(g.isMarked(SVG)).toBe(false);
+  });
+
+  it("eine slow-Marke älter als MARK_MAX_AGE_MS wird beim nächsten Zeichnen nicht erneuert", () => {
+    const store = memStore();
+    const w = fakeWin();
+    let wall = 0;
+    const g = createRenderGuard(store, w.clock, "s1", () => wall);
+    g.begin(SVG, w.win).settle();
+    w.blockAndRun(2000);
+    wall = MARK_MAX_AGE_MS + 10;
+    const g2 = createRenderGuard(store, w.clock, "s2", () => wall);
+    expect(g2.isMarked(SVG)).toBe(false);
+    g2.begin(SVG, w.win).settle();
+    w.advance(CALM_MS + 2 * TICK_MS);
     expect(store.marks).toEqual([]);
   });
 });

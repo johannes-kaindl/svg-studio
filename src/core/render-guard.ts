@@ -3,10 +3,11 @@
 // (`load` und zwei Frames liegen bei Raster-Kosten vor dem Hänger, gemessen), sondern wenn der Hauptthread nach dem Setzen belegt reaktionsfähig war: ein Wächter mit
 // Timer-Takt misst die Lücken zwischen den Ticks. Eine Lücke über `SLOW_GAP_MS` macht die Marke zur `slow`-Marke; sie bleibt, auch wenn Obsidian sich erholt.
 // Steht eine Marke in einer späteren Sitzung noch (Obsidian eingefroren und beendet) oder ist sie `slow`, zeigt das Plugin das Bild nicht von selbst.
-// Geschützt: Hänger ab etwa 1 s, auf die ein Absturz oder hartes Beenden folgt (die Marke muss dann schon gespeichert sein: Chromium schreibt `localStorage` erst nach
-// etwa 5 s fest) und, als `slow`, jeder Hänger ab 1 s im selben Fenster der ersten Sekunden. Nicht geschützt: Hänger unter der Speicherzeit, bei denen der Nutzer einfach
-// wartet; ein Hänger, der erst nach `MAX_WATCH_MS` beginnt (CSS-Animation mit langer Verzögerung); das Neuzeichnen eines schon gezeigten Bildes. Eine Marke aus der LAUFENDEN Sitzung ohne `slow` ist nur ein Bild, das gerade gezeichnet wird: ein zweiter Block mit demselben Text darf nicht wegen ihr ausbleiben.
-// Pure: die Liste der Marken ist ein Wert; Lesen und Schreiben (App-lokaler Speicher) liegen in `src/obsidian/render-guard.ts`.
+// Geschützt: Hänger ab etwa 1 s und Dauerlast (Frames über etwa 450 ms), auf die ein Absturz oder hartes Beenden folgt; die Marke steht dann schon dauerhaft (IndexedDB,
+// `src/obsidian/mark-store.ts`). Nicht geschützt: Hänger unter etwa einer Sekunde, bei denen der Nutzer einfach wartet; ein Hänger, der erst nach dem Wachfenster beginnt (CSS-Animation
+// mit langer Verzögerung); ein Bild unterhalb des sichtbaren Bereichs, das erst beim Scrollen gezeichnet wird; gleichzeitig beobachtete Bilder teilen jede Lücke. Eine Marke aus der
+// LAUFENDEN Sitzung ohne `slow` ist nur ein Bild, das gerade gezeichnet wird: ein zweiter Block mit demselben Text darf nicht wegen ihr ausbleiben.
+// Pure: die Liste der Marken ist ein Wert; der Wächter liegt in `src/obsidian/render-guard.ts`, der dauerhafte Speicher in `src/obsidian/mark-store.ts`.
 
 export interface Mark {
   /** Fingerabdruck des SVG-Textes (SHA-256, hex). */
@@ -29,8 +30,13 @@ export const TICK_MS = 250;
 export const SLOW_GAP_MS = 1000;
 /** Eine Verspätung über dieser Grenze (aber unter `SLOW_GAP_MS`) ist keine Ruhe: das Ruhefenster beginnt neu. */
 export const CALM_GAP_MS = 300;
-/** Summe aller Verspätungen im Wachfenster: darüber ist es Dauerlast (jeder Frame knapp unter der Hängergrenze), die Marke wird `slow`. Gemessen: bei 97 % blockierter Zeit (Frames von 450 bis 530 ms) summieren sich die Verspätungen im Ruhefenster auf rund 1000 ms, nicht auf mehr, weil jede Verspätung die Tick-Zeit selbst schon enthält. */
-export const SLOW_SUM_MS = 800;
+/**
+ * Dauerlast: der Anteil verspäteter Zeit an der beobachteten Zeit. Jede einzelne Verspätung zählt höchstens `CALM_GAP_MS` (eine Spitze unter dem Hänger macht noch keine Dauerlast),
+ * ab `SLOW_LOAD_FROM_MS` beobachteter Zeit gilt ein Anteil von `SLOW_LOAD_RATIO` als Dauerlast und die Marke wird `slow`. Gemessen (Opus-Review 2026-11-05): Frames von 450 bis
+ * 530 ms ergeben rund 45 %, von 600 bis 700 ms rund 46 %; eine absolute Summe kippte schon bei einer einzelnen Lücke von 0,8 s.
+ */
+export const SLOW_LOAD_RATIO = 0.35;
+export const SLOW_LOAD_FROM_MS = 1000;
 /** So lange muss der Hauptthread ruhig bleiben, bevor die Marke fällt (die gemessenen Hänger beginnen innerhalb von 100 ms nach dem Setzen). */
 export const CALM_MS = 2000;
 /** Länger wird nicht gewartet: danach fällt die Marke auch ohne Ruhe (Obsidian war nur beschäftigt). */
@@ -62,7 +68,8 @@ export function parseMarks(raw: unknown): Mark[] {
 
 /** Setzt die Marke (eine vorhandene mit demselben Fingerabdruck wird ersetzt und rückt ans Ende; eine `slow`-Marke bleibt `slow`). */
 export function addMark(marks: readonly Mark[], fp: string, at: number, session: string): Mark[] {
-  const slow = marks.some((m) => m.fp === fp && m.slow === true);
+  // Eine abgelaufene slow-Marke wird nicht erneuert: sonst sperrte sie nach jedem freien Zeichnen wieder.
+  const slow = marks.some((m) => m.fp === fp && m.slow === true && at - m.at <= MARK_MAX_AGE_MS);
   return rotate([...marks.filter((m) => m.fp !== fp), { fp, at, session, ...(slow ? { slow: true as const } : {}) }], session);
 }
 
@@ -76,8 +83,9 @@ export function removeMark(marks: readonly Mark[], fp: string, onlyOwn?: string)
   return marks.filter((m) => m.fp !== fp || (onlyOwn !== undefined && (m.session !== onlyOwn || m.slow === true)));
 }
 
-/** Eine Marke älter als das verhindert nie mehr ein Rendern (eine hängengebliebene Marke darf einen Block nicht dauerhaft sperren); „Trotzdem anzeigen“ löscht sie ohnehin. */
-export const MARK_MAX_AGE_MS = 60 * 60 * 1000;
+/** Eine Marke älter als das verhindert nie mehr ein Rendern (eine hängengebliebene Marke darf einen Block nicht dauerhaft sperren); „Trotzdem anzeigen“ löscht sie ohnehin.
+ *  Eine Woche, nicht eine Stunde: Obsidian friert ein, wird hart beendet und am nächsten Morgen wieder geöffnet. */
+export const MARK_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Blockiert die Marke die Anzeige? Ja, wenn sie `slow` ist oder aus einer anderen Sitzung stammt (Obsidian ist danach beendet worden). Eine Marke der eigenen Sitzung

@@ -5,8 +5,9 @@
 // `--enable-aggressive-domstorage-flushing` nicht). Ein `kill -9` oder „Sofort beenden“ im Hänger verliert die Marke dann. Warum nicht eine Datei im Plugin-Ordner:
 // `adapter.write` ist asynchron und seine Fortsetzungen brauchen den Hauptthread, der hängt; `fs` verletzt die Store-Regel `no-nodejs-modules`; und der Plugin-Ordner
 // wird mitsynchronisiert (die Marke gehört zum Gerät, nicht in den Sync).
-// IndexedDB mit `put` und `commit()` unter `durability: "strict"` überlebt `kill -9` auch nach 0,3 s mitten in einem 30-s-Hänger (gemessen), ist gerätelokal und
-// Web-Standard (läuft auch am Handy). Die Liste liegt zusätzlich im Hauptspeicher: Lesen ist synchron, geschrieben wird beim Setzen der Marke, VOR dem Rendern.
+// IndexedDB mit `put` und `commit()` überlebt `kill -9` auch nach 0,3 s mitten in einem 30-s-Hänger (gemessen; tragend ist `commit()`: nur `strict` ohne `commit()` verlor die Marke
+// 3 von 3, `commit()` allein hielt sie 3 von 3; `strict` kommt dazu), ist gerätelokal und Web-Standard (läuft auch am Handy; wo `commit()` fehlt, etwa Safari vor 15, bleibt der
+// Schutz auf die Sitzung beschränkt, gefangen und ungemessen). Die Liste liegt zusätzlich im Hauptspeicher: Lesen ist synchron, geschrieben wird beim Setzen der Marke, VOR dem Rendern.
 // Fehlt IndexedDB oder ist es gesperrt (Privatmodus, Quota), arbeitet der Speicher nur im Hauptspeicher weiter: der Schutz gilt dann nur innerhalb der Sitzung, ohne Fehlerflut.
 import type { App } from "obsidian";
 import { parseMarks, type Mark } from "../core/render-guard";
@@ -16,12 +17,15 @@ export interface MarkStore {
   read(): Mark[];
   /** Ersetzt die Liste; das Festschreiben läuft im Hintergrund und wirft nie. */
   write(marks: Mark[]): void;
+  /** Schließt die Verbindung zum dauerhaften Speicher (Plugin wird entladen). */
+  close(): void;
 }
 
 /** Was der dauerhafte Teil können muss: einmal lesen (beim Start), schreiben ohne zu warten. */
 export interface DurablePort {
   read(): Promise<unknown>;
   write(marks: Mark[]): void;
+  close?(): void;
 }
 
 /** Hauptspeicher plus (falls vorhanden) dauerhafter Port. Liest den Port einmal; ein Fehler dabei heißt: leere Liste. */
@@ -36,28 +40,39 @@ export async function createMarkStore(port: DurablePort | null): Promise<MarkSto
       mem = marks;
       try { port?.write(marks); } catch { /* ohne dauerhaften Speicher gilt der Schutz nur in dieser Sitzung */ }
     },
+    close() {
+      try { port?.close?.(); } catch { /* schon zu */ }
+    },
   };
 }
 
 const STORE_NAME = "marks";
 const KEY = "list";
 
-/** IndexedDB als dauerhafter Port; `null`, wenn es fehlt oder sich nicht öffnen lässt. */
+/** So lange wartet der Start auf IndexedDB; danach arbeitet der Speicher nur im Hauptspeicher (ein blockiertes Öffnen kommt ohne Ereignis, und Obsidian lädt Plugins nacheinander). */
+export const OPEN_TIMEOUT_MS = 1500;
+
+/** IndexedDB als dauerhafter Port; `null`, wenn es fehlt, sich nicht öffnen lässt oder nicht binnen `OPEN_TIMEOUT_MS` antwortet. */
 export function openIdbPort(name: string): Promise<DurablePort | null> {
   return new Promise((resolve) => {
+    const timer = window.setTimeout(() => { resolve(null); }, OPEN_TIMEOUT_MS);
+    const done = (port: DurablePort | null): void => { window.clearTimeout(timer); resolve(port); };
     let req: IDBOpenDBRequest;
     try {
       req = indexedDB.open(name, 1);
     } catch {
-      resolve(null);
+      done(null);
       return;
     }
     req.onupgradeneeded = () => { req.result.createObjectStore(STORE_NAME); };
-    req.onerror = () => { resolve(null); };
-    req.onblocked = () => { resolve(null); };
+    req.onerror = () => { done(null); };
+    req.onblocked = () => { done(null); };
     req.onsuccess = () => {
       const db = req.result;
-      resolve({
+      // Eine spätere Schema-Version oder ein `deleteDatabase` darf nicht an unserer offenen Verbindung hängen.
+      db.onversionchange = () => { db.close(); };
+      done({
+        close: () => { db.close(); },
         read: () => new Promise((res, rej) => {
           const get = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(KEY);
           get.onsuccess = () => { res(get.result); };

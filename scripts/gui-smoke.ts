@@ -748,8 +748,8 @@ async function punktAbsturzNeustart(): Promise<boolean> {
       if (!start.startsWith("KEINE") && !start.startsWith("Fehler")) {
         const z = JSON.parse(start) as { marken: Array<{ fp: string; at: number; slow: boolean; session: string }>; offen: string[] };
         const m = z.marken.find((x) => x.fp === fp);
-        gut = m !== undefined && m.at >= tOffen && m.at <= tKill;
-        grund = m === undefined ? `keine Marke für den Hänger-Block (Marken ${q(z.marken.length)}, offen ${q(z.offen)})` : `Marke geschrieben ${String(m.at - tOffen)} ms nach dem Öffnen, ${String(tKill - m.at)} ms vor dem Kill (${gut ? "vor dem Kill" : "NACH dem Kill, vom neuen Prozess"}), Sitzung ${m.session}, slow ${String(m.slow)}`;
+        gut = m !== undefined && m.session !== "" && m.at >= tOffen && m.at <= tKill;
+        grund = m === undefined ? `keine Marke für den Hänger-Block (Marken ${q(z.marken.length)}, offen ${q(z.offen)})` : `(Notiz beim Start offen: ${q(z.offen)}) Marke geschrieben ${String(m.at - tOffen)} ms nach dem Öffnen, ${String(tKill - m.at)} ms vor dem Kill (${gut ? "vor dem Kill" : "NACH dem Kill, vom neuen Prozess"}), Sitzung ${m.session}, slow ${String(m.slow)}`;
       }
       befunde.push(`Kill ${String(killNach)} ms nach dem Öffnen: ${grund}`);
       if (!gut) { alleGut = false; continue; }

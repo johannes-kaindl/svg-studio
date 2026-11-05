@@ -82,6 +82,7 @@ describe("renderSvgBlock", () => {
         guard: {
           isMarked: () => isMarked,
           clear: () => { isMarked = false; log.push("clear"); },
+        dispose: () => undefined,
           begin: (_text: string, _win: Window) => {
             log.push("begin");
             return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } };
