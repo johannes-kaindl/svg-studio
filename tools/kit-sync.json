@@ -11,12 +11,12 @@
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure",
       "modules": ["safe-markdown", "i18n", "answer-retry", "llm-answer", "think-splitter", "sha256", "data-url", "slug", { "name": "measured-quality", "ref": "0.55.0" },
-        { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "rounds", "ref": "0.54.0" }, { "name": "run-slot", "ref": "0.54.0" }, { "name": "rotation", "ref": "0.54.0" }, { "name": "css-color", "ref": "0.56.0" }, { "name": "word-diff", "ref": "0.55.0" }]
+        { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "rounds", "ref": "0.54.0" }, { "name": "run-slot", "ref": "0.54.0" }, { "name": "rotation", "ref": "0.60.0" }, { "name": "css-color", "ref": "0.56.0" }, { "name": "word-diff", "ref": "0.55.0" }]
     },
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure", "ref": "0.55.0",
       "modules": ["anthropic-wire", "backend-probe", "capabilities", "embeddings-client", "endpoint", "endpoint_config", "endpoint_diagnostics", "error_body", "model-choice", "model-context",
-        "model-list-cache", "reasoning", "redact", "sampling-profiles", "secrets", "sse", "timeout"]
+        "model-list-cache", "reasoning", { "name": "redact", "ref": "0.60.0" }, "sampling-profiles", "secrets", "sse", "timeout"]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "ref": "0.55.0", "modules": ["clipboard"] },
     {
