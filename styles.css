@@ -577,6 +577,28 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
   justify-content: center;
 }
 
+/* Platzhalter statt Bild (Absturzmarke oder Notausschalter „SVG in Notizen automatisch anzeigen“): eine ruhige Fläche mit Hinweis und Knopf. */
+.svg-studio-held {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--size-4-2);
+  min-height: 6em;
+  padding: var(--size-4-3);
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+}
+
+.svg-studio-held p {
+  margin: 0;
+}
+
+.is-mobile .svg-studio-held button.svg-studio-show {
+  min-height: calc(var(--size-4-10) + var(--size-4-1));
+}
+
 .svg-studio-error {
   padding: var(--size-4-2) var(--size-4-3);
   border: 1px solid var(--background-modifier-error);

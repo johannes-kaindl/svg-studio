@@ -67,4 +67,12 @@ describe("loadSettings", () => {
     expect(DEFAULT_SETTINGS.background.on).toBe(true);
     expect(loadSettings({}).settings.background.on).toBe(true);
   });
+
+  it("autoShow (Notausschalter): Vorgabe an, ein Boolean bleibt, ein Nicht-Boolean fällt auf die Vorgabe und wird gemeldet", () => {
+    expect(loadSettings({}).settings.autoShow).toBe(true);
+    expect(loadSettings({ autoShow: false }).settings.autoShow).toBe(false);
+    const bad = loadSettings({ autoShow: "nein" });
+    expect(bad.settings.autoShow).toBe(true);
+    expect(bad.dropped).toContain("autoShow");
+  });
 });

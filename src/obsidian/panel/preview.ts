@@ -5,12 +5,14 @@
 // steht (Popout-Fenster!), nie der Text per `innerHTML` (Parser-Differenz HTML gegen XML, code-kit 0.45.0). Abgelehnter Text: nichts gezeigt, die Probleme
 // gehen zurück. Die Auswahlmarke ist ein Attribut mit zufälligem Namen am Element der Vorschau plus ein `<style>` im Shadow Root, nie eine Änderung am Quelltext.
 import type { SvgProblem, checkSvg } from "../../vendor/kit/svg-guard";
+import type { RenderGuard } from "../render-guard";
 import { drawingBox, localBox, userBox, type Box } from "./bbox";
 
 export type { Box };
 
 export interface PreviewHandle {
-  show: (text: string) => { ok: true } | { ok: false; problems: SvgProblem[] };
+  /** `blocked`: eine Absturzmarke steht für diesen Text, es wurde nichts gezeichnet (`problems` ist dann leer). */
+  show: (text: string) => { ok: true } | { ok: false; problems: SvgProblem[]; blocked?: true };
   /** Markiert das erste Element mit dieser `id` (`null` oder unbekannt: keine Marke). Meldet nichts an `onSelect`. */
   select: (id: string | null) => void;
   /** Ausdehnung des Elements, `null` = die ganze Zeichnung. Ist das gewählte (geklickte) Element das mit dieser `id`, gilt es, nicht ein anderes mit derselben `id`.
@@ -29,6 +31,8 @@ export interface PreviewOptions {
   guard: typeof checkSvg;
   /** Ein Klick im Bild: die `id` des nächsten Vorfahren (oder des Elements selbst) mit `id` unter der Wurzel, sonst `null`. */
   onSelect: (id: string | null) => void;
+  /** Absturzmarken (Laufzeit-Schutz): die Marke steht vor dem Einsetzen des Baums und fällt, wenn das Bild gezeichnet ist; ohne Wächter wird immer gezeichnet. */
+  renderGuard?: RenderGuard;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -108,10 +112,14 @@ svg { display: block; max-width: 100%; height: auto; }
       clear();
       const r = o.guard(text);
       if (!r.ok) return { ok: false, problems: r.problems };
+      if (o.renderGuard?.isMarked(text) === true) return { ok: false, problems: [], blocked: true };
       svg = doc.importNode(r.svg, true);
       // Ein Element, das schon unseren Markennamen trägt, stammt nicht von uns (der Name ist zufällig, also nur ein Zufallstreffer): weg damit.
       for (const el of Array.from(svg.querySelectorAll(`[${mark}]`))) el.removeAttribute(mark);
+      // Die Marke steht, BEVOR der Baum im Dokument hängt: Layout und Zeichnen folgen erst danach und können den Hauptthread blockieren.
+      const ticket = o.renderGuard?.begin(text, doc.defaultView ?? window);
       shadow.appendChild(svg);
+      ticket?.settle();
       return { ok: true };
     },
     select(id) {

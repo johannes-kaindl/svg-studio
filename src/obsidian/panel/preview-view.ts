@@ -6,11 +6,14 @@ import { measureCanvas } from "../../core/measure";
 import { formatMeasureLine } from "../../core/measure-line";
 import { measureTexts, t } from "../../i18n/strings";
 import { checkSvg } from "../../vendor/kit/svg-guard";
+import type { RenderGuard } from "../render-guard";
 import { buildBackgroundBar } from "./background-bar";
 import { buildPreview, type Box } from "./preview";
 
 export interface PreviewViewDeps {
   background: { get: () => BackgroundState; set: (s: BackgroundState) => void };
+  /** Absturzmarken (Laufzeit-Schutz); ohne sie wird immer gezeichnet. */
+  renderGuard?: RenderGuard;
   /** Die Auswahl hat sich geändert (Klick im Bild oder `select`): die Zahlenfelder zeichnen sich neu. */
   onSelectionChange?: () => void;
 }
@@ -38,6 +41,7 @@ export function renderPreviewView(host: HTMLElement, text: string, d: PreviewVie
   const head = host.createDiv({ cls: "svg-studio-preview-head" });
   const preview = buildPreview(host, {
     guard: checkSvg,
+    ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }),
     onSelect: (id) => { selection.id = id; paintMeasure(); d.onSelectionChange?.(); },
   });
   const measureEl = host.createDiv({ cls: "svg-studio-measure", attr: { "aria-live": "polite" } });
@@ -69,6 +73,26 @@ export function renderPreviewView(host: HTMLElement, text: string, d: PreviewVie
   }
 
   const shown = preview.show(text);
+  if (!shown.ok && shown.blocked === true) {
+    // Eine Absturzmarke steht: statt des Bildes ein Platzhalter. „Trotzdem anzeigen“ löscht die Marke und baut die Vorschau neu auf; das Handle gehört dann ihr.
+    preview.destroy();
+    host.empty();
+    let inner: PreviewView | null = null;
+    const held = host.createDiv({ cls: "svg-studio-held" });
+    held.createEl("p", { text: t("block.blocked") });
+    const button = held.createEl("button", { cls: "svg-studio-show", text: t("block.showAnyway"), attr: { type: "button" } });
+    button.addEventListener("click", () => {
+      d.renderGuard?.clear(text);
+      host.empty();
+      inner = renderPreviewView(host, text, d, selection);
+      d.onSelectionChange?.();
+    });
+    return {
+      dispose: () => { inner?.dispose(); },
+      select: (id) => { selection.id = id; inner?.select(id); },
+      localBoxOf: (id) => inner?.localBoxOf(id) ?? null,
+    };
+  }
   if (!shown.ok) {
     preview.destroy();
     host.empty();

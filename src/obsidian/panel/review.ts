@@ -27,6 +27,8 @@ function withArrows<S extends { kind: string; text: string }>(segs: readonly S[]
 export interface ReviewDeps {
   /** Hintergrund der kleinen Vorschauen (dieselbe Wahl wie die große Vorschau). */
   background: PreviewViewDeps["background"];
+  /** Absturzmarken (Laufzeit-Schutz): auch die kleinen Vorschauen zeichnen nicht, solange eine Marke steht. */
+  renderGuard?: PreviewViewDeps["renderGuard"];
   /** Die große Vorschau springt zu diesem Element (Klick auf den Kartenrumpf). */
   jump: (id: string) => void;
   /** Fragt den Kommentartext (mit dem bisherigen als Vorbelegung); `null` heißt Abbruch. Fehlt die Funktion, gibt es keine Kommentar-Taste. */
@@ -167,7 +169,7 @@ function renderCompare(parent: HTMLElement, before: string, after: string, d: Re
   for (const [label, text] of [[t("review.before"), before], [t("review.after"), after]] as const) {
     const cell = grid.createDiv({ cls: "svg-studio-compare-cell" });
     cell.createDiv({ cls: "svg-studio-compare-label", text: label });
-    const preview = buildPreview(cell, { guard: checkSvg, onSelect: () => undefined });
+    const preview = buildPreview(cell, { guard: checkSvg, onSelect: () => undefined, ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }) });
     if (preview.show(text).ok) preview.setBackground(backgroundColor(d.background.get()));
     else {
       preview.destroy();

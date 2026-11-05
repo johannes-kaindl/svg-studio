@@ -13,6 +13,8 @@ export type SvgPanelDeps = Omit<PanelDeps<SvgSession>, "strings"> & {
   thinkingOn: () => boolean;
   /** Hintergrund der Vorschau (Einstellung): lesen und speichern. */
   background: SvgSlotDeps["background"];
+  /** Absturzmarken der Vorschau (Laufzeit-Schutz); ohne sie wird immer gezeichnet. */
+  renderGuard?: SvgSlotDeps["renderGuard"];
   /** Hält die Sitzung eines geschlossenen Panels, wenn der Nutzer die Runden behalten wollte; das nächste Panel nimmt sie wieder auf. */
   stash: { take: () => SvgSession | null; put: (s: SvgSession | null) => void };
 };
@@ -60,8 +62,8 @@ export class SvgStudioView extends ItemView {
   onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("svg-studio-panel");
-    const { thinkingOn, background, stash, ...rest } = this.deps;
-    const slots = svgSlots({ llm: this.deps.llm, readTargetText: this.deps.readTargetText, thinkingOn, background, comment: commentDialog(this.app) });
+    const { thinkingOn, background, stash, renderGuard, ...rest } = this.deps;
+    const slots = svgSlots({ llm: this.deps.llm, readTargetText: this.deps.readTargetText, thinkingOn, background, ...(renderGuard === undefined ? {} : { renderGuard }), comment: commentDialog(this.app) });
     this.shell = buildPanelShell(this.contentEl, { ...rest, strings: panelStrings() }, slots, stash.take() ?? undefined);
     if (this.target !== null) this.shell.setTarget(this.target);
     return Promise.resolve();

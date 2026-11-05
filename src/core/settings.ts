@@ -11,6 +11,8 @@ export type AcceptAs = "file" | "block" | "ask";
 
 export interface SvgStudioSettings {
   acceptAs: AcceptAs;
+  /** Notausschalter „SVG in Notizen automatisch anzeigen“: aus, zeigt ein Block erst nach Klick sein Bild (ein SVG, das Obsidian einfriert, lässt sich so lösen). */
+  autoShow: boolean;
   background: BackgroundState;
   /** Die LLM-Anbindung (Kit `createLlmConnection`): lokale Endpunkt-Zeilen (Schlüssel liegen im Schlüsselbund, nie hier), die Wahl bei einem Endpunkt-Manager und die Anfrage-Einstellungen (Denkstufe, Überschreibungen). */
   llm: { endpoints: EndpointConfig[]; choice: EndpointChoice; request: RequestSettings };
@@ -18,6 +20,7 @@ export interface SvgStudioSettings {
 
 export const DEFAULT_SETTINGS: SvgStudioSettings = {
   acceptAs: "file",
+  autoShow: true,
   background: { ...DEFAULT_BACKGROUND },
   llm: { endpoints: [], choice: {}, request: DEFAULT_REQUEST_SETTINGS },
 };
@@ -34,6 +37,9 @@ export function loadSettings(raw: unknown): { settings: SvgStudioSettings; dropp
   const acceptAs: AcceptAs = src.acceptAs === "file" || src.acceptAs === "block" || src.acceptAs === "ask" ? src.acceptAs : DEFAULT_SETTINGS.acceptAs;
   if ("acceptAs" in src && acceptAs !== src.acceptAs) dropped.push("acceptAs");
 
+  const autoShow = typeof src.autoShow === "boolean" ? src.autoShow : DEFAULT_SETTINGS.autoShow;
+  if ("autoShow" in src && typeof src.autoShow !== "boolean") dropped.push("autoShow");
+
   const rawBackground = isRecord(src.background) ? src.background : {};
   if (typeof rawBackground.hex === "string" && !isHexColor(rawBackground.hex)) dropped.push("background.hex");
   const background: BackgroundState = sanitizeBackground(rawBackground);
@@ -47,5 +53,5 @@ export function loadSettings(raw: unknown): { settings: SvgStudioSettings; dropp
     choice: sanitizeChoice(l.choice),
     request: request.settings,
   };
-  return { settings: { acceptAs, background, llm }, dropped };
+  return { settings: { acceptAs, autoShow, background, llm }, dropped };
 }

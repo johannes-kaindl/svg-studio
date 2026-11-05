@@ -33,6 +33,7 @@ export class SvgStudioSettingTab extends PluginSettingTab {
           options: { file: t("settings.acceptAs.file"), block: t("settings.acceptAs.block"), ask: t("settings.acceptAs.ask") },
         },
       },
+      { name: t("settings.autoShow"), desc: t("settings.autoShow.desc"), control: { type: "toggle", key: "autoShow" } },
       // Die Texte des Abschnitts kommen aus dem Kit (EN/DE nach `lang`), kein eigenes Bündel.
       { name: t("settings.model"), desc: "", render: (setting: Setting) => { this.host.llm.renderSettings(settingBodyHost(setting), { lang: getLang() }); } },
     ];

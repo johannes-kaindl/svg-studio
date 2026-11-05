@@ -22,6 +22,8 @@ export interface SvgSlotDeps {
   thinkingOn: () => boolean;
   /** Hintergrund der Vorschau: lesen und speichern (nur die Vorschau, nie das SVG). */
   background: PreviewViewDeps["background"];
+  /** Absturzmarken (Laufzeit-Schutz): Vorschau und Vergleich zeichnen erst nach der Marke und nicht, solange eine steht. */
+  renderGuard?: PreviewViewDeps["renderGuard"];
   /** Der Kommentar-Dialog der Prüfliste (`promptText` des Kits, vom Panel mit der App verdrahtet); ohne ihn gibt es keine Kommentar-Taste. */
   comment?: ReviewDeps["comment"];
 }
@@ -58,7 +60,7 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       view?.dispose();
       view = null;
       if (text === null) return;
-      view = renderPreviewView(host, text, { background: d.background, onSelectionChange: () => { paintFields?.(); } }, selection);
+      view = renderPreviewView(host, text, { background: d.background, ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }), onSelectionChange: () => { paintFields?.(); } }, selection);
     },
     canPreviewBase(text) {
       const b = bestandProblems(text, checkSvg);
@@ -97,7 +99,7 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
       paintFields();
     },
     renderChanges(host, round, session, ctx) {
-      renderReview(host, round, session, ctx, { background: d.background, jump: (id) => { view?.select(id); }, ...(d.comment === undefined ? {} : { comment: d.comment }) });
+      renderReview(host, round, session, ctx, { background: d.background, ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }), jump: (id) => { view?.select(id); }, ...(d.comment === undefined ? {} : { comment: d.comment }) });
     },
     notices(host, ctx) {
       void renderNotices(host, ctx, d);

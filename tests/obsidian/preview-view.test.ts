@@ -144,3 +144,46 @@ describe("renderPreviewView: Größenbeobachter (das Panel misst nach, wenn der 
     expect(m.measure()).toBe("Area 460 × 425 cm · Drawing 30 × 40 cm");
   });
 });
+
+describe("renderPreviewView: Absturzmarke", () => {
+  const guard = (marked: boolean) => {
+    const log: string[] = [];
+    let isMarked = marked;
+    return { log, guard: { isMarked: () => isMarked, clear: () => { isMarked = false; log.push("clear"); }, begin: () => { log.push("begin"); return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } }; } } };
+  };
+  const mount = (g: ReturnType<typeof guard>["guard"]) => {
+    const host = document.body.createDiv();
+    const bg: BackgroundState = { on: true, tone: "light", hex: "#ffffff" };
+    const selection: Selection = { id: null, text: null };
+    const view = renderPreviewView(host, SVG, { background: { get: () => bg, set: () => undefined }, renderGuard: g }, selection);
+    return { host, view, selection };
+  };
+
+  it("mit Marke: ein Platzhalter mit Hinweis und „Show anyway“, kein Bild, keine Maßzeile", () => {
+    const g = guard(true);
+    const { host } = mount(g.guard);
+    expect(host.querySelector(".svg-studio-held")?.textContent).toContain("blocked the display");
+    expect(host.querySelector(".svg-studio-stage")).toBeNull();
+    expect(g.log).toEqual([]);
+  });
+
+  it("„Show anyway“ löscht die Marke und zeichnet die Vorschau; das Handle gehört dann dem neuen Inhalt", () => {
+    const g = guard(true);
+    const { host, view, selection } = mount(g.guard);
+    host.querySelector<HTMLButtonElement>("button.svg-studio-show")!.click();
+    expect(g.log.slice(0, 2)).toEqual(["clear", "begin"]);
+    expect(host.querySelector(".svg-studio-held")).toBeNull();
+    expect(host.querySelector<HTMLElement>(".svg-studio-stage")?.shadowRoot?.querySelector("svg")).not.toBeNull();
+    view.select("wand-nord");
+    expect(selection.id).toBe("wand-nord");
+    view.dispose();
+    expect(host.querySelector(".svg-studio-stage")).toBeNull();
+  });
+
+  it("ohne Marke: gezeichnet wie bisher", () => {
+    const g = guard(false);
+    const { host } = mount(g.guard);
+    expect(host.querySelector(".svg-studio-held")).toBeNull();
+    expect(g.log[0]).toBe("begin");
+  });
+});

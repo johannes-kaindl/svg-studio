@@ -447,3 +447,56 @@ describe("buildPreview: Maße", () => {
     expect(m.handle.boxOf("gibt-es-nicht")).toBeNull();
   });
 });
+
+// Laufzeit-Schutz: die Vorschau setzt die Marke VOR dem Einsetzen des Baums und zeichnet nichts, solange eine Marke steht.
+describe("buildPreview: Absturzmarke", () => {
+  const fake = (marked: boolean) => {
+    const log: string[] = [];
+    let isMarked = marked;
+    return {
+      log,
+      guard: {
+        isMarked: () => isMarked,
+        clear: () => { isMarked = false; log.push("clear"); },
+        begin: () => { log.push("begin"); return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } }; },
+      },
+    };
+  };
+  const build = (renderGuard: ReturnType<typeof fake>["guard"] | undefined) => {
+    const parent = document.body.appendChild(document.createElement("div"));
+    const handle = buildPreview(parent, { guard: checkSvg, onSelect: () => undefined, ...(renderGuard === undefined ? {} : { renderGuard }) });
+    return { parent, handle, shadow: parent.querySelector<HTMLElement>(".svg-studio-stage")!.shadowRoot! };
+  };
+
+  it("ohne Marke: begin vor dem Einsetzen (im Shadow Root steht beim begin noch kein svg), danach settle", () => {
+    const f = fake(false);
+    const m = build(f.guard);
+    let svgAtBegin: boolean | null = null;
+    const begin = f.guard.begin;
+    f.guard.begin = () => { svgAtBegin = m.shadow.querySelector("svg") !== null; return begin(); };
+    expect(m.handle.show(SVG)).toEqual({ ok: true });
+    expect(svgAtBegin).toBe(false);
+    expect(m.shadow.querySelector("svg")).not.toBeNull();
+    expect(f.log).toEqual(["begin", "settle"]);
+  });
+
+  it("mit Marke: nichts gezeichnet, kein begin; das Ergebnis meldet blocked", () => {
+    const f = fake(true);
+    const m = build(f.guard);
+    const r = m.handle.show(SVG);
+    expect(r).toMatchObject({ ok: false, blocked: true });
+    expect(m.shadow.querySelector("svg")).toBeNull();
+    expect(f.log).toEqual([]);
+  });
+
+  it("ein abgelehntes SVG meldet Probleme (nicht blocked), auch wenn eine Marke steht", () => {
+    const m = build(fake(true).guard);
+    const r = m.handle.show(`<svg ${NS}><script>x</script></svg>`);
+    expect(r).toMatchObject({ ok: false });
+    expect("blocked" in r).toBe(false);
+  });
+
+  it("ohne Wächter wie bisher", () => {
+    expect(build(undefined).handle.show(SVG)).toEqual({ ok: true });
+  });
+});

@@ -8,6 +8,7 @@ import { BLOCK_LANG, fileTarget, registerFileMenu, targetFromContext } from "./o
 import { SvgStudioView } from "./obsidian/panel/view";
 import { readTargetText } from "./obsidian/read-target";
 import { renderSvgBlock, VIEW_TYPE_SVG_STUDIO } from "./obsidian/render-block";
+import { appMarkStore, createRenderGuard } from "./obsidian/render-guard";
 import { SvgStudioSettingTab } from "./obsidian/settings-tab";
 import type { Target } from "./vendor/kit/panel-session";
 import { pickLang } from "./vendor/kit/i18n";
@@ -76,6 +77,7 @@ export default class SvgStudioPlugin extends Plugin {
       thinkingOn: () => thinkingFor(this.settings.llm.request, "transform") !== "off",
       // Die letzte Stellung bleibt gespeichert (Spec § 7.3); sie betrifft nur die Vorschau.
       background: { get: () => this.settings.background, set: (s) => { this.settings.background = s; void this.saveSettings(); } },
+      renderGuard: this.renderGuard,
       readTargetText: (target) => readTargetText(this.app, target),
       // Übernehmen: Kit `panel-accept` und `block-writer`, davor ein Schnappschuss der Datei und `checkSvg` auf dem fertigen Text (Spec § 3 Punkt 4, § 7.6).
       accept: (session) => acceptSvgSession(this.acceptEnv(), session, { guard: checkSvg, firstPromptLine: firstPromptLineOf(session), pluginId: this.manifest.id }),
@@ -126,7 +128,7 @@ export default class SvgStudioPlugin extends Plugin {
         if (tg === null) new Notice(t("notice.noTarget"));
         else void this.openPanel(tg);
       };
-      renderSvgBlock(source, el, { guard: checkSvg, onEdit: open, onRepair: open, t });
+      renderSvgBlock(source, el, { guard: checkSvg, onEdit: open, onRepair: open, t, marks: this.renderGuard, autoShow: () => this.settings.autoShow });
     });
 
     installEmbedButtons(this, {
@@ -160,6 +162,9 @@ export default class SvgStudioPlugin extends Plugin {
     const recent = workspace.getMostRecentLeaf(workspace.rootSplit)?.view;
     return recent instanceof MarkdownView && recent.file !== null ? recent : null;
   }
+
+  /** Absturzmarken für Block und Panel-Vorschau (App-lokaler Speicher, für alle Fenster gemeinsam). */
+  private readonly renderGuard = createRenderGuard(appMarkStore(this.app));
 
   /** Die zuletzt aktive Notiz-Ansicht, fensterübergreifend (das Panel selbst ist keine). */
   private lastMarkdown: MarkdownView | null = null;
