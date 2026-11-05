@@ -3,6 +3,7 @@
 import { backgroundColor, type BackgroundState } from "../../core/background";
 import { scanElements } from "../../core/elements";
 import { measureCanvas } from "../../core/measure";
+import { COST_LIMIT } from "../../core/render-guard";
 import { formatMeasureLine } from "../../core/measure-line";
 import { guardProblemText, measureTexts, t } from "../../i18n/strings";
 import { checkSvg } from "../../vendor/kit/svg-guard";
@@ -73,16 +74,19 @@ export function renderPreviewView(host: HTMLElement, text: string, d: PreviewVie
   }
 
   const shown = preview.show(text);
-  if (!shown.ok && shown.blocked === true) {
-    // Eine Absturzmarke steht: statt des Bildes ein Platzhalter. „Trotzdem anzeigen“ löscht die Marke und baut die Vorschau neu auf; das Handle gehört dann ihr.
+  if (!shown.ok && (shown.blocked === true || shown.costly !== undefined)) {
+    // Eine Absturzmarke steht oder der Text ist teuer: statt des Bildes ein Platzhalter. Der Klick löscht die Marke bzw. gibt den Text frei (gleicher Zustand wie im Block) und baut die Vorschau neu auf;
+    // das Handle gehört dann ihr.
     preview.destroy();
     host.empty();
     let inner: PreviewView | null = null;
     const held = host.createDiv({ cls: "svg-studio-held" });
-    held.createEl("p", { text: t("block.blocked") });
-    const button = held.createEl("button", { cls: "svg-studio-show", text: t("block.showAnyway"), attr: { type: "button" } });
+    const costly = shown.costly;
+    held.createEl("p", { text: costly === undefined ? t("block.blocked") : t("preview.costly", Math.round((costly / COST_LIMIT) * 100)) });
+    const button = held.createEl("button", { cls: "svg-studio-show", text: costly === undefined ? t("block.showAnyway") : t("block.show"), attr: { type: "button" } });
     button.addEventListener("click", () => {
-      d.renderGuard?.clear(text);
+      if (costly === undefined) d.renderGuard?.clear(text);
+      else d.renderGuard?.release(text);
       host.empty();
       inner = renderPreviewView(host, text, d, selection);
       d.onSelectionChange?.();

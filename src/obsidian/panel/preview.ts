@@ -4,6 +4,7 @@
 // Sicherheit: eingefügt wird GENAU der Baum, den der Bereiniger geprüft hat (`result.svg`), per `ownerDocument.importNode` des Dokuments, in dem der Host
 // steht (Popout-Fenster!), nie der Text per `innerHTML` (Parser-Differenz HTML gegen XML, code-kit 0.45.0). Abgelehnter Text: nichts gezeigt, die Probleme
 // gehen zurück. Die Auswahlmarke ist ein Attribut mit zufälligem Namen am Element der Vorschau plus ein `<style>` im Shadow Root, nie eine Änderung am Quelltext.
+import { CLICK_COST } from "../../core/render-guard";
 import type { SvgProblem, checkSvg } from "../../vendor/kit/svg-guard";
 import type { RenderGuard } from "../render-guard";
 import { drawingBox, localBox, userBox, type Box } from "./bbox";
@@ -11,8 +12,9 @@ import { drawingBox, localBox, userBox, type Box } from "./bbox";
 export type { Box };
 
 export interface PreviewHandle {
-  /** `blocked`: eine Absturzmarke steht für diesen Text, es wurde nichts gezeichnet (`problems` ist dann leer). */
-  show: (text: string) => { ok: true } | { ok: false; problems: SvgProblem[]; blocked?: true };
+  /** `blocked`: eine Absturzmarke steht für diesen Text, es wurde nichts gezeichnet (`problems` ist dann leer). `costly`: der Kostenwert liegt an oder über der Klickschwelle und der Nutzer hat den Text
+   *  noch nicht freigegeben, es wurde nichts gezeichnet; der Wert ist der Kostenwert des Bereinigers. */
+  show: (text: string) => { ok: true } | { ok: false; problems: SvgProblem[]; blocked?: true; costly?: number };
   /** Markiert das erste Element mit dieser `id` (`null` oder unbekannt: keine Marke). Meldet nichts an `onSelect`. */
   select: (id: string | null) => void;
   /** Ausdehnung des Elements, `null` = die ganze Zeichnung. Ist das gewählte (geklickte) Element das mit dieser `id`, gilt es, nicht ein anderes mit derselben `id`.
@@ -33,6 +35,8 @@ export interface PreviewOptions {
   onSelect: (id: string | null) => void;
   /** Absturzmarken (Laufzeit-Schutz): die Marke steht vor dem Einsetzen des Baums und fällt, wenn das Bild gezeichnet ist; ohne Wächter wird immer gezeichnet. */
   renderGuard?: RenderGuard;
+  /** Kostenwert ab dem die Vorschau erst nach einem Klick zeichnet (nur mit `renderGuard`, der die Freigabe hält); Vorgabe `CLICK_COST`. */
+  clickCost?: number;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -121,6 +125,11 @@ svg { display: block; max-width: 100%; height: auto; }
       if (!r.ok) {
         t?.abort();
         return { ok: false, problems: r.problems };
+      }
+      // Nahe der Kostengrenze erst nach einem Klick, wie im Block: die Freigabe (je Text und Sitzung) liegt im Wächter und gilt für Block, Vorschau und Vergleich gemeinsam.
+      if (o.renderGuard !== undefined && !o.renderGuard.released(text) && r.cost >= (o.clickCost ?? CLICK_COST)) {
+        t?.abort();
+        return { ok: false, problems: [], costly: r.cost };
       }
       svg = doc.importNode(r.svg, true);
       // Ein Element, das schon unseren Markennamen trägt, stammt nicht von uns (der Name ist zufällig, also nur ein Zufallstreffer): weg damit.

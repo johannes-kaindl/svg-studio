@@ -5,6 +5,7 @@ import { defineStrings, getLang, setLang, t, type Lang } from "../vendor/kit/i18
 import type { QualityTexts } from "../vendor/kit/measured-quality";
 import type { LabelTexts } from "../core/diff-labels";
 import type { MeasureTexts } from "../core/measure-line";
+import { costEstimate } from "../core/guard-problem";
 import type { Problem } from "../core/problem";
 import type { PanelStrings } from "../obsidian/panel/shell";
 import type { AcceptStrings } from "../vendor/kit-obsidian/panel-accept";
@@ -28,9 +29,11 @@ const EN: Record<string, string> = {
   "block.manual": "This SVG is not shown automatically.",
   "block.show": "Show",
   "block.costly": "This SVG is expensive to draw (about {0} % of the allowed cost), so it is shown in the note only after a click.",
+  "preview.costly": "This SVG is expensive to draw (about {0} % of the allowed cost), so the preview is shown only after a click.",
   "block.rejected": "This SVG cannot be shown: the sanitizer rejected it.",
   "block.problem": "{0}: {1}",
-  "block.problem.too-costly": "too-costly: this SVG would take too long to draw ({0}). Use fewer nested masks, markers or filters and fewer blurred shapes.",
+  "block.problem.too-costly": "too-costly: this SVG would take too long to draw (about {0} times the allowed cost). Use fewer nested masks, markers or filters and fewer blurred shapes.",
+  "block.problem.too-costly-over": "too-costly: this SVG would take far too long to draw (far above the allowed cost). Use fewer nested masks, markers or filters and fewer blurred shapes.",
   "embed.edit": "Edit in SVG Studio",
   "notice.noTarget": "Open an .svg file, or put the cursor in a svg-studio block or on an embedded .svg file.",
   "settings.acceptAs": "Apply new SVG as",
@@ -308,9 +311,11 @@ const DE: Record<string, string> = {
   "block.manual": "Dieses SVG wird nicht automatisch angezeigt.",
   "block.show": "Anzeigen",
   "block.costly": "Dieses SVG ist aufwendig zu zeichnen (rund {0} % der erlaubten Kosten) und wird in der Notiz erst nach einem Klick gezeigt.",
+  "preview.costly": "Dieses SVG ist aufwendig zu zeichnen (rund {0} % der erlaubten Kosten), die Vorschau erscheint deshalb erst nach einem Klick.",
   "block.rejected": "Dieses SVG lässt sich nicht anzeigen: der Bereiniger hat es abgelehnt.",
   "block.problem": "{0}: {1}",
-  "block.problem.too-costly": "too-costly: dieses SVG wäre zu aufwendig zu zeichnen ({0}). Nimm weniger verschachtelte Masken, Marker oder Filter und weniger weichgezeichnete Formen.",
+  "block.problem.too-costly": "too-costly: dieses SVG wäre zu aufwendig zu zeichnen (rund {0}-fach über den erlaubten Kosten). Nimm weniger verschachtelte Masken, Marker oder Filter und weniger weichgezeichnete Formen.",
+  "block.problem.too-costly-over": "too-costly: dieses SVG wäre viel zu aufwendig zu zeichnen (weit über den erlaubten Kosten). Nimm weniger verschachtelte Masken, Marker oder Filter und weniger weichgezeichnete Formen.",
   "embed.edit": "In SVG Studio bearbeiten",
   "notice.noTarget": "Öffne eine .svg-Datei oder setze den Cursor in einen svg-studio-Block oder auf eine eingebettete .svg-Datei.",
   "settings.acceptAs": "Neues SVG übernehmen als",
@@ -690,9 +695,13 @@ export function problemText(p: Problem): string {
   return p.round === undefined ? text : t("problem.round", p.round, text);
 }
 
-/** Ein Befund des Bereinigers für den Nutzer: `too-costly` (code-kit 0.58.0) mit einem Satz in der Sprache der Oberfläche, jeder andere Code als `code: detail`. `tr` ist die Übersetzung, die der Aufrufer schon hat. */
+/** Ein Befund des Bereinigers für den Nutzer: `too-costly` aus der Schätzung der Zeichenkosten (code-kit 0.58.0) mit einem Satz in der Sprache der Oberfläche („rund 2-fach über den erlaubten Kosten“,
+ *  statt der englischen, verschachtelten Klammer des Kits), jeder andere Befund als `code: detail` (auch `too-costly` wegen einer Mengengrenze: dort sagt das Detail, was zu groß ist). `tr` ist die Übersetzung, die der Aufrufer schon hat. */
 export function guardProblemText(p: { code: string; detail: string }, tr: T = t): string {
-  return p.code === "too-costly" ? tr("block.problem.too-costly", p.detail) : tr("block.problem", p.code, p.detail);
+  const est = costEstimate(p);
+  if (est === null) return tr("block.problem", p.code, p.detail);
+  if (est.ratio === null) return tr("block.problem.too-costly-over");
+  return tr("block.problem.too-costly", est.ratio >= 10 ? String(Math.round(est.ratio)) : String(Math.round(est.ratio * 10) / 10));
 }
 
 /** Die Wörter der Beschriftung von Einträgen (`core/diff-labels.ts`). */

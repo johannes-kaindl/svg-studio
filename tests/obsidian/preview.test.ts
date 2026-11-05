@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { MID_COST_SVG } from "../helpers/costly-svg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installObsidianDom } from "../helpers/obsidian-dom";
 import { buildPreview, type PreviewHandle } from "../../src/obsidian/panel/preview";
@@ -453,11 +454,14 @@ describe("buildPreview: Absturzmarke", () => {
   const fake = (marked: boolean) => {
     const log: string[] = [];
     let isMarked = marked;
+    const freed = new Set<string>();
     return {
       log,
       guard: {
         isMarked: () => isMarked,
-        clear: () => { isMarked = false; log.push("clear"); },
+        clear: (text?: string) => { isMarked = false; if (text !== undefined) freed.add(text); log.push("clear"); },
+          released: (text: string) => freed.has(text),
+          release: (text: string) => { freed.add(text); log.push("release"); },
         dispose: () => undefined,
         begin: () => { log.push("begin"); return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } }; },
       },
@@ -527,5 +531,65 @@ describe("buildPreview: Absturzmarke", () => {
     expect(f.log).toEqual(["begin", "settle", "abort", "begin", "settle"]);
     m.handle.destroy();
     expect(f.log.at(-1)).toBe("abort");
+  });
+});
+
+// Klick-zum-Rendern nach Kostenwert (code-kit 0.58.0) gilt auch für die Vorschau des Panels; die Freigabe liegt im Wächter und wird mit dem Block geteilt.
+describe("buildPreview: Kostenschwelle", () => {
+  const fake = () => {
+    const log: string[] = [];
+    const freed = new Set<string>();
+    return {
+      log,
+      guard: {
+        isMarked: () => false,
+        clear: () => undefined,
+        released: (text: string) => freed.has(text),
+        release: (text: string) => { freed.add(text); log.push("release"); },
+        dispose: () => undefined,
+        begin: () => { log.push("begin"); return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } }; },
+      },
+    };
+  };
+  const build = (renderGuard?: ReturnType<typeof fake>["guard"], clickCost?: number) => {
+    const parent = document.body.appendChild(document.createElement("div"));
+    const handle = buildPreview(parent, { guard: checkSvg, onSelect: () => undefined, ...(renderGuard === undefined ? {} : { renderGuard }), ...(clickCost === undefined ? {} : { clickCost }) });
+    return { handle, shadow: parent.querySelector<HTMLElement>(".svg-studio-stage")!.shadowRoot! };
+  };
+  const cost = (() => { const r = checkSvg(MID_COST_SVG); if (!r.ok) throw new Error("erwartet ok"); return r.cost; })();
+
+  it("teurer Text ohne Freigabe: nichts gezeichnet, costly meldet den Kostenwert, die Marke fällt (abort)", () => {
+    const f = fake();
+    const m = build(f.guard);
+    const r = m.handle.show(MID_COST_SVG);
+    expect(r).toEqual({ ok: false, problems: [], costly: cost });
+    expect(m.shadow.querySelector("svg")).toBeNull();
+    expect(f.log).toEqual(["begin", "abort"]);
+  });
+
+  it("nach der Freigabe wird derselbe Text gezeichnet, jedes weitere Zeichnen (renderAll) ohne neuen Klick", () => {
+    const f = fake();
+    const m = build(f.guard);
+    f.guard.release(MID_COST_SVG);
+    expect(m.handle.show(MID_COST_SVG)).toEqual({ ok: true });
+    expect(m.handle.show(MID_COST_SVG)).toEqual({ ok: true });
+    expect(m.shadow.querySelector("svg")).not.toBeNull();
+  });
+
+  it("die Freigabe gilt nur für diesen Text", () => {
+    const f = fake();
+    const m = build(f.guard);
+    f.guard.release(MID_COST_SVG);
+    expect(m.handle.show(MID_COST_SVG.replace("0.2", "0.3"))).toMatchObject({ ok: false, costly: expect.any(Number) });
+  });
+
+  it("Grenzwert: genau auf der Schwelle wartet der Text, knapp darunter wird gezeichnet", () => {
+    expect(build(fake().guard, cost).handle.show(MID_COST_SVG)).toMatchObject({ ok: false });
+    expect(build(fake().guard, cost + 1).handle.show(MID_COST_SVG)).toEqual({ ok: true });
+  });
+
+  it("ein billiger Text und ein Aufruf ohne Wächter werden gezeichnet wie bisher", () => {
+    expect(build(fake().guard).handle.show(SVG)).toEqual({ ok: true });
+    expect(build().handle.show(MID_COST_SVG)).toEqual({ ok: true });
   });
 });

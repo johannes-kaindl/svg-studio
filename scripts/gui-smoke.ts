@@ -96,6 +96,7 @@ const PUNKTE = [
   "laufzeit-marke-verhindert-wiederholung",
   "laufzeit-notausschalter",
   "block-bom-und-kosten-im-block",
+  "panel-teurer-text-braucht-klick",
   "laufzeit-absturz-neustart",
   "laufzeit-beenden-im-wachfenster",
   "pruefliste-kartenbeschriftung",
@@ -716,12 +717,56 @@ async function punktBomUndKosten(): Promise<void> {
     const bomAngekommen = quellenListe.some((x) => x.startsWith("feff,3c,"));
     const gutBom = bomAngekommen && bom.imgs === 1 && bom.nw > 0 && bom.held === null && bom.fehler.length === 0;
     record("block-bom-und-kosten-im-block", gutBom
-      && teuer.imgs === 0 && teuer.fehler.length === 1 && /^too-costly: this SVG would take too long to draw \(estimated render cost \d+ exceeds the limit of 1000000/.test(teuer.fehler[0]) && teuer.fehler[0].includes("fewer nested masks")
+      && teuer.imgs === 0 && teuer.fehler.length === 1 && /^too-costly: this SVG would take too long to draw \(about \d+(\.\d)? times the allowed cost\)\. /.test(teuer.fehler[0]) && teuer.fehler[0].includes("fewer nested masks")
       && nah.imgs === 0 && nah.held !== null && /expensive to draw \(about \d+ % of the allowed cost\)/.test(nah.held) && nah.knopf === "Show"
       && kl.imgs === 1 && kl.nw > 0 && kl.held === null
       && geklickt && nach !== null && nach[3].imgs === 1 && nach[3].nw > 0 && nach[3].held === null,
     `ein BOM (angekommen: ${String(bomAngekommen)}): ${q(bom)} · zwei BOM (Hinweis, Ergebnis hängt von der Chromium-Version ab): ${q(bom2)} · zu teuer: ${q(teuer)} · nahe der Grenze: ${q(nah)} → nach Klick (${String(geklickt)}) ${q(nach?.[3])} · klein: ${q(kl)}`);
   });
+}
+
+/**
+ * (Anderer Text als im Punkt davor: die Freigabe gilt je Text und Sitzung.) Der Stift im Platzhalter eines teuren Blocks (Opus-Delta-Check 2026-11-05, Befund 1): das Panel zeichnet den Text nicht von selbst, sondern zeigt einen Platzhalter mit „Show“; der Klick zeichnet die Vorschau
+ * und gibt den Text frei, danach zeichnet auch der Block ohne weiteren Klick (gemeinsamer Zustand im Wächter).
+ */
+async function punktPanelTeuerBraucht(): Promise<void> {
+  await lauf("panel-teurer-text-braucht-klick", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await setPluginSetting(cdp, PLUGIN_ID, "autoShow", true);
+    await cdp.evaluate(`${PLUGIN_MARKEN}.write([]); return true;`);
+    await schreibe("Teuer.md", `# Teuer\n\n\`\`\`svg-studio\n${kostenSvg(720, 500)}\n\`\`\`\n`);
+    if (!(await openExisting(cdp, "Teuer.md", "preview"))) throw new Vorbedingung("Teuer.md rendert nicht");
+    const block = (): Promise<{ imgs: number; held: string | null } | null> => pollUntil(cdp, `
+      const b = document.querySelector(".markdown-preview-view .svg-studio-block"); if (!b) return null;
+      const h = b.querySelector(".svg-studio-held p"); return { imgs: b.querySelectorAll("img.svg-studio-img").length, held: h ? h.innerText : null };`, 8000, 250);
+    const erst = await block();
+    const stift = `document.querySelector(".markdown-preview-view .svg-studio-block > .svg-studio-edit")`;
+    const gestiftet = await klick(stift);
+    const ziel = await warteSnap((x) => /Teuer\.md:\d+/.test(x.target ?? ""), 8000);
+    const panel = (): Promise<{ held: string | null; knopf: string | null; stage: number } | null> => pollUntil(cdp, `
+      const p = document.querySelector(".svg-studio-panel"); if (!p) return null;
+      const h = p.querySelector(".svg-studio-held p"); const k = p.querySelector(".svg-studio-held button.svg-studio-show");
+      return h ? { held: h.innerText, knopf: k ? k.innerText : null, stage: p.querySelectorAll(".svg-studio-stage").length } : null;`, 8000, 250);
+    const imPanel = await panel();
+    const geklickt = await klick(`document.querySelector(".svg-studio-panel .svg-studio-held button.svg-studio-show")`);
+    const gezeichnet = await pollUntil<boolean>(cdp, `const st = document.querySelector(".svg-studio-panel .svg-studio-stage"); return st && st.shadowRoot && st.shadowRoot.querySelector("svg") ? true : null;`, 8000, 250);
+    // Gemeinsamer Zustand: der Block derselben Notiz zeichnet nach dem Neuaufbau ohne Klick.
+    await oeffneNotizNeu("Teuer.md");
+    const danach = await block();
+    record("panel-teurer-text-braucht-klick",
+      erst !== null && erst.imgs === 0 && erst.held !== null && gestiftet && ziel !== null
+      && imPanel !== null && imPanel.stage === 0 && imPanel.knopf === "Show" && /the preview is shown only after a click/.test(imPanel.held ?? "")
+      && geklickt && gezeichnet === true
+      && danach !== null && danach.imgs === 1 && danach.held === null,
+    `Block ${q(erst)} · Stift (${String(gestiftet)}) → Ziel ${q(ziel?.target)} · Panel ${q(imPanel)} · nach „Show“ (Klick ${String(geklickt)}) gezeichnet: ${String(gezeichnet)} · Block danach ${q(danach)}`);
+  });
+}
+
+/** Eine andere Notiz und dann die genannte öffnen, damit der Block sicher neu gerendert wird. */
+async function oeffneNotizNeu(pfad: string): Promise<void> {
+  if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md rendert nicht");
+  if (!(await openExisting(cdp, pfad, "preview"))) throw new Vorbedingung(`${pfad} rendert nicht`);
 }
 
 /**
@@ -1826,6 +1871,7 @@ async function main(): Promise<void> {
     await punktBlock();
     await punktLaufzeitSchutz();
     await punktBomUndKosten();
+    await punktPanelTeuerBraucht();
     await punktEinbettung();
     await punktKnopfOeffnetPanel();
     await punktSchnappschuss();

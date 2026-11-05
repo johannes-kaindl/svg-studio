@@ -4,7 +4,9 @@ import { diffSvg } from "../../src/core/diff";
 import type { Problem } from "../../src/core/problem";
 import { addRound, decide, type SvgRound, type SvgSession } from "../../src/core/session";
 import { initStrings, panelStrings } from "../../src/i18n/strings";
+import type { RenderGuard } from "../../src/obsidian/render-guard";
 import { renderReview } from "../../src/obsidian/panel/review";
+import { MID_COST_SVG } from "../helpers/costly-svg";
 import { runSvgPrompt } from "../../src/obsidian/panel/run";
 import { buildPanelShell, type ChangesCtx, type PanelDeps, type PanelShell, type RunIo } from "../../src/obsidian/panel/shell";
 import { freshSession, svgSlots } from "../../src/obsidian/panel/slots";
@@ -36,7 +38,7 @@ const open = (startText: string | null): SvgSession => ({ target: startText === 
 const withRound = (): SvgSession => ok(addRound(open(BASE), { art: "prompt", instruction: "größer", basedOn: null, body: entriesOf(BASE, ANSWER) }));
 
 // ---- Ohne Shell: die Prüfliste mit einem Kontext, der die Sitzung hält ------------------------------------------------------------
-function harness(start: SvgSession, o: { busy?: boolean; busyNow?: () => boolean; comment?: (initial: string) => Promise<string | null>; track?: (destroy: () => void) => void } = {}) {
+function harness(start: SvgSession, o: { renderGuard?: RenderGuard; busy?: boolean; busyNow?: () => boolean; comment?: (initial: string) => Promise<string | null>; track?: (destroy: () => void) => void } = {}) {
   let session = start;
   const host = document.body.createDiv();
   const statuses: string[] = [];
@@ -49,7 +51,7 @@ function harness(start: SvgSession, o: { busy?: boolean; busyNow?: () => boolean
   };
   function draw(): void {
     host.empty();
-    renderReview(host, activeRound(session.rounds), session, ctx, { background: BG, ...(o.track === undefined ? {} : { track: o.track }), jump: (id) => { jumps.push(id); }, ...(o.comment === undefined ? {} : { comment: o.comment }) });
+    renderReview(host, activeRound(session.rounds), session, ctx, { background: BG, ...(o.renderGuard === undefined ? {} : { renderGuard: o.renderGuard }), ...(o.track === undefined ? {} : { track: o.track }), jump: (id) => { jumps.push(id); }, ...(o.comment === undefined ? {} : { comment: o.comment }) });
   }
   draw();
   const cards = (): HTMLElement[] => [...host.querySelectorAll<HTMLElement>(".okit-review-card")];
@@ -292,6 +294,26 @@ describe("Prüfliste: Runde „ganzes Bild“", () => {
     expect(host.querySelectorAll(".svg-studio-stage-wrap")).toHaveLength(2);
     slots.dispose?.();
     expect(host.querySelectorAll(".svg-studio-stage-wrap")).toHaveLength(0);
+  });
+
+  it("ein teurer Text in einer Vergleichszelle: Platzhalter mit „Show“, der Klick gibt ihn frei (auch für andere Ansichten) und zeichnet die Zelle; die andere Zelle wird gezeichnet", () => {
+    const freed = new Set<string>();
+    const log: string[] = [];
+    const renderGuard: RenderGuard = {
+      isMarked: () => false, clear: () => undefined, dispose: () => undefined,
+      released: (text) => freed.has(text), release: (text) => { freed.add(text); log.push("release"); },
+      begin: () => ({ settle: () => undefined, abort: () => undefined }),
+    };
+    const h = harness(whole("prompt", MID_COST_SVG), { renderGuard });
+    const cells = [...h.cards()[0]!.querySelectorAll(".svg-studio-compare-cell")];
+    expect(cells[0]!.querySelector(".svg-studio-stage")).toBeNull();
+    expect(cells[0]!.querySelector(".svg-studio-compare-none")!.textContent).toMatch(/expensive to draw \(about \d+ % of the allowed cost\), so the preview is shown only after a click\./);
+    expect(cells[1]!.querySelector(".svg-studio-stage")).not.toBeNull();
+    cells[0]!.querySelector<HTMLButtonElement>("button.svg-studio-show")!.click();
+    expect(log).toEqual(["release"]);
+    expect(freed.has(MID_COST_SVG)).toBe(true);
+    expect(cells[0]!.querySelector(".svg-studio-stage")).not.toBeNull();
+    expect(cells[0]!.querySelector("button.svg-studio-show")).toBeNull();
   });
 
   it("Reparatur: „Repair: whole image“; ist der Ausgang kaputt, steht bei Vorher der Hinweis statt einer Vorschau", () => {

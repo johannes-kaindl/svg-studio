@@ -10,6 +10,7 @@ import { canonDocument } from "./canon";
 import { diffSvg, type DiffResult } from "./diff";
 import { scanElements } from "./elements";
 import { assignMissingIds, ensureUnit } from "./format";
+import { costEstimate } from "./guard-problem";
 
 export const COMMON_SYSTEM: string = [
   "Du bist ein Zeichenwerkzeug und schreibst SVG-Code für Obsidian-Notizen. Du antwortest ausschließlich mit dem verlangten Ergebnis, ohne Einleitung, ohne Erklärung, ohne Markdown-Zaun (kein ```), ohne Gedankenprotokoll in der Antwort.",
@@ -125,13 +126,13 @@ export interface RefineValue {
 
 const NO_SVG = "Die Antwort enthält kein <svg>…</svg>.";
 
-/** Zusatz für das Modell, wenn der Bereiniger `too-costly` meldet (code-kit 0.58.0: das SVG ist klein und wohlgeformt, würde aber die Anzeige einfrieren). */
+/** Zusatz für das Modell, wenn der Bereiniger `too-costly` wegen der Zeichenkosten meldet (nicht bei einer Mengengrenze: ein größeres Dokument wird nicht durch weniger Masken kleiner) (code-kit 0.58.0: das SVG ist klein und wohlgeformt, würde aber die Anzeige einfrieren). */
 export const COST_HINT = "Das SVG ist zu aufwendig zu zeichnen; nimm weniger verschachtelte Masken, Marker, Filter und Weichzeichner.";
 
 /** Der Satz für das Modell zu den Befunden des Bereinigers (Rückfrage und Reparatur). */
 export function guardProblemsLine(problems: ReadonlyArray<{ code: string; detail: string }>): string {
   const list = problems.map((p) => `${p.code}: ${p.detail}`).join("; ");
-  return `Der Bereiniger lehnt ab: ${list}.${problems.some((p) => p.code === "too-costly") ? ` ${COST_HINT}` : ""}`;
+  return `Der Bereiniger lehnt ab: ${list}.${problems.some((p) => costEstimate(p) !== null) ? ` ${COST_HINT}` : ""}`;
 }
 
 /** Gemeinsame Prüfung: SVG finden, wohlgeformt, vom Bereiniger angenommen. Liefert das SVG oder das Problem (deutsch, geht ans Modell). */

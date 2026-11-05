@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { installObsidianDom } from "../helpers/obsidian-dom";
 import { CLICK_COST, COST_LIMIT } from "../../src/core/render-guard";
 import { initStrings, t } from "../../src/i18n/strings";
+import { MID_COST_SVG } from "../helpers/costly-svg";
 import { renderSvgBlock } from "../../src/obsidian/render-block";
 import { base64ToBytes } from "../../src/vendor/kit/data-url";
 import { checkSvg } from "../../src/vendor/kit/svg-guard";
@@ -31,7 +32,7 @@ describe("renderSvgBlock", () => {
     expect(el.querySelector("img")).toBeNull();
     const items = [...el.querySelectorAll(".svg-studio-error li")].map((li) => li.textContent ?? "");
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatch(/^too-costly: this SVG would take too long to draw \(estimated render cost \d+ exceeds the limit of 1000000/);
+    expect(items[0]).toMatch(/^too-costly: this SVG would take too long to draw \(about \d+(\.\d)? times the allowed cost\)\. /);
     expect(items[0]).toContain("fewer nested masks, markers or filters");
   });
 
@@ -104,11 +105,14 @@ describe("renderSvgBlock", () => {
     const fakeGuard = (marked: boolean) => {
       const log: string[] = [];
       let isMarked = marked;
+    const freed = new Set<string>();
       return {
         log,
         guard: {
           isMarked: () => isMarked,
-          clear: () => { isMarked = false; log.push("clear"); },
+          clear: (text?: string) => { isMarked = false; if (text !== undefined) freed.add(text); log.push("clear"); },
+          released: (text: string) => freed.has(text),
+          release: (text: string) => { freed.add(text); log.push("release"); },
         dispose: () => undefined,
           begin: (_text: string, _win: Window) => {
             log.push("begin");
@@ -200,12 +204,7 @@ describe("renderSvgBlock", () => {
     // Klick-zum-Rendern nach Kostenwert (code-kit 0.58.0, `cost` im ok-Ergebnis): ab `clickCost` Platzhalter, erst der Klick zeichnet; die Marke fällt, es wurde nichts gezeichnet.
     describe("Kostenschwelle", () => {
       const cost = (svg: string): number => { const r = checkSvg(svg); if (!r.ok) throw new Error("erwartet ok"); return r.cost; };
-      /** Eine Polylinie mit `marker-mid` und einem Marker aus Kreisen: der Kostenwert wächst mit Punkten × Kreisen. */
-      const MID = (() => {
-        const pts = Array.from({ length: 700 }, (_, i) => `${i % 100},${(i * 7) % 100}`).join(" ");
-        const dots = Array.from({ length: 500 }, (_, i) => `<circle cx="${i % 10}" cy="${Math.floor(i / 10) % 10}" r="0.2"/>`).join("");
-        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><marker id="m" markerWidth="10" markerHeight="10">${dots}</marker></defs><polyline points="${pts}" fill="none" stroke="black" marker-mid="url(#m)"/></svg>`;
-      })();
+      const MID = MID_COST_SVG;
       const run = (src: string, extra: Partial<Parameters<typeof renderSvgBlock>[2]> = {}) => {
         const f = fakeGuard(false);
         const el = document.createElement("div");
@@ -230,13 +229,22 @@ describe("renderSvgBlock", () => {
         (el.querySelector("button.svg-studio-show") as HTMLElement).click();
         expect(el.querySelector("img.svg-studio-img")).not.toBeNull();
         expect(el.querySelector(".svg-studio-held")).toBeNull();
-        expect(f.log).toEqual(["begin", "abort", "begin", "settle"]);
+        expect(f.log).toEqual(["begin", "abort", "release", "begin", "settle"]);
       });
 
       it("knapp unter der Schwelle wird gezeichnet, genau auf der Schwelle nicht (Grenzwert zählt zum Platzhalter)", () => {
         const c = cost(MID);
         expect(run(MID, { clickCost: c + 1 }).result).toBe("image");
         expect(run(MID, { clickCost: c }).result).toBe("held");
+      });
+
+      it("die Freigabe gilt für denselben Text auch in einem zweiten Block (gemeinsamer Zustand im Wächter), nicht für einen anderen", () => {
+        const f = fakeGuard(false);
+        const mkBlock = (src: string) => renderSvgBlock(src, document.createElement("div"), { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard });
+        expect(mkBlock(MID)).toBe("held");
+        f.guard.release(MID);
+        expect(mkBlock(MID)).toBe("image");
+        expect(mkBlock(MID.replace("0.2", "0.3"))).toBe("held");
       });
 
       it("ein billiges Bild bleibt ein Bild (keine Marke weniger, kein Platzhalter)", () => {

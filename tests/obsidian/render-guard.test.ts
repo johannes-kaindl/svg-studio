@@ -459,3 +459,25 @@ describe("createRenderGuard: Wächter nach dem Setzen der Marke", () => {
     expect(store.marks).toEqual([]);
   });
 });
+
+describe("Freigabe (Klick-zum-Rendern)", () => {
+  it("release merkt den Text, nur diesen und nur im Speicher dieser Sitzung", () => {
+    const store = memStore();
+    const g = createRenderGuard(store, () => 0, "s1");
+    expect(g.released(SVG)).toBe(false);
+    g.release(SVG);
+    expect(g.released(SVG)).toBe(true);
+    expect(g.released(OTHER)).toBe(false);
+    expect(createRenderGuard(store, () => 0, "s2").released(SVG)).toBe(false);
+    expect(store.marks).toEqual([]);
+  });
+
+  it("clear („Trotzdem anzeigen“) löscht die Marke und gibt den Text auch für die Kostenschwelle frei", () => {
+    const store = memStore();
+    store.marks = [{ fp: "x", at: 1, session: "alt" }];
+    const g = createRenderGuard(store, () => 0, "s1");
+    g.clear(SVG);
+    expect(g.released(SVG)).toBe(true);
+  });
+});
+

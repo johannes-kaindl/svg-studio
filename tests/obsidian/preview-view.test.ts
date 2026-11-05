@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installObsidianDom } from "../helpers/obsidian-dom";
 import type { BackgroundState } from "../../src/core/background";
 import { initStrings } from "../../src/i18n/strings";
+import { MID_COST_SVG } from "../helpers/costly-svg";
 import { renderPreviewView, type Selection } from "../../src/obsidian/panel/preview-view";
 
 installObsidianDom();
@@ -149,7 +150,10 @@ describe("renderPreviewView: Absturzmarke", () => {
   const guard = (marked: boolean) => {
     const log: string[] = [];
     let isMarked = marked;
-    return { log, guard: { isMarked: () => isMarked, clear: () => { isMarked = false; log.push("clear"); },
+    const freed = new Set<string>();
+    return { log, guard: { isMarked: () => isMarked, clear: (text?: string) => { isMarked = false; if (text !== undefined) freed.add(text); log.push("clear"); },
+          released: (text: string) => freed.has(text),
+          release: (text: string) => { freed.add(text); log.push("release"); },
         dispose: () => undefined, begin: () => { log.push("begin"); return { settle: () => { log.push("settle"); }, abort: () => { log.push("abort"); } }; } } };
   };
   const mount = (g: ReturnType<typeof guard>["guard"]) => {
@@ -186,5 +190,36 @@ describe("renderPreviewView: Absturzmarke", () => {
     const { host } = mount(g.guard);
     expect(host.querySelector(".svg-studio-held")).toBeNull();
     expect(g.log[0]).toBe("begin");
+  });
+
+  const mountText = (g: ReturnType<typeof guard>["guard"], text: string) => {
+    const host = document.body.createDiv();
+    const bg: BackgroundState = { on: true, tone: "light", hex: "#ffffff" };
+    const selection: Selection = { id: null, text: null };
+    const view = renderPreviewView(host, text, { background: { get: () => bg, set: () => undefined }, renderGuard: g }, selection);
+    return { host, view, selection };
+  };
+
+  it("teurer Text: Platzhalter mit Hinweis und „Show“, kein Bild; der Klick gibt den Text frei (release, nicht clear) und zeichnet", () => {
+    const g = guard(false);
+    const { host, view, selection } = mountText(g.guard, MID_COST_SVG);
+    expect(host.querySelector(".svg-studio-held p")?.textContent).toMatch(/^This SVG is expensive to draw \(about \d+ % of the allowed cost\), so the preview is shown only after a click\.$/);
+    expect(host.querySelector(".svg-studio-stage")).toBeNull();
+    expect(host.querySelector("button.svg-studio-show")?.textContent).toBe("Show");
+    expect(g.log).toEqual(["begin", "abort"]);
+    host.querySelector<HTMLButtonElement>("button.svg-studio-show")!.click();
+    expect(g.log.slice(2, 4)).toEqual(["release", "begin"]);
+    expect(host.querySelector(".svg-studio-held")).toBeNull();
+    expect(host.querySelector<HTMLElement>(".svg-studio-stage")?.shadowRoot?.querySelector("svg")).not.toBeNull();
+    view.select("m");
+    expect(selection.id).toBe("m");
+  });
+
+  it("schon freigegeben (Klick im Block): die Vorschau zeichnet sofort, kein Platzhalter", () => {
+    const g = guard(false);
+    g.guard.release(MID_COST_SVG);
+    const { host } = mountText(g.guard, MID_COST_SVG);
+    expect(host.querySelector(".svg-studio-held")).toBeNull();
+    expect(host.querySelector<HTMLElement>(".svg-studio-stage")?.shadowRoot?.querySelector("svg")).not.toBeNull();
   });
 });

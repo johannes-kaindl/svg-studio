@@ -50,8 +50,8 @@ describe("bestandProblems", () => {
   });
 
   it("repairProblem: bei too-costly mit dem Hinweis für das Modell", () => {
-    const b = { parse: null, guard: [{ code: "too-costly" as const, detail: "d" }], unnamed: 0, editorMetadata: false };
-    expect(repairProblem(b)).toBe("Der Bereiniger lehnt ab: too-costly: d. Das SVG ist zu aufwendig zu zeichnen; nimm weniger verschachtelte Masken, Marker, Filter und Weichzeichner.");
+    const b = { parse: null, guard: [{ code: "too-costly" as const, detail: "estimated render cost 2000000 exceeds the limit of 1000000" }], unnamed: 0, editorMetadata: false };
+    expect(repairProblem(b)).toBe("Der Bereiniger lehnt ab: too-costly: estimated render cost 2000000 exceeds the limit of 1000000. Das SVG ist zu aufwendig zu zeichnen; nimm weniger verschachtelte Masken, Marker, Filter und Weichzeichner.");
   });
 
   it("repairProblem: ohne Parserfehler die Bereiniger-Befunde", () => {
@@ -359,6 +359,16 @@ describe("renderBestandNotice: keine Reparatur für zu große SVGs", () => {
       expect(host.textContent).toContain(code);
       expect(host.querySelector("button")).toBeNull();
     }
+  });
+  it("too-costly wegen einer Mengengrenze (riesiges Stilblatt): kein Knopf; wegen der Kostenschätzung: der Knopf bleibt", async () => {
+    const { renderBestandNotice } = await import("../../src/obsidian/panel/bestand");
+    const mk = (detail: string) => {
+      const host = document.createElement("div");
+      renderBestandNotice(host, { parse: null, guard: [{ code: "too-costly", detail }], unnamed: 0, editorMetadata: false }, actions, false);
+      return host;
+    };
+    expect(mk("the style sheets have 303889 characters, the limit is 250000").querySelector("button")).toBeNull();
+    expect(mk("estimated render cost 2000000 exceeds the limit of 1000000 (about 2000 ms)").querySelector("button")).not.toBeNull();
   });
   it("ein anderer Befund (parse-error) behält den Knopf", async () => {
     const { renderBestandNotice } = await import("../../src/obsidian/panel/bestand");

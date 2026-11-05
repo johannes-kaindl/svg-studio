@@ -29,8 +29,12 @@ export interface RenderGuard {
   isMarked(text: string): boolean;
   /** Marke setzen, BEVOR das Bild eingesetzt wird; der Speicher stößt das dauerhafte Schreiben sofort an, die Marke steht, auch wenn der Hauptthread danach hängt. */
   begin(text: string, win: GuardWindow): RenderTicket;
-  /** Marke löschen („Trotzdem anzeigen“). */
+  /** Marke löschen („Trotzdem anzeigen“); ein Klick gilt auch als Freigabe für die Kostenschwelle. */
   clear(text: string): void;
+  /** Hat der Nutzer diesen Text in dieser Sitzung freigegeben (Klick auf „Anzeigen“ im Block, im Panel oder in einer Vergleichszelle)? Block, Vorschau und Vergleich teilen den Zustand. */
+  released(text: string): boolean;
+  /** Freigabe merken: der teure Text wird bis zum Neustart von Obsidian ohne weiteren Klick gezeichnet. */
+  release(text: string): void;
   /** Alle laufenden Tickets beenden (Plugin wird entladen); ein offener Hänger macht die Marke `slow`, sonst fällt sie. */
   dispose(): void;
 }
@@ -54,10 +58,14 @@ export function createRenderGuard(
   const inflight = new Map<string, number>();
   /** Die Abbruchfunktionen der laufenden Tickets (für `dispose`). */
   const running = new Set<() => void>();
+  /** Fingerabdrücke der Texte, die der Nutzer in dieser Sitzung freigegeben hat (nur im Speicher, nach einem Neustart fragt die Schwelle wieder). */
+  const freed = new Set<string>();
   return {
+    released: (text) => freed.has(sha256HexUtf8(text)),
+    release: (text) => { freed.add(sha256HexUtf8(text)); },
     dispose() { for (const end of [...running]) end(); },
     isMarked: (text) => isBlocked(store.read(), sha256HexUtf8(text), session, wall()),
-    clear: (text) => { store.write(removeMark(store.read(), sha256HexUtf8(text))); },
+    clear: (text) => { freed.add(sha256HexUtf8(text)); store.write(removeMark(store.read(), sha256HexUtf8(text))); },
     begin(text, win) {
       const fp = sha256HexUtf8(text);
       inflight.set(fp, (inflight.get(fp) ?? 0) + 1);

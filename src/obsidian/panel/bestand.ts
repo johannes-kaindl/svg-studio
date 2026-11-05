@@ -5,6 +5,7 @@ import { applyChanges } from "../../core/changes";
 import { stripEditorMetadata } from "../../core/editor-metadata";
 import { scanElements } from "../../core/elements";
 import { guardProblemsLine } from "../../core/protocol";
+import { isSizeLimit } from "../../core/guard-problem";
 import { canRefine } from "../../core/session";
 import { guardProblemText, problemText, t } from "../../i18n/strings";
 import type { SvgProblem, checkSvg } from "../../vendor/kit/svg-guard";
@@ -70,8 +71,9 @@ export function renderBestandNotice(host: HTMLElement, b: BestandProblems, a: Be
   if (b.parse !== null) {
     card(plain(t("bestand.unusable", problemText({ code: "text-unreadable", params: [b.parse.message, b.parse.offset] }))), t("bestand.repair"), t("bestand.repair.hint"), a.repair);
   } else if (b.guard.length > 0) {
-    // Ein SVG über der Größengrenze ginge ganz ans Modell (über 1 MB) und käme nicht zurück: keine Reparatur anbieten (Opus-Gesamtreview 2026-11-05, Befund 9).
-    const tooBig = b.guard.some((p) => p.code === "too-large" || p.code === "too-many-elements");
+    // Ein SVG über der Größengrenze ginge ganz ans Modell (über 1 MB) und käme nicht zurück: keine Reparatur anbieten (Opus-Gesamtreview 2026-11-05, Befund 9). Dasselbe für `too-costly` wegen einer
+    // Mengengrenze (riesiges Stilblatt, Wert oder Verweisliste; Opus-Delta-Check 2026-11-05, Befund 5): ein Modell macht daraus kein kleineres Bild. Eine Kostenschätzung ist dagegen reparierbar.
+    const tooBig = b.guard.some((p) => p.code === "too-large" || p.code === "too-many-elements" || isSizeLimit(p));
     card((box) => {
       box.createDiv({ text: t("bestand.unusableHead") });
       const list = box.createEl("ul", { cls: "svg-studio-notice-list" });

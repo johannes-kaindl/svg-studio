@@ -72,9 +72,10 @@ export function renderSvgBlock(source: string, el: HTMLElement, o: RenderBlockOp
   const checked = o.guard(source);
   if (checked.ok) {
     // Nahe der Kostengrenze erst nach einem Klick (der Kostenwert ist erst nach dem Bereiniger bekannt); die Marke fällt wieder, es wurde nichts gezeichnet.
-    if (o.forced !== true && checked.cost >= (o.clickCost ?? CLICK_COST)) {
+    // Eine Freigabe im Panel oder in einem anderen Block mit demselben Text gilt auch hier (gleicher Zustand im Wächter).
+    if (o.forced !== true && o.marks?.released(source) !== true && checked.cost >= (o.clickCost ?? CLICK_COST)) {
       ticket?.abort();
-      return hold(o.t("block.costly", Math.round((checked.cost / COST_LIMIT) * 100)), o.t("block.show"), () => undefined);
+      return hold(o.t("block.costly", Math.round((checked.cost / COST_LIMIT) * 100)), o.t("block.show"), () => { o.marks?.release(source); });
     }
     const title = checked.svg.querySelector(":scope > title")?.textContent?.trim();
     const alt = title !== undefined && title !== "" ? title : o.t("block.alt");

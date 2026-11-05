@@ -8,6 +8,7 @@
 // keinen Kommentar, deshalb zeichnet dieses Modul ihn selbst. Eine Runde „ganzes Bild“ speichert nur den Zustand: dort entfällt die Taste.
 import { backgroundColor } from "../../core/background";
 import { describeEntry } from "../../core/diff-labels";
+import { COST_LIMIT } from "../../core/render-guard";
 import type { Problem } from "../../core/problem";
 import { diffSvg } from "../../core/diff";
 import { baseTextOfRound, decide, type Decision, type SvgRound, type SvgSession } from "../../core/session";
@@ -171,14 +172,29 @@ function renderCompare(parent: HTMLElement, before: string, after: string, d: Re
   for (const [label, text] of [[t("review.before"), before], [t("review.after"), after]] as const) {
     const cell = grid.createDiv({ cls: "svg-studio-compare-cell" });
     cell.createDiv({ cls: "svg-studio-compare-label", text: label });
-    const preview = buildPreview(cell, { guard: checkSvg, onSelect: () => undefined, ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }) });
-    d.track?.(() => { preview.destroy(); });
-    if (preview.show(text).ok) preview.setBackground(backgroundColor(d.background.get()));
-    else {
-      preview.destroy();
-      cell.createDiv({ cls: "svg-studio-compare-none", text: t("review.notShown") });
-    }
+    drawCell(cell, text, d);
   }
+}
+
+/** Eine Zelle: die Vorschau, bei einem teuren Text zuerst ein Platzhalter mit „Anzeigen“ (die Freigabe gilt für denselben Text im Block und in der Vorschau des Panels), bei einem abgelehnten der Hinweis. */
+function drawCell(cell: HTMLElement, text: string, d: ReviewDeps): void {
+  const preview = buildPreview(cell, { guard: checkSvg, onSelect: () => undefined, ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }) });
+  d.track?.(() => { preview.destroy(); });
+  const shown = preview.show(text);
+  if (shown.ok) { preview.setBackground(backgroundColor(d.background.get())); return; }
+  preview.destroy();
+  if (shown.costly !== undefined) {
+    const held = cell.createDiv({ cls: "svg-studio-compare-none" });
+    held.createSpan({ text: `${t("preview.costly", Math.round((shown.costly / COST_LIMIT) * 100))} ` });
+    const button = held.createEl("button", { cls: "svg-studio-show", text: t("block.show"), attr: { type: "button" } });
+    button.addEventListener("click", () => {
+      d.renderGuard?.release(text);
+      held.remove();
+      drawCell(cell, text, d);
+    });
+    return;
+  }
+  cell.createDiv({ cls: "svg-studio-compare-none", text: t("review.notShown") });
 }
 
 /** Eine Regelrunde: was die Regel ändert, als Redline-Zeilen (ohne Annehmen und Ablehnen: die Regel gilt ganz, verworfen wird die Runde). */
