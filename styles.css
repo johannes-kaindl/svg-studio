@@ -539,6 +539,8 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
   display: block;
   max-width: 100%;
   height: auto;
+  /* Eigene Ebene: der Knopf darüber blendet beim Überfahren ein, und ohne eigene Ebene zeichnet Chromium das teure Bild dafür neu (Opus-Review 2026-11-05: Lücke 625–754 ms, mit will-change keine). */
+  will-change: transform;
 }
 
 .svg-studio-block > .svg-studio-edit,

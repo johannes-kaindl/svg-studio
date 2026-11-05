@@ -17,6 +17,8 @@ export interface RenderBlockOptions {
   marks?: RenderGuard;
   /** Einstellung „SVG in Notizen automatisch anzeigen“ (Notausschalter); Vorgabe an. Aus: erst nach Klick. */
   autoShow?: () => boolean;
+  /** Der Block meldet hier eine Aufräum-Funktion an, die beim Abbau des Blocks (Notizwechsel, erneutes Rendern) läuft: sie beendet den Wächter der Absturzmarke. */
+  onDispose?: (cleanup: () => void) => void;
 }
 
 /** Ein Knopf mit Icon und zugänglichem Namen; `createEl` am Elternknoten erzeugt ihn im Dokument des Elternknotens (auch in einem Popout-Fenster). */
@@ -55,6 +57,7 @@ export function renderSvgBlock(source: string, el: HTMLElement, o: RenderBlockOp
       const ticket = o.marks?.begin(source, win);
       img.addEventListener("load", () => { ticket?.settle(); });
       img.addEventListener("error", () => { ticket?.abort(); });
+      if (ticket !== undefined) o.onDispose?.(() => { ticket.abort(); });
       img.setAttribute("src", binaryToDataUrl(new TextEncoder().encode(source), "svg"));
       iconButton(wrap, "svg-studio-edit", "pencil", o.t("block.edit"), o.onEdit);
     };

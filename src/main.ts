@@ -1,4 +1,4 @@
-import { getLanguage, MarkdownView, Notice, Plugin, type TFile } from "obsidian";
+import { getLanguage, MarkdownRenderChild, MarkdownView, Notice, Plugin, type TFile } from "obsidian";
 import { DEFAULT_SETTINGS, loadSettings, type SvgStudioSettings } from "./core/settings";
 import { getLang, initStrings, t } from "./i18n/strings";
 import type { SvgSession } from "./core/session";
@@ -128,7 +128,7 @@ export default class SvgStudioPlugin extends Plugin {
         if (tg === null) new Notice(t("notice.noTarget"));
         else void this.openPanel(tg);
       };
-      renderSvgBlock(source, el, { guard: checkSvg, onEdit: open, onRepair: open, t, marks: this.renderGuard, autoShow: () => this.settings.autoShow });
+      renderSvgBlock(source, el, { guard: checkSvg, onEdit: open, onRepair: open, t, marks: this.renderGuard, autoShow: () => this.settings.autoShow, onDispose: (cleanup) => { const child = new MarkdownRenderChild(el); child.onunload = cleanup; ctx.addChild(child); } });
     });
 
     installEmbedButtons(this, {

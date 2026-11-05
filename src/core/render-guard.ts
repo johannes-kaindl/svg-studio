@@ -1,7 +1,11 @@
 // Absturzmarken (Task „Laufzeit-Schutz im Plugin“, Befund Plan 2 C3): ein statischer Zähler im Bereiniger wird nie vollständig, und der Notiz-Weg (`<img>` mit Data-URL)
-// blockiert den Hauptthread wie das Panel. Vor dem Rendern eines SVG steht eine Marke mit dem Fingerabdruck seines Textes; sie fällt, wenn das Bild gezeichnet ist.
-// Steht sie in einer späteren Sitzung noch (Obsidian eingefroren und beendet) oder dauerte das Zeichnen länger als `SLOW_MS` (Marke `slow`), zeigt das Plugin das Bild
-// nicht von selbst. Eine Marke aus der LAUFENDEN Sitzung ohne `slow` ist nur ein Bild, das gerade gezeichnet wird: ein zweiter Block mit demselben Text darf nicht wegen ihr ausbleiben.
+// blockiert den Hauptthread wie das Panel. Vor dem Rendern eines SVG steht eine Marke mit dem Fingerabdruck seines Textes. Sie fällt NICHT, wenn ein Ereignis feuert
+// (`load` und zwei Frames liegen bei Raster-Kosten vor dem Hänger, gemessen), sondern wenn der Hauptthread nach dem Setzen belegt reaktionsfähig war: ein Wächter mit
+// Timer-Takt misst die Lücken zwischen den Ticks. Eine Lücke über `SLOW_GAP_MS` macht die Marke zur `slow`-Marke; sie bleibt, auch wenn Obsidian sich erholt.
+// Steht eine Marke in einer späteren Sitzung noch (Obsidian eingefroren und beendet) oder ist sie `slow`, zeigt das Plugin das Bild nicht von selbst.
+// Geschützt: Hänger ab etwa 1 s, auf die ein Absturz oder hartes Beenden folgt (die Marke muss dann schon gespeichert sein: Chromium schreibt `localStorage` erst nach
+// etwa 5 s fest) und, als `slow`, jeder Hänger ab 1 s im selben Fenster der ersten Sekunden. Nicht geschützt: Hänger unter der Speicherzeit, bei denen der Nutzer einfach
+// wartet; ein Hänger, der erst nach `MAX_WATCH_MS` beginnt (CSS-Animation mit langer Verzögerung); das Neuzeichnen eines schon gezeigten Bildes. Eine Marke aus der LAUFENDEN Sitzung ohne `slow` ist nur ein Bild, das gerade gezeichnet wird: ein zweiter Block mit demselben Text darf nicht wegen ihr ausbleiben.
 // Pure: die Liste der Marken ist ein Wert; Lesen und Schreiben (App-lokaler Speicher) liegen in `src/obsidian/render-guard.ts`.
 
 export interface Mark {
@@ -17,8 +21,18 @@ export interface Mark {
 
 /** So viele Marken hält die Liste; die ältesten fallen heraus. */
 export const MAX_MARKS = 50;
-/** Dauert das Zeichnen länger, bleibt die Marke stehen, auch wenn Obsidian wieder reagiert: gemessene Last-Klassen des Bereinigers beginnen bei 1,5 s. */
+/** Kommt `load` später als so viele ms nach dem Setzen der Marke (Stilkosten vor dem Laden), ist das Bild sofort `slow`. */
 export const SLOW_MS = 1500;
+/** Takt des Wächters. */
+export const TICK_MS = 250;
+/** Ein Tick, der mehr als so viele ms später kommt als geplant, war ein Hänger: die Marke wird `slow`. */
+export const SLOW_GAP_MS = 1000;
+/** Eine Verspätung über dieser Grenze (aber unter `SLOW_GAP_MS`) ist keine Ruhe: das Ruhefenster beginnt neu. */
+export const CALM_GAP_MS = 300;
+/** So lange muss der Hauptthread ruhig bleiben, bevor die Marke fällt (die gemessenen Hänger beginnen innerhalb von 100 ms nach dem Setzen). */
+export const CALM_MS = 2000;
+/** Länger wird nicht gewartet: danach fällt die Marke auch ohne Ruhe (Obsidian war nur beschäftigt). */
+export const MAX_WATCH_MS = 15000;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 

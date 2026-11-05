@@ -158,6 +158,17 @@ describe("renderSvgBlock", () => {
       expect(render(fakeGuard(false).guard, () => true).result).toBe("image");
     });
 
+    it("onDispose: der Block meldet eine Aufräum-Funktion an, die den Wächter beendet (Notizwechsel)", () => {
+      const f = fakeGuard(false);
+      let cleanup: (() => void) | null = null;
+      const el = document.createElement("div");
+      renderSvgBlock(OK, el, { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard, onDispose: (c) => { cleanup = c; } });
+      expect(cleanup).not.toBeNull();
+      const before = f.log.length;
+      (cleanup as unknown as () => void)();
+      expect(f.log.slice(before)).toEqual(["abort"]);
+    });
+
     it("ein abgelehntes SVG bleibt ein Fehlerkasten, mit oder ohne Marke und Notausschalter", () => {
       const el = document.createElement("div");
       const f = fakeGuard(true);

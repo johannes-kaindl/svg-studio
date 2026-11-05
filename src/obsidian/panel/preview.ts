@@ -64,6 +64,8 @@ svg { display: block; max-width: 100%; height: auto; }
   const base = shadow.appendChild(doc.createElementNS(SVG_NS, "style"));
   base.textContent = css;
   let svg: SVGSVGElement | null = null;
+  /** Der Wächter der Absturzmarke für den Baum, der gerade hängt; `clear`/`destroy` beenden ihn. */
+  let ticket: { abort: () => void } | undefined;
   let marked: Element | null = null;
 
   const withId = (id: string): SVGGraphicsElement[] => {
@@ -73,6 +75,8 @@ svg { display: block; max-width: 100%; height: auto; }
   };
 
   const clear = (): void => {
+    ticket?.abort();
+    ticket = undefined;
     marked = null;
     svg?.remove();
     svg = null;
@@ -117,9 +121,10 @@ svg { display: block; max-width: 100%; height: auto; }
       // Ein Element, das schon unseren Markennamen trägt, stammt nicht von uns (der Name ist zufällig, also nur ein Zufallstreffer): weg damit.
       for (const el of Array.from(svg.querySelectorAll(`[${mark}]`))) el.removeAttribute(mark);
       // Die Marke steht, BEVOR der Baum im Dokument hängt: Layout und Zeichnen folgen erst danach und können den Hauptthread blockieren.
-      const ticket = o.renderGuard?.begin(text, doc.defaultView ?? window);
+      const t = o.renderGuard?.begin(text, doc.defaultView ?? window);
+      ticket = t;
       shadow.appendChild(svg);
-      ticket?.settle();
+      t?.settle();
       return { ok: true };
     },
     select(id) {

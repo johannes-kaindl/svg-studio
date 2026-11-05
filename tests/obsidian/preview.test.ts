@@ -499,4 +499,14 @@ describe("buildPreview: Absturzmarke", () => {
   it("ohne Wächter wie bisher", () => {
     expect(build(undefined).handle.show(SVG)).toEqual({ ok: true });
   });
+
+  it("destroy und ein erneutes show beenden den Wächter des vorigen Baums (abort)", () => {
+    const f = fake(false);
+    const m = build(f.guard);
+    m.handle.show(SVG);
+    m.handle.show(SVG);
+    expect(f.log).toEqual(["begin", "settle", "abort", "begin", "settle"]);
+    m.handle.destroy();
+    expect(f.log.at(-1)).toBe("abort");
+  });
 });

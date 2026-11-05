@@ -23,6 +23,7 @@
  *
  * Typen: `npm run typecheck:test` (sieht `scripts/`).
  */
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -94,6 +95,7 @@ const PUNKTE = [
   "c4g-nichtzeichen-im-attribut",
   "laufzeit-marke-verhindert-wiederholung",
   "laufzeit-notausschalter",
+  "laufzeit-absturz-neustart",
   "pruefliste-kartenbeschriftung",
   "pruefliste-ablehnen",
   "pruefliste-annehmen",
@@ -598,6 +600,14 @@ const blockZustand = (): Promise<{ imgs: number; naturalWidth: number; held: str
     return { imgs: block.querySelectorAll("img.svg-studio-img").length, naturalWidth: img ? img.naturalWidth : 0, held: held ? held.innerText : null, knopf: knopf ? knopf.innerText : null, marken: Array.isArray(marken) ? marken.length : 0 };
   `, 8000, 250);
 
+/** Wartet, bis die Zahl der Marken im App-Speicher `n` ist (der Wächter löscht sie nach rund 2 s Ruhe), und liefert dann den Zustand des Blocks; `null` bei Zeitüberschreitung. */
+async function warteMarken(n: number, ms: number): Promise<Awaited<ReturnType<typeof blockZustand>>> {
+  const bis = Date.now() + ms;
+  let z = await blockZustand();
+  while (z !== null && z.marken !== n && Date.now() < bis) { await sleep(300); z = await blockZustand(); }
+  return z;
+}
+
 /** Eine andere Notiz und dann Block.md öffnen, damit der Block sicher neu gerendert wird (Zustand der Marke am Start). */
 async function oeffneBlockNeu(): Promise<void> {
   if (!(await openExisting(cdp, "Einbettung.md", "preview"))) throw new Vorbedingung("Einbettung.md rendert nicht");
@@ -613,11 +623,10 @@ async function punktLaufzeitSchutz(): Promise<void> {
     const quelle = blockQuelle(fixtur("Block.md"));
     const loescheMarken = (): Promise<unknown> => cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", null); return true;`);
     await loescheMarken();
-    // Gegenprobe ohne Marke: das Bild erscheint, und die Marke fällt wieder.
+    // Gegenprobe ohne Marke: das Bild erscheint, und die Marke fällt nach dem Ruhefenster des Wächters (rund 2 s) wieder.
     await oeffneBlockNeu();
     const ohne = await blockZustand();
-    await sleep(800);
-    const ohneNach = await blockZustand();
+    const ohneNach = await warteMarken(0, 8000);
     // Der Absturz-Zustand: eine Marke einer früheren Sitzung für genau diesen Block steht (wie nach einem eingefrorenen und beendeten Obsidian).
     const fp = createHash("sha256").update(quelle, "utf8").digest("hex");
     await cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", [{ fp: ${q(fp)}, at: Date.now(), session: "frueher" }]); return true;`);
@@ -625,15 +634,14 @@ async function punktLaufzeitSchutz(): Promise<void> {
     await oeffneBlockNeu();
     const mit = await blockZustand();
     const geklickt = await klick(`document.querySelector(".markdown-preview-view .svg-studio-block button.svg-studio-show")`);
-    await sleep(800);
-    const danach = await blockZustand();
+    const danach = await warteMarken(0, 8000);
     const gut = ohne !== null && ohne.imgs === 1 && ohne.naturalWidth > 0 && ohne.held === null
-      && ohneNach !== null && ohneNach.marken === 0
+      && ohneNach !== null && ohneNach.marken === 0 && ohneNach.imgs === 1
       && gesetzt
       && mit !== null && mit.imgs === 0 && mit.held !== null && mit.knopf !== null && mit.marken >= 1
       && geklickt
       && danach !== null && danach.imgs === 1 && danach.naturalWidth > 0 && danach.held === null && danach.marken === 0;
-    record("laufzeit-marke-verhindert-wiederholung", gut, `ohne Marke ${q(ohne)} → nach 0,8 s ${q(ohneNach)} · Marke gesetzt ${String(gesetzt)} · Neustart des Blocks ${q(mit)} · nach „Trotzdem anzeigen“ (Klick ${String(geklickt)}) ${q(danach)}`);
+    record("laufzeit-marke-verhindert-wiederholung", gut, `ohne Marke ${q(ohne)} → nach dem Ruhefenster ${q(ohneNach)} · Marke gesetzt ${String(gesetzt)} · Neustart des Blocks ${q(mit)} · nach „Trotzdem anzeigen“ (Klick ${String(geklickt)}) ${q(danach)}`);
   });
 
   await lauf("laufzeit-notausschalter", async () => {
@@ -645,14 +653,93 @@ async function punktLaufzeitSchutz(): Promise<void> {
       await oeffneBlockNeu();
       const aus = await blockZustand();
       const geklickt = await klick(`document.querySelector(".markdown-preview-view .svg-studio-block button.svg-studio-show")`);
-      await sleep(800);
-      const nach = await blockZustand();
+      const nach = await warteMarken(0, 8000);
       const gut = aus !== null && aus.imgs === 0 && aus.held !== null && aus.knopf !== null && aus.marken === 0 && geklickt && nach !== null && nach.imgs === 1 && nach.naturalWidth > 0 && nach.held === null;
       record("laufzeit-notausschalter", gut, `aus ${q(aus)} · nach „Anzeigen“ (Klick ${String(geklickt)}) ${q(nach)}`);
     } finally {
       await setzeAutoShow(true);
     }
   });
+}
+
+/** Ein SVG, das der Bereiniger 0.52.1 annimmt und dessen Stilauflösung den Hauptthread rund 27 s blockiert (1000 `:has()`-Regeln über 4800 Elemente, Messung des Opus-Reviews 2026-11-05, Chromium 153; unabhängig vom Raster-Backend). */
+function haengerSvg(): string {
+  const regeln = Array.from({ length: 1000 }, (_, i) => `rect:has(~ rect.c${String(i % 97)}):not(.z${String(i)}){fill:#${String((i % 9) + 1)}${String((i % 9) + 1)}0}`).join("\n");
+  const rects = Array.from({ length: 4800 }, (_, i) => `<rect class="c${String(i % 97)}" x="${String(i % 100)}" y="${String(Math.floor(i / 100))}" width="1" height="1" fill="#36c"/>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><style>${regeln}</style>${rects}</svg>`;
+}
+
+/** Laufzeit-Schutz, der Ernstfall: ein angenommenes SVG friert Obsidian ein, die Instanz wird hart beendet, nach dem Neustart zeichnet der Block nicht mehr, sondern bietet „Trotzdem anzeigen“. */
+async function punktAbsturzNeustart(): Promise<boolean> {
+  let neuGestartet = false;
+  await lauf("laufzeit-absturz-neustart", async () => {
+    const ud = process.env.UD ?? "";
+    if (!ud.startsWith("/tmp/obs-test-")) throw new Vorbedingung("nur über messlauf.sh (UD fehlt oder ist kein Wegwerfprofil)");
+    await raeume();
+    await stelleFixturenHer();
+    await setPluginSetting(cdp, PLUGIN_ID, "autoShow", true);
+    await cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", null); return true;`);
+    // Ein verdecktes Fenster zeichnet nicht, und dann hängt auch nichts: der Punkt braucht das Fenster vorn.
+    await requireVisible(cdp);
+    // Öffnen, ohne zu warten: der Renderer hängt danach (Stilauflösung rund 27 s).
+    await schreibe("Haenger.md", `# Hänger-Probe\n\n\`\`\`svg-studio\n${haengerSvg()}\n\`\`\`\n\nText nach dem Block.\n`);
+    // Vorprobe ohne Beenden: mit einer Marke einer früheren Sitzung darf der Hänger-Block den Renderer nicht einfrieren (nur der Platzhalter entsteht).
+    const fpHaenger = createHash("sha256").update(haengerSvg(), "utf8").digest("hex");
+    await cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", [{ fp: ${q(fpHaenger)}, at: Date.now(), session: "frueher" }]); return true;`);
+    await cdp.evaluate(`const f = app.vault.getAbstractFileByPath("Haenger.md"); setTimeout(() => { app.workspace.getLeaf("tab").openFile(f, { state: { mode: "preview" } }); }, 50); return true;`);
+    await sleep(3000);
+    const vorprobe = await Promise.race([cdp.evaluate<string>(`const b = document.querySelector(".markdown-preview-view .svg-studio-block"); return JSON.stringify({ imgs: b ? b.querySelectorAll("img").length : -1, held: b ? !!b.querySelector(".svg-studio-held") : null });`).catch((e) => `Fehler ${fehlerText(e)}`), sleep(8000).then(() => "keine Antwort in 8 s (Renderer hängt)")]);
+    console.log(`  Vorprobe (Marke einer früheren Sitzung gesetzt, Block geöffnet): ${vorprobe}`);
+    if (!vorprobe.includes('"held":true')) {
+      record("laufzeit-absturz-neustart", false, `schon die Vorprobe scheitert: mit einer fremden Marke zeigt der Hänger-Block keinen Platzhalter: ${vorprobe}`);
+      return;
+    }
+    await cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", null); return true;`);
+    await raeume();
+    await stelleFixturenHer();
+    await schreibe("Haenger.md", `# Hänger-Probe\n\n\`\`\`svg-studio\n${haengerSvg()}\n\`\`\`\n\nText nach dem Block.\n`);
+    // Fühler für die Speicherzeit von localStorage in Obsidian: derselbe Schreibweg wie die Marke, zur selben Zeit.
+    await cdp.evaluate(`app.saveLocalStorage("svg-studio:persist-probe", { at: Date.now() }); return true;`);
+    await cdp.evaluate(`const f = app.vault.getAbstractFileByPath("Haenger.md"); setTimeout(() => { app.workspace.getLeaf("tab").openFile(f, { state: { mode: "preview" } }); }, 50); return true;`);
+    // Länger als die rund 5 s, nach denen Chromium localStorage festschreibt (gemessen im Opus-Review 2026-11-05).
+    await sleep(7500);
+    // Hängt der Renderer wirklich? Antwortet er binnen 3 s, ist der Punkt nicht gemessen (kein Hänger, nichts zu beenden).
+    const antwortet = await Promise.race([cdp.evaluate<number>(`return 1;`).then(() => true, () => false), sleep(3000).then(() => false)]);
+    if (antwortet) throw new Vorbedingung("Der Block hat den Renderer nicht eingefroren (Fenster verdeckt oder das Bild zeichnet schnell): nichts zu messen");
+    // Hart beenden: nur die eigene Zweitinstanz, über den vollen Profilpfad (nie die reguläre Instanz auf 9222).
+    const beende = (sig: string): void => { try { execFileSync("pkill", [sig, "-f", `user-data-dir=${ud}`]); } catch { /* nichts mehr da */ } };
+    beende("-9");
+    for (let i = 0; i < 30; i++) {
+      try { execFileSync("pgrep", ["-f", `user-data-dir=${ud}`]); await sleep(500); } catch { break; }
+    }
+    neuGestartet = true;
+    const app = spawn("/Applications/Obsidian.app/Contents/MacOS/Obsidian", [`--user-data-dir=${ud}`, `--remote-debugging-port=${String(port)}`, "--lang=en-US"], { detached: true, stdio: "ignore" });
+    app.unref();
+    let neu: Cdp | null = null;
+    for (let i = 0; i < 40 && neu === null; i++) {
+      await sleep(1000);
+      neu = await attachTo("workspace", port, REPO_NAME).catch(() => null);
+    }
+    if (neu === null) throw new Vorbedingung("Die Zweitinstanz kam nach dem Beenden nicht wieder");
+    cdp = neu;
+    // Sofort nach dem Wiederverbinden, vor allem anderen: steht die Marke im Speicher, und was hat Obsidian beim Start geöffnet?
+    const lesen = `const m = app.loadLocalStorage("svg-studio:render-marks"); return JSON.stringify({ fuehler: app.loadLocalStorage("svg-studio:persist-probe"), marken: Array.isArray(m) ? m.map((x) => ({ slow: x.slow === true, session: x.session })) : m, offen: app.workspace.getLeavesOfType("markdown").map((l) => l.view.file && l.view.file.path), plugin: !!(app.plugins.plugins[${q(PLUGIN_ID)}]) });`;
+    const start = await Promise.race([cdp.evaluate<string>(lesen).catch((e) => `Fehler ${fehlerText(e)}`), sleep(20000).then(() => "keine Antwort in 20 s (Renderer hängt schon beim Start)")]);
+    console.log(`  Zustand direkt nach dem Neustart: ${start}`);
+    await bereiteVor(cdp);
+    const marken = await cdp.evaluate<number>(`const m = app.loadLocalStorage("svg-studio:render-marks"); return Array.isArray(m) ? m.length : 0;`);
+    const geoeffnet = await Promise.race([openExisting(cdp, "Haenger.md", "preview").catch(() => false), sleep(25000).then(() => null)]);
+    if (geoeffnet === null) {
+      record("laufzeit-absturz-neustart", false, `nach hartem Beenden und Neustart hängt das Öffnen der Notiz erneut (kein Platzhalter): ${marken} Marke vor dem Öffnen · direkt nach dem Start ${start}`);
+      return;
+    }
+    if (!geoeffnet) throw new Vorbedingung("Haenger.md rendert nach dem Neustart nicht");
+    const nach = await blockZustand();
+    // „Trotzdem anzeigen“ wird hier nicht geklickt: der Block hinge wieder. Die Marke wird danach gelöscht.
+    record("laufzeit-absturz-neustart", marken >= 1 && nach !== null && nach.imgs === 0 && nach.held !== null && nach.knopf !== null, `nach hartem Beenden: ${marken} Marke im Speicher · Block nach dem Neustart ${q(nach)} (ohne Bild, Platzhalter mit Knopf)`);
+    await cdp.evaluate(`app.saveLocalStorage("svg-studio:render-marks", null); return true;`);
+  });
+  return neuGestartet;
 }
 
 async function punktEinbettung(): Promise<void> {
@@ -1530,6 +1617,7 @@ async function main(): Promise<void> {
   stub = await startLlmStub({ models: ["stub-modell"] });
   console.log(`LLM-Stub: ${stub.url}`);
 
+  let neuGestartet = false;
   let farbklasse = "";
   let themaWar: string | null = null;
   const zustandZurueck = async (): Promise<void> => {
@@ -1580,6 +1668,8 @@ async function main(): Promise<void> {
 
     await raeume();
     if (gewaehlt("mobil-emulation", "mobil-trefflaeche-44px", "mobil-pruefliste-trefflaeche-44px", "mobil-felder")) await punktMobil();
+    // Zuletzt: der Punkt beendet die Instanz hart und startet sie neu; alles danach liefe gegen eine andere Instanz.
+    neuGestartet = await punktAbsturzNeustart();
     if (nur !== null) for (const n of PUNKTE) if (!bilanz.eintraege().some((p) => p.name === n)) skipped(n, "nicht gewählt (--nur, Entwicklungslauf)");
   } finally {
     await zustand.schliesse();
@@ -1589,6 +1679,10 @@ async function main(): Promise<void> {
   }
   if (istAbgebrochen()) return;
   cdp.close();
+  // Die neu gestartete Instanz gehört nicht mehr dem Aufrufer (messlauf.sh kennt nur die erste PID): hier beenden, nur über den vollen Profilpfad.
+  if (neuGestartet) {
+    try { execFileSync("pkill", ["-f", `user-data-dir=${process.env.UD ?? "/nonexistent"}`]); } catch { /* schon weg */ }
+  }
   bilanz.abschluss();
 }
 
