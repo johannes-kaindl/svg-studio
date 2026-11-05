@@ -10,7 +10,7 @@ import { canonDocument } from "./canon";
 import { diffSvg, type DiffResult } from "./diff";
 import { scanElements } from "./elements";
 import { assignMissingIds, ensureUnit } from "./format";
-import { costEstimate } from "./guard-problem";
+import type { SvgProblem } from "../vendor/kit/svg-guard";
 
 export const COMMON_SYSTEM: string = [
   "Du bist ein Zeichenwerkzeug und schreibst SVG-Code für Obsidian-Notizen. Du antwortest ausschließlich mit dem verlangten Ergebnis, ohne Einleitung, ohne Erklärung, ohne Markdown-Zaun (kein ```), ohne Gedankenprotokoll in der Antwort.",
@@ -129,10 +129,16 @@ const NO_SVG = "Die Antwort enthält kein <svg>…</svg>.";
 /** Zusatz für das Modell, wenn der Bereiniger `too-costly` wegen der Zeichenkosten meldet (nicht bei einer Mengengrenze: ein größeres Dokument wird nicht durch weniger Masken kleiner) (code-kit 0.58.0: das SVG ist klein und wohlgeformt, würde aber die Anzeige einfrieren). */
 export const COST_HINT = "Das SVG ist zu aufwendig zu zeichnen; nimm weniger verschachtelte Masken, Marker, Filter und Weichzeichner.";
 
-/** Der Satz für das Modell zu den Befunden des Bereinigers (Rückfrage und Reparatur). */
-export function guardProblemsLine(problems: ReadonlyArray<{ code: string; detail: string }>): string {
+/** Ein Befund des Bereinigers, soweit der Kern ihn liest (`code`, `detail` und bei `too-costly` die Felder des Kits seit code-kit 0.59.0: `kind`, `cost`, `limit`). */
+export type GuardProblem = Pick<SvgProblem, "detail" | "kind" | "cost" | "limit"> & { code: string };
+
+/** Der Satz für das Modell zu den Befunden des Bereinigers (Rückfrage und Reparatur). Den Rat zu weniger Masken und Filtern gibt es nur, wenn die Zeichenkosten die Ursache sind (`kind: "cost"`) und kein
+ *  Befund eine Mengengrenze oder eine nicht schätzbare Zeichnung meldet (`kind: "limit"`): ein größeres Dokument wird nicht durch weniger Masken kleiner, und eine Mengengrenze bringt im Kit einen zweiten Eintrag
+ *  `kind: "cost"` mit unendlichen Kosten mit. */
+export function guardProblemsLine(problems: ReadonlyArray<GuardProblem>): string {
   const list = problems.map((p) => `${p.code}: ${p.detail}`).join("; ");
-  return `Der Bereiniger lehnt ab: ${list}.${problems.some((p) => costEstimate(p) !== null) ? ` ${COST_HINT}` : ""}`;
+  const costOnly = problems.some((p) => p.kind === "cost") && !problems.some((p) => p.kind === "limit");
+  return `Der Bereiniger lehnt ab: ${list}.${costOnly ? ` ${COST_HINT}` : ""}`;
 }
 
 /** Gemeinsame Prüfung: SVG finden, wohlgeformt, vom Bereiniger angenommen. Liefert das SVG oder das Problem (deutsch, geht ans Modell). */

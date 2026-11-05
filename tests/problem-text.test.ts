@@ -89,22 +89,22 @@ describe("Probleme des Kerns erscheinen in der Sprache der Oberfläche, ohne fre
 });
 
 describe("guardProblemText (Befunde des Bereinigers für den Nutzer)", () => {
-  const costly = { code: "too-costly", detail: "estimated render cost 2002001 exceeds the limit of 1000000 (about 2002 ms of Chromium drawing time at 600 px width, limit 1000 ms)" };
+  const costly = { code: "too-costly", kind: "cost" as const, cost: 2002001, limit: 1000000, detail: "estimated render cost 2002001 exceeds the limit of 1000000 (about 2002 ms of Chromium drawing time at 600 px width, limit 1000 ms)" };
   it("too-costly aus der Schätzung: ein eigener Satz in beiden Sprachen mit dem Verhältnis zur Grenze statt der englischen Klammer", () => {
     initStrings("en");
     expect(guardProblemText(costly)).toBe("too-costly: this SVG would take too long to draw (about 2 times the allowed cost). Use fewer nested masks, markers or filters and fewer blurred shapes.");
     initStrings("de");
     expect(guardProblemText(costly)).toBe("too-costly: dieses SVG wäre zu aufwendig zu zeichnen (rund 2-fach über den erlaubten Kosten). Nimm weniger verschachtelte Masken, Marker oder Filter und weniger weichgezeichnete Formen.");
-    expect(guardProblemText({ code: "too-costly", detail: "estimated render cost 194809700 exceeds the limit of 1000000 (about 194810 ms)" })).toContain("rund 195-fach");
-    expect(guardProblemText({ code: "too-costly", detail: "estimated render cost 1234567 exceeds the limit of 1000000 (x)" })).toContain("rund 1,2-fach".replace(",", "."));
+    expect(guardProblemText({ code: "too-costly", kind: "cost", cost: 194809700, limit: 1000000, detail: "estimated render cost 194809700 exceeds the limit of 1000000 (about 194810 ms)" })).toContain("rund 195-fach");
+    expect(guardProblemText({ code: "too-costly", kind: "cost", cost: 1234567, limit: 1000000, detail: "estimated render cost 1234567 exceeds the limit of 1000000 (x)" })).toContain("rund 1,2-fach".replace(",", "."));
   });
   it("too-costly „unbounded“ (der Wert lief über): Satz ohne Zahl", () => {
     initStrings("en");
-    expect(guardProblemText({ code: "too-costly", detail: "estimated render cost unbounded exceeds the limit of 1000000" })).toContain("far too long to draw (far above the allowed cost)");
+    expect(guardProblemText({ code: "too-costly", kind: "cost", cost: Infinity, limit: 1000000, detail: "estimated render cost unbounded exceeds the limit of 1000000" })).toContain("far too long to draw (far above the allowed cost)");
   });
   it("too-costly wegen einer Mengengrenze bleibt „code: detail“ (das Detail nennt, was zu groß ist), ohne Rat zu Masken und Filtern", () => {
     initStrings("en");
-    expect(guardProblemText({ code: "too-costly", detail: "the style sheets have 303889 characters, the limit is 250000" })).toBe("too-costly: the style sheets have 303889 characters, the limit is 250000");
+    expect(guardProblemText({ code: "too-costly", kind: "limit", detail: "the style sheets have 303889 characters, the limit is 250000" })).toBe("too-costly: the style sheets have 303889 characters, the limit is 250000");
   });
   it("jeder andere Code bleibt „code: detail“", () => {
     initStrings("de");

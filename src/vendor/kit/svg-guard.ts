@@ -1,4 +1,4 @@
-// vendored from code-kit@0.58.0, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.59.0, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 import { CSS_RISKY, CSS_RISKY_PLAIN, isLocalRef, normalizeUrlRef, trimUrlLikeBrowser } from "./safe-markdown";
 
 /** Checks SVG text written by a model (or any untrusted source) BEFORE it is shown or stored. The guard REJECTS: it
@@ -81,6 +81,12 @@ export interface SvgProblem {
   element?: string;
   /** Local name of the offending attribute, when the problem belongs to one. */
   attribute?: string;
+  /** Only on `too-costly`: `"cost"` is the render-cost estimate over `maxRenderCost` (a simpler picture fixes it), `"limit"` is a size limit of the document (style sheets, values, references, `var()` work) or an estimate that could not be made (the picture is too big, simplifying does not help). */
+  kind?: "cost" | "limit";
+  /** Only on `kind: "cost"`: the estimated cost; `Infinity` when the estimate ran over. */
+  cost?: number;
+  /** Only on `kind: "cost"`: the limit it was compared with (`maxRenderCost`). */
+  limit?: number;
   detail: string;
 }
 
@@ -1000,7 +1006,7 @@ function effectOf(decls: ReadonlyArray<readonly [string, string]>, reader: Reade
     const kind = kindOf(name);
     if (kind === null || kind === "custom" || !isRelevant(name, raw, true)) continue;
     if (raw.length > C.maxValueChars) {
-      problems.push({ code: "too-costly", element, detail: `the value of ${name} has ${String(raw.length)} characters, the limit is ${String(C.maxValueChars)}` });
+      problems.push({ code: "too-costly", kind: "limit", element, detail: `the value of ${name} has ${String(raw.length)} characters, the limit is ${String(C.maxValueChars)}` });
       continue;
     }
     const rd = reader.read(raw);
@@ -1013,7 +1019,7 @@ function effectOf(decls: ReadonlyArray<readonly [string, string]>, reader: Reade
       if (rd.ids === undefined) {
         rd.ids = fragmentIds(rd.value);
         if (rd.ids.length > C.maxIdsPerValue) {
-          problems.push({ code: "too-costly", element, detail: `${name} names ${String(rd.ids.length)} references, the limit is ${String(C.maxIdsPerValue)}` });
+          problems.push({ code: "too-costly", kind: "limit", element, detail: `${name} names ${String(rd.ids.length)} references, the limit is ${String(C.maxIdsPerValue)}` });
           rd.ids = rd.ids.slice(0, C.maxIdsPerValue);
         }
       }
@@ -1083,7 +1089,7 @@ function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Ele
   // ── style sheets and inline styles, each read once ──
   const styleChars = all.reduce((n, el) => n + (el.localName === "style" && el.namespaceURI === SVG_NS ? (el.textContent ?? "").length : 0), 0);
   if (styleChars > C.maxStyleChars) {
-    problems.push({ code: "too-costly", element: "style", detail: `the style sheets have ${String(styleChars)} characters, the limit is ${String(C.maxStyleChars)}` });
+    problems.push({ code: "too-costly", kind: "limit", element: "style", detail: `the style sheets have ${String(styleChars)} characters, the limit is ${String(C.maxStyleChars)}` });
     return Infinity;
   }
   const inline = new Map<Element, Array<[string, string]>>();
@@ -1096,7 +1102,7 @@ function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Ele
   for (const el of all) {
     const attr = el.getAttribute("style");
     if (attr === null || attr === "") continue;
-    if (attr.length > C.maxStyleChars) { problems.push({ code: "too-costly", element: el.localName, attribute: "style", detail: `a style attribute of ${String(attr.length)} characters, the limit is ${String(C.maxStyleChars)}` }); return Infinity; }
+    if (attr.length > C.maxStyleChars) { problems.push({ code: "too-costly", kind: "limit", element: el.localName, attribute: "style", detail: `a style attribute of ${String(attr.length)} characters, the limit is ${String(C.maxStyleChars)}` }); return Infinity; }
     const decls = parseDeclarations(attr);
     inline.set(el, decls);
     for (const [n, v] of decls) if (n.startsWith("--")) noteCustom(n, v);
@@ -1117,7 +1123,7 @@ function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Ele
   let selectorWork = 0;
   const sheet = new Map<Element, Effect[]>();
   const animated = new Set<Element>();
-  const stop = (detail: string): number => { problems.push({ code: "too-costly", element: "style", detail }); return Infinity; };
+  const stop = (detail: string): number => { problems.push({ code: "too-costly", kind: "limit", element: "style", detail }); return Infinity; };
   const hitsOf = (r: Rule): Element[] | null => {
     if (/&|:scope|:host/i.test(r.selector)) return all;
     if (r.selector.length > C.maxSelectorChars) return null;
@@ -1426,14 +1432,14 @@ export function checkSvg(input: string, options: SvgGuardOptions = {}): SvgGuard
     let c: number | "cycle";
     try { c = renderCost(root, all, byId, problems); } catch (e) {
       // one verdict, never an exception: whatever the estimate trips over is a document the guard does not let through
-      problems.push({ code: "too-costly", detail: `the render cost could not be estimated: ${e instanceof Error ? e.message : String(e)}` });
+      problems.push({ code: "too-costly", kind: "limit", detail: `the render cost could not be estimated: ${e instanceof Error ? e.message : String(e)}` });
       c = 0;
     }
     if (c === "cycle") problems.push({ code: "unsafe-markup", detail: "a reference (mask, clip-path, filter, marker or feImage) refers back to an element that contains it" });
     else {
       cost = c;
       // `!(c <= max)`: a NaN from absurd input is rejected, not waved through
-      if (!(c <= maxRenderCost)) problems.push({ code: "too-costly", detail: Number.isFinite(c) ? `estimated render cost ${String(Math.round(c))} exceeds the limit of ${String(maxRenderCost)} (about ${String(Math.round(c / 1000))} ms of Chromium drawing time at ${String(C.referenceWidthPx)} px width, limit ${String(Math.round(maxRenderCost / 1000))} ms)` : `estimated render cost unbounded exceeds the limit of ${String(maxRenderCost)}` });
+      if (!(c <= maxRenderCost)) problems.push({ code: "too-costly", kind: "cost", cost: c, limit: maxRenderCost, detail: Number.isFinite(c) ? `estimated render cost ${String(Math.round(c))} exceeds the limit of ${String(maxRenderCost)} (about ${String(Math.round(c / 1000))} ms of Chromium drawing time at ${String(C.referenceWidthPx)} px width, limit ${String(Math.round(maxRenderCost / 1000))} ms)` : `estimated render cost unbounded exceeds the limit of ${String(maxRenderCost)}` });
     }
   }
 

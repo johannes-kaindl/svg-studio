@@ -5,7 +5,7 @@ import { defineStrings, getLang, setLang, t, type Lang } from "../vendor/kit/i18
 import type { QualityTexts } from "../vendor/kit/measured-quality";
 import type { LabelTexts } from "../core/diff-labels";
 import type { MeasureTexts } from "../core/measure-line";
-import { costEstimate } from "../core/guard-problem";
+import type { GuardProblem } from "../core/protocol";
 import type { Problem } from "../core/problem";
 import type { PanelStrings } from "../obsidian/panel/shell";
 import type { AcceptStrings } from "../vendor/kit-obsidian/panel-accept";
@@ -695,13 +695,15 @@ export function problemText(p: Problem): string {
   return p.round === undefined ? text : t("problem.round", p.round, text);
 }
 
-/** Ein Befund des Bereinigers für den Nutzer: `too-costly` aus der Schätzung der Zeichenkosten (code-kit 0.58.0) mit einem Satz in der Sprache der Oberfläche („rund 2-fach über den erlaubten Kosten“,
- *  statt der englischen, verschachtelten Klammer des Kits), jeder andere Befund als `code: detail` (auch `too-costly` wegen einer Mengengrenze: dort sagt das Detail, was zu groß ist). `tr` ist die Übersetzung, die der Aufrufer schon hat. */
-export function guardProblemText(p: { code: string; detail: string }, tr: T = t): string {
-  const est = costEstimate(p);
-  if (est === null) return tr("block.problem", p.code, p.detail);
-  if (est.ratio === null) return tr("block.problem.too-costly-over");
-  return tr("block.problem.too-costly", est.ratio >= 10 ? String(Math.round(est.ratio)) : String(Math.round(est.ratio * 10) / 10));
+/** Ein Befund des Bereinigers für den Nutzer: `too-costly` aus der Schätzung der Zeichenkosten (`kind: "cost"`, code-kit 0.59.0) mit einem Satz in der Sprache der Oberfläche („rund 2-fach über den erlaubten Kosten“,
+ *  statt der englischen, verschachtelten Klammer des Kits), jeder andere Befund als `code: detail` (auch `too-costly` wegen einer Mengengrenze, `kind: "limit"`: dort sagt das Detail, was zu groß ist). `tr` ist die
+ *  Übersetzung, die der Aufrufer schon hat. */
+export function guardProblemText(p: GuardProblem, tr: T = t): string {
+  if (p.kind !== "cost") return tr("block.problem", p.code, p.detail);
+  // `cost` ist unendlich, wenn die Schätzung überlief: dann gibt es kein Verhältnis, nur „weit über“.
+  if (p.cost === undefined || p.limit === undefined || !Number.isFinite(p.cost) || !(p.limit > 0)) return tr("block.problem.too-costly-over");
+  const ratio = p.cost / p.limit;
+  return tr("block.problem.too-costly", ratio >= 10 ? String(Math.round(ratio)) : String(Math.round(ratio * 10) / 10));
 }
 
 /** Die Wörter der Beschriftung von Einträgen (`core/diff-labels.ts`). */
