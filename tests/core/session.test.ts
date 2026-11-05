@@ -398,7 +398,7 @@ describe("acceptText: ein führendes BOM der Datei bleibt (code-kit 0.58.0 nimmt
   const BOM = "\uFEFF";
   const answer = BASE.replace(`r="40"`, `r="60"`);
 
-  it("Spannen-Runde: das BOM bleibt, weil nur die Spanne ersetzt wird", () => {
+  it("Spannen-Runde (Dokumentation, keine Absicherung der neuen Zeile): das BOM bleibt, weil nur die Spanne ersetzt wird", () => {
     const s = ok(addRound(open(BOM + BASE), prompt(BASE, answer)));
     const r = acceptText(s, BOM + BASE);
     expect(r).toEqual({ ok: true, text: BOM + answer });

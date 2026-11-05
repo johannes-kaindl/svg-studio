@@ -224,7 +224,7 @@ describe("renderSvgBlock", () => {
         const { f, el, result } = run(MID);
         expect(result).toBe("held");
         expect(el.querySelector("img")).toBeNull();
-        expect(el.querySelector(".svg-studio-held p")?.textContent).toMatch(/^This SVG is expensive to draw \(about \d+ % of the allowed cost\), so it is shown only after a click\.$/);
+        expect(el.querySelector(".svg-studio-held p")?.textContent).toMatch(/^This SVG is expensive to draw \(about \d+ % of the allowed cost\), so it is shown in the note only after a click\.$/);
         expect(el.querySelector("button.svg-studio-show")?.textContent).toBe("Show");
         expect(f.log).toEqual(["begin", "abort"]);
         (el.querySelector("button.svg-studio-show") as HTMLElement).click();
@@ -245,11 +245,19 @@ describe("renderSvgBlock", () => {
         expect(f.log).toEqual(["begin", "settle"]);
       });
 
-      it("der Klick umgeht die Schwelle nur für diesen Block; ein abgelehntes SVG bleibt abgelehnt (forced zeichnet nichts Abgelehntes)", () => {
+      it("forced zeichnet nichts Abgelehntes: ein SVG über der Grenze bleibt ein Fehlerkasten", () => {
         expect(run(COSTLY, { forced: true }).result).toBe("error");
       });
 
-      it("Reihenfolge: eine Absturzmarke und der Notausschalter gehen der Kostenschwelle vor (Platzhalter ohne Bereiniger, ohne begin)", () => {
+      it("Reihenfolge: der Notausschalter geht der Kostenschwelle vor (Platzhalter „nicht automatisch“, ohne Bereiniger, ohne begin)", () => {
+        const f = fakeGuard(false);
+        const el = document.createElement("div");
+        expect(renderSvgBlock(MID, el, { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard, autoShow: () => false })).toBe("held");
+        expect(el.querySelector(".svg-studio-held p")?.textContent).toContain("not shown automatically");
+        expect(f.log).toEqual([]);
+      });
+
+      it("Reihenfolge: eine Absturzmarke geht der Kostenschwelle vor (Platzhalter ohne Bereiniger, ohne begin)", () => {
         const f = fakeGuard(true);
         const el = document.createElement("div");
         expect(renderSvgBlock(MID, el, { guard: checkSvg, onEdit() {}, onRepair() {}, t, marks: f.guard })).toBe("held");

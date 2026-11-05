@@ -20,16 +20,18 @@ export interface Mark {
   slow?: true;
 }
 
-/** So viele Marken hält die Liste; es fallen zuerst eigene laufende Marken heraus, `slow`-Marken und die einer früheren Sitzung bleiben am längsten. */
 /** Die Grenze des Bereinigers (`maxRenderCost`, Vorgabe von code-kit 0.58.0): das Plugin ändert sie nicht, die Anzeige „x % der erlaubten Kosten“ rechnet gegen sie. */
 export const COST_LIMIT = 1_000_000;
 /** Kostenwert (`cost` im ok-Ergebnis des Bereinigers), ab dem ein Block in einer Notiz erst nach einem Klick gezeichnet wird. Das ergänzt die Absturzmarke, es ersetzt sie nicht.
- *  Herkunft (code-kit 0.58.0, `docs/internal/svg-guard-cost.md`): der Kostenwert ist etwa eine Mikrosekunde Chromium-Zeichenzeit bei 600 px Breite, die Grenze 1 Mio. etwa eine Sekunde
- *  (Messrechner Apple M5 Pro). Die Randfälle des Kits zeichnen bei 138 729 in 48 ms, bei 549 756 in 415 ms, bei 799 601 in 332 ms und bei 820 202 in 601 ms (bis 0,76 ms je 1000);
- *  die 38 echten SVG-Dateien des Kits liegen höchstens bei 38 794 (3,9 % der Grenze), ein üblicher Schlagschatten bei 33 232. 250 000 ist ein Viertel der Grenze: rund 0,2 s auf dem
- *  Messrechner im schlechtesten gemessenen Verhältnis, mehr als das Sechsfache des teuersten echten Bildes (kein Platzhalter für Icons, Logos, Diagramme). Auf einem Telefon, das
- *  drei- bis fünfmal langsamer sein dürfte (geschätzt, nicht gemessen), wäre es rund eine Sekunde. */
+ *  Herkunft (code-kit 0.58.0, `docs/internal/svg-guard-cost.md`): der Kostenwert ist etwa eine Mikrosekunde Chromium-Zeichenzeit bei 600 px Breite und Gerätepixelverhältnis 1, die Grenze 1 Mio.
+ *  etwa eine Sekunde (Messrechner Apple M5 Pro, Software-Raster). Die Randfälle des Kits zeichnen bei 138 729 in 48 ms, bei 549 756 in 415 ms, bei 799 601 in 332 ms, bei 806 002 in 649 ms und
+ *  bei 820 202 in 601 ms (bis 0,81 ms je 1000; ein Weichzeichner in riesiger Filterregion 1,37 ms je 1000). Die 38 echten SVG-Dateien des Kits liegen höchstens bei 38 794 (3,9 % der Grenze), ein
+ *  üblicher Schlagschatten bei 33 232. 250 000 ist ein Viertel der Grenze: bei Gerätepixelverhältnis 1 und 600 px gemessen 0,15 bis 0,4 s (Opus-Delta-Check, Chromium 148 bis 153), mehr als das
+ *  Sechsfache des teuersten echten Bildes (kein Platzhalter für Icons, Logos, Diagramme). Grenzen der Herleitung: bei Gerätepixelverhältnis 2 (Retina) und GPU-Raster wuchsen dieselben Fälle
+ *  auf 0,7 bis 1,2 s, in Notizbreite 700 px um etwa ein Fünftel; die Zeit ist Raster-Zeit außerhalb des Hauptthreads (Frame-Lücken, kaum Timer-Lücken), also ein spätes Bild und Ruckeln, kein
+ *  eingefrorenes Fenster. Die Schwelle gilt je Block: zehn Blöcke knapp darunter addieren sich. Auf einem Telefon (geschätzt drei- bis fünfmal langsamer, nicht gemessen) wäre es länger. */
 export const CLICK_COST = 250_000;
+/** So viele Marken hält die Liste; es fallen zuerst eigene laufende Marken heraus, `slow`-Marken und die einer früheren Sitzung bleiben am längsten. */
 export const MAX_MARKS = 50;
 /** Kommt `load` später als so viele ms nach dem Setzen der Marke (Stilkosten vor dem Laden), ist das Bild sofort `slow`. */
 export const SLOW_MS = 1500;
