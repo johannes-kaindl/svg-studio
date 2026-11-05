@@ -724,12 +724,28 @@ async function punktBomUndKosten(): Promise<void> {
   });
 }
 
-/** Ein SVG, das der Bereiniger 0.52.1 annimmt und dessen Stilauflösung den Hauptthread rund 27 s blockiert (1000 `:has()`-Regeln über 4800 Elemente, Messung des Opus-Reviews 2026-11-05, Chromium 153; unabhängig vom Raster-Backend). */
+/**
+ * Der Hänger des Ernstfalls. Echte Hänger kann der Bereiniger seit code-kit 0.58.0 kaum noch durchlassen: das alte Fixture (1000 `:has()`-Regeln über 4800 Elemente, 27 s) lehnt er mit `too-costly` ab,
+ * und die Stil- und Layoutarbeit ist auf etwa eine Sekunde begrenzt. Was er annimmt und in Chromium 153 mit Software-Raster Sekunden braucht (`clip-path: polygon()` mit 6000 Punkten auf 2000 Rechtecken:
+ * 12,3 s, Kostenwert 2083), friert Obsidian NICHT ein: im echten Obsidian gemessen 2026-11-05 (16 s Beobachtung) größte Timerlücke 298 ms, größte Framelücke 250 ms, das Raster läuft außerhalb des Hauptthreads.
+ * Deshalb friert der Test selbst ein: `einfrierer()` blockiert den Hauptthread beim Setzen der `src` eines SVG-Bildes 12 s (die Stelle, an der ein echter Hänger zuschlägt, nach `begin`). Der Text des Blocks ist
+ * ein kleines, gültiges SVG; das Urteil gilt der Kette Marke, Beenden, Neustart, Platzhalter, nicht dem Kostenmodell.
+ */
 function haengerSvg(): string {
-  const regeln = Array.from({ length: 1000 }, (_, i) => `rect:has(~ rect.c${String(i % 97)}):not(.z${String(i)}){fill:#${String((i % 9) + 1)}${String((i % 9) + 1)}0}`).join("\n");
-  const rects = Array.from({ length: 4800 }, (_, i) => `<rect class="c${String(i % 97)}" x="${String(i % 100)}" y="${String(Math.floor(i / 100))}" width="1" height="1" fill="#36c"/>`).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><style>${regeln}</style>${rects}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><title>Haenger-Probe</title><rect id="h" x="1" y="1" width="8" height="8" fill="#c33"/></svg>`;
 }
+
+/** Ausdruck für den Renderer: friert den Hauptthread für `ms` ein, sobald ein SVG-Bild seine `src` bekommt (einmal je Fenster). */
+const einfrierer = (ms: number): string => `
+  if (!window.__einfrierer) {
+    window.__einfrierer = true;
+    const orig = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (name, value) {
+      if (this instanceof HTMLImageElement && name === "src" && String(value).startsWith("data:image/svg+xml")) { const t = performance.now(); while (performance.now() - t < ${String(ms)}) { /* Hauptthread blockiert */ } }
+      return orig.call(this, name, value);
+    };
+  }
+  return true;`;
 
 /** Zeigt der Block, was der Wächter schützen soll: Zustand des Blocks in der Notiz, die Marken im Speicher des Plugins. */
 const PLUGIN_MARKEN = `app.plugins.plugins[${q(PLUGIN_ID)}].markStore`;
@@ -842,6 +858,7 @@ async function punktAbsturzNeustart(): Promise<boolean> {
     await schreibe("Haenger.md", notiz);
 
     // Vorprobe ohne Beenden: mit einer Marke einer früheren Sitzung darf der Hänger-Block den Renderer nicht einfrieren (nur der Platzhalter entsteht).
+    await cdp.evaluate(einfrierer(12000));
     await cdp.evaluate(`${PLUGIN_MARKEN}.write([{ fp: ${q(fp)}, at: Date.now(), session: "frueher" }]); return true;`);
     await cdp.evaluate(`const f = app.vault.getAbstractFileByPath("Haenger.md"); setTimeout(() => { app.workspace.getLeaf("tab").openFile(f, { state: { mode: "preview" } }); }, 50); return true;`);
     await sleep(3000);
@@ -858,8 +875,9 @@ async function punktAbsturzNeustart(): Promise<boolean> {
       await stelleFixturenHer();
       await schreibe("Haenger.md", notiz);
       await requireVisible(cdp);
+      await cdp.evaluate(einfrierer(12000));
       const tOffen = Date.now();
-      // Öffnen, ohne zu warten: der Renderer hängt danach (Stilauflösung rund 27 s).
+      // Öffnen, ohne zu warten: der Einfrierer blockiert den Hauptthread, sobald das Bild seine src bekommt (12 s).
       await cdp.evaluate(`const f = app.vault.getAbstractFileByPath("Haenger.md"); setTimeout(() => { app.workspace.getLeaf("tab").openFile(f, { state: { mode: "preview" } }); }, 0); return true;`);
       await sleep(killNach);
       const tKill = Date.now();
@@ -891,9 +909,14 @@ async function punktAbsturzNeustart(): Promise<boolean> {
     // Gegenprobe: dieselbe Notiz ohne Marke hängt (sonst hätte der Test den Hänger gar nicht erzeugt). „Trotzdem anzeigen“ löscht die Marke und zeichnet.
     let gegenprobe = "nicht gemessen";
     if (alleGut) {
+      await cdp.evaluate(einfrierer(12000));
+      // Lückenmesser im Fenster: größte Verspätung eines 20-ms-Timers und größter Abstand zweier Frames (rAF) ab dem Klick; er läuft 16 s und wird danach gelesen.
+      await cdp.evaluate(`window.__luecken = { timer: 0, raf: 0 }; let lt = performance.now(), lr = performance.now(); const iv = setInterval(() => { const n = performance.now(); window.__luecken.timer = Math.max(window.__luecken.timer, n - lt); lt = n; }, 20); const f = () => { const n = performance.now(); window.__luecken.raf = Math.max(window.__luecken.raf, n - lr); lr = n; requestAnimationFrame(f); }; requestAnimationFrame(f); setTimeout(() => clearInterval(iv), 16000); return true;`);
       await cdp.evaluate(`const b = document.querySelector(".markdown-preview-view .svg-studio-block button.svg-studio-show"); setTimeout(() => { if (b) b.click(); }, 0); return !!b;`);
       const antwortet = await Promise.race([sleep(2000).then(() => cdp.evaluate<number>(`return 1;`)).then(() => true, () => false), sleep(6000).then(() => false)]);
-      gegenprobe = antwortet ? "Renderer blieb ansprechbar (der Test erzeugt keinen Hänger)" : "Renderer hängt, wie erwartet";
+      await sleep(14000);
+      const luecken = await Promise.race([cdp.evaluate<string>(`return JSON.stringify(window.__luecken);`).catch(() => "Fehler"), sleep(30000).then(() => "keine Antwort")]);
+      gegenprobe = `${antwortet ? "Renderer blieb ansprechbar (der Test erzeugt keinen Hänger)" : "Renderer hängt, wie erwartet"} · größte Lücke ${luecken}`;
       if (antwortet) alleGut = false;
     }
     record("laufzeit-absturz-neustart", alleGut, `${befunde.join(" · ")} · Gegenprobe (Marke gelöscht, Block gezeichnet): ${gegenprobe}`);
