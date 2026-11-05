@@ -32,6 +32,7 @@ import {
   ladePluginNeu,
   openExisting,
   pollUntil,
+  requireUntil,
   requireVisible,
   schliesseDialog,
   setAppConfig,
@@ -231,7 +232,7 @@ async function raeume(cdp: Cdp): Promise<void> {
 async function setzeSeitenleiste(cdp: Cdp, breite: number): Promise<number> {
   // Erst aufklappen und warten, dann die Breite setzen: `setSize` mitten im Aufklappen (Animation) verpufft und die Breite des vorigen Bildes bleibt stehen.
   await cdp.evaluate(`app.workspace.rightSplit.expand(); return true;`);
-  await pollUntil<number>(cdp, `const w = app.workspace.rightSplit.containerEl.getBoundingClientRect().width; return w > 100 ? w : null;`, 5000, 150);
+  await requireUntil(cdp, `app.workspace.rightSplit.containerEl.getBoundingClientRect().width > 100`, "Die rechte Seitenleiste klappt nicht auf", 5000, 150);
   await sleep(600);
   await cdp.evaluate(`app.workspace.rightSplit.setSize(${breite}); return true;`);
   const b = await pollUntil<number>(cdp, `const w = app.workspace.rightSplit.containerEl.getBoundingClientRect().width; return Math.abs(w - ${breite}) <= 2 ? w : null;`, 5000, 150);
