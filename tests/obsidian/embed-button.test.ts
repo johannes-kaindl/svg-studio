@@ -2,7 +2,7 @@
 import { Window } from "happy-dom";
 import { describe, expect, it } from "vitest";
 import { installObsidianDom } from "../helpers/obsidian-dom";
-import { installEmbedButtons } from "../../src/obsidian/embed-button";
+import { installEmbedButtons, openDocuments } from "../../src/obsidian/embed-button";
 import { Plugin, TFile } from "../__mocks__/obsidian";
 
 installObsidianDom();
@@ -98,6 +98,32 @@ describe("installEmbedButtons", () => {
     handlers["window-open"]![0]!(null, { document: win.document as unknown as Document });
     const e = embed(win.document as unknown as Document, "pop.svg");
     win.document.body.appendChild(e as never);
+    await flush();
+    expect(e.querySelectorAll("[data-svg-studio-button]")).toHaveLength(1);
+    plugin.unload();
+  });
+
+  it("openDocuments: Hauptfenster plus die Fenster aller offenen Blätter, ohne Dubletten (Gesamtreview Befund 11)", () => {
+    const pop = new Window();
+    const leaf = (doc: unknown): { view: { containerEl: { ownerDocument: unknown } } } => ({ view: { containerEl: { ownerDocument: doc } } });
+    const ws = { iterateAllLeaves: (cb: (l: unknown) => void) => { [leaf(document), leaf(pop.document), leaf(pop.document)].forEach(cb); } };
+    const docs = openDocuments(ws as never);
+    expect(docs).toHaveLength(2);
+    expect(docs).toContain(document);
+    expect(docs).toContain(pop.document);
+    // Ohne iterateAllLeaves (Mock, alte API): nur das aktive Dokument.
+    expect(openDocuments({} as never)).toEqual([document]);
+  });
+
+  it("beim Start offene Popouts bekommen ihre Knöpfe, ohne dass window-open kommt", async () => {
+    const pop = new Window();
+    installObsidianDom(pop);
+    const plugin = new Plugin() as Plugin & { unload(): void };
+    const leaf = { view: { containerEl: { ownerDocument: pop.document } } };
+    (plugin as { app: unknown }).app = { workspace: { on: () => ({}), iterateAllLeaves: (cb: (l: unknown) => void) => { cb(leaf); } } };
+    const e = embed(pop.document as unknown as Document, "schon-offen.svg");
+    pop.document.body.appendChild(e as never);
+    installEmbedButtons(plugin as never, { resolve: (el) => { const f = new TFile(); f.path = el.getAttribute("src") ?? ""; return f; }, onEdit: () => undefined, label: "x" });
     await flush();
     expect(e.querySelectorAll("[data-svg-studio-button]")).toHaveLength(1);
     plugin.unload();

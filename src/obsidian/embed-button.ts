@@ -1,7 +1,7 @@
 // Knopf „In SVG Studio bearbeiten“ an eingebetteten `.svg`-Dateien (Spec § 7.1). Obsidian zeigt die Einbettung selbst; das Plugin hängt nur einen Knopf an.
 // Ein Beobachter je Fenster (Hauptfenster und Popouts, Review-Fokus 3 des Plans): die Einbettung entsteht erst beim Rendern, und im Live Preview baut Obsidian
 // sie bei jeder Zeilenänderung neu. Der Knopf trägt `data-svg-studio-button`, damit eine erneute Mutation keinen zweiten anhängt.
-import { setIcon, type Plugin, type TFile } from "obsidian";
+import { setIcon, type Plugin, type TFile, type Workspace } from "obsidian";
 
 export interface EmbedButtonOptions {
   /** Die Datei, auf die die Einbettung zeigt, wenn sie eine `.svg` ist; sonst `null`. */
@@ -9,7 +9,7 @@ export interface EmbedButtonOptions {
   onEdit(file: TFile): void;
   /** Zugänglicher Name des Knopfs. */
   label: string;
-  /** Die Dokumente, die schon offen sind (Standard: das Hauptfenster). Neue Fenster melden sich über `window-open`. */
+  /** Die Dokumente, die schon offen sind (Standard: `openDocuments`, Hauptfenster und Popouts mit offenen Blättern). Neue Fenster melden sich über `window-open`. */
   documents?: () => Document[];
 }
 
@@ -50,12 +50,21 @@ function watch(doc: Document, o: EmbedButtonOptions): () => void {
   return () => { observer.disconnect(); };
 }
 
+/** Hauptfenster und jedes Fenster, in dem ein Blatt offen ist (Popouts); ohne `iterateAllLeaves` nur das aktive Dokument. Ohne diese Liste fehlten die Knöpfe in einem Popout, das beim Einschalten des Plugins schon offen war. */
+export function openDocuments(workspace: Workspace): Document[] {
+  const docs = new Set<Document>([activeDocument]);
+  if (typeof workspace.iterateAllLeaves === "function") {
+    workspace.iterateAllLeaves((leaf) => { docs.add(leaf.view.containerEl.ownerDocument); });
+  }
+  return [...docs];
+}
+
 export function installEmbedButtons(plugin: Plugin, o: EmbedButtonOptions): void {
   const stops = new Map<Document, () => void>();
   const add = (doc: Document): void => {
     if (!stops.has(doc)) stops.set(doc, watch(doc, o));
   };
-  for (const d of (o.documents ?? (() => [activeDocument]))()) add(d);
+  for (const d of (o.documents ?? (() => openDocuments(plugin.app.workspace)))()) add(d);
   // Popout-Fenster: der Beobachter des Hauptfensters sieht ihre Einbettungen nicht.
   plugin.registerEvent(plugin.app.workspace.on("window-open", (_win, window) => { add(window.document); }));
   plugin.registerEvent(plugin.app.workspace.on("window-close", (_win, window) => {
