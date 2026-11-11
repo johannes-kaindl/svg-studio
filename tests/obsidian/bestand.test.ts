@@ -26,7 +26,7 @@ beforeEach(() => { document.body.replaceChildren(); initStrings("en"); });
 
 describe("bestandProblems", () => {
   it("ein sauberes SVG hat keinen Befund", () => {
-    expect(bestandProblems(CLEAN, checkSvg)).toEqual({ parse: null, guard: [], unnamed: 0, editorMetadata: false });
+    expect(bestandProblems(CLEAN, checkSvg)).toEqual({ parse: null, guard: [], unnamed: 0, editorMetadata: false, duplicateIds: [] });
   });
 
   it("Inkscape-Fixture: Editor-Angaben erkannt, der Bereiniger lehnt ab; die Kinder der entfernbaren Metadaten zählen nicht als „ohne Namen“", () => {
@@ -39,6 +39,13 @@ describe("bestandProblems", () => {
 
   it("drei Elemente ohne id → unnamed: 3", () => {
     expect(bestandProblems(UNNAMED, checkSvg)).toMatchObject({ parse: null, guard: [], unnamed: 3, editorMetadata: false });
+  });
+
+  it("doppelte ids werden genannt (Gesamtreview Befund 8): jede doppelte id einmal, mit Zahl; das SVG bleibt sonst ohne Befund", () => {
+    const dup = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect id="a" width="1" height="1"/><rect id="a" width="2" height="2"/><circle id="b" r="1"/><circle id="b" r="2"/><circle id="b" r="3"/><rect id="c" width="1" height="1"/></svg>`;
+    const b = bestandProblems(dup, checkSvg);
+    expect(b.duplicateIds).toEqual(["a", "b"]);
+    expect(b).toMatchObject({ parse: null, unnamed: 0, editorMetadata: false });
   });
 
   it("kaputtes XML → parse trägt das Parserproblem, nichts anderes wird gezählt", () => {
@@ -349,6 +356,20 @@ describe("Karte „Reparieren“: Befunde als Liste, gekürzt (C5)", () => {
 });
 
 // Opus-Gesamtreview 2026-11-05, Befund 9: „Reparieren“ wurde auch bei einem SVG über der Größengrenze angeboten und hätte über 1 MB ans Modell geschickt.
+describe("renderBestandNotice: doppelte ids", () => {
+  it("eine Karte ohne Knopf nennt die ids und sagt, warum die Felder gesperrt sind", async () => {
+    const { renderBestandNotice } = await import("../../src/obsidian/panel/bestand");
+    const host = document.createElement("div");
+    renderBestandNotice(host, { parse: null, guard: [], unnamed: 0, editorMetadata: false, duplicateIds: ["a", "b"] }, { repair: vi.fn(), names: vi.fn(), cleanup: vi.fn() }, false);
+    expect(host.textContent).toContain("a, b");
+    expect(host.textContent).toMatch(/more than one element/);
+    expect(host.querySelector("button")).toBeNull();
+    const none = document.createElement("div");
+    renderBestandNotice(none, { parse: null, guard: [], unnamed: 0, editorMetadata: false, duplicateIds: [] }, { repair: vi.fn(), names: vi.fn(), cleanup: vi.fn() }, false);
+    expect(none.textContent).toBe("");
+  });
+});
+
 describe("renderBestandNotice: keine Reparatur für zu große SVGs", () => {
   const actions = { repair: vi.fn(), names: vi.fn(), cleanup: vi.fn() };
   it("too-large und too-many-elements: die Karte nennt den Befund, bietet aber keinen Reparaturknopf", async () => {

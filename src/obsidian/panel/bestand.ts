@@ -18,12 +18,14 @@ export interface BestandProblems {
   unnamed: number;
   /** Editor-Angaben (Inkscape: `sodipodi:`, `inkscape:`, RDF-`metadata`) sind im Text. */
   editorMetadata: boolean;
+  /** Ids, die mehr als ein Element trägt (jede einmal, in der Reihenfolge des ersten Vorkommens). Die Zahlenfelder dieser Elemente sind „mehrdeutig“ gesperrt; die Karte sagt es. */
+  duplicateIds?: string[];
 }
 
 export function bestandProblems(text: string, guard: typeof checkSvg): BestandProblems {
   const syntax = scanElements(text).issues.find((i) => i.kind === "syntax");
   if (syntax !== undefined) {
-    return { parse: { message: syntax.message, offset: syntax.offset }, guard: [], unnamed: 0, editorMetadata: false };
+    return { parse: { message: syntax.message, offset: syntax.offset }, guard: [], unnamed: 0, editorMetadata: false, duplicateIds: [] };
   }
   const g = guard(text);
   // `stripEditorMetadata` scheitert bei lesbarem Text nur, wenn Elemente ohne id Editor-Angaben tragen: auch das sind Editor-Angaben.
@@ -35,7 +37,10 @@ export function bestandProblems(text: string, guard: typeof checkSvg): BestandPr
     if (out.ok) counted = out.text;
   }
   const can = canRefine(counted);
-  return { parse: null, guard: g.ok ? [] : g.problems, unnamed: can.ok ? 0 : can.unnamed, editorMetadata };
+  const seen = new Map<string, number>();
+  for (const e of scanElements(text).elements) if (e.id !== null) seen.set(e.id, (seen.get(e.id) ?? 0) + 1);
+  const duplicateIds = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+  return { parse: null, guard: g.ok ? [] : g.problems, unnamed: can.ok ? 0 : can.unnamed, editorMetadata, duplicateIds };
 }
 
 /** Der Befund, mit dem die Reparatur ans Modell geht: das Parserproblem, sonst die Befunde des Bereinigers (Wortlaut wie in `protocol.ts`). */
@@ -66,6 +71,7 @@ export function renderBestandNotice(host: HTMLElement, b: BestandProblems, a: Be
   const plain = (text: string) => (box: HTMLElement): void => { box.setText(text); };
   // In der Reihenfolge, in der die Schritte gehen: Namen zuerst („Editor-Angaben entfernen“ scheitert an Elementen ohne id), dann die Editor-Angaben, dann die Reparatur.
   if (b.unnamed > 0) card(plain(t("bestand.unnamed", b.unnamed)), t("bestand.names"), t("bestand.names.hint"), a.names);
+  if ((b.duplicateIds ?? []).length > 0) card(plain(t("bestand.duplicate", (b.duplicateIds ?? []).join(", "))), "", "", null);
   if (b.editorMetadata) card(plain(t("bestand.editor")), t("bestand.cleanup"), t("bestand.cleanup.hint"), a.cleanup);
   if (b.parse !== null) {
     card(plain(t("bestand.unusable", problemText({ code: "text-unreadable", params: [b.parse.message, b.parse.offset] }))), t("bestand.repair"), t("bestand.repair.hint"), a.repair);
