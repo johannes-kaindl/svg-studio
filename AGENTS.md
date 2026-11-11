@@ -74,4 +74,4 @@ Projekt-Memory unter `~/.claude/projects/<slug>/memory/` mit `MEMORY.md`-Index. 
 
 ## Abweichungen von der Leitkonvention
 
-- CORE-META-11 (Uplink-Seite): offen, Vorschlag liegt beim Master (Dach/Website); die Seite entsteht nach dem ersten Release.
+Keine. CORE-META-11 (Uplink-Seite) ist erfüllt: `/uplink/svg-studio/` und `/uplink/svg-studio-de/` sind seit 2026-11-11 live (Tier 0).
