@@ -109,6 +109,18 @@ describe("scanElements", () => {
     expect(issues[0]!.offset).toBe(text.lastIndexOf("<rect"));
   });
 
+  it("eine id mit @ oder # am Anfang ist ein Syntaxfehler: sie kollidiert mit den festen Schlüsseln (Gesamtreview Befund 10)", () => {
+    for (const id of ["@x", "#wurzel", "#style-1"]) {
+      const text = `<svg xmlns="http://www.w3.org/2000/svg"><rect id="${id}"/></svg>`;
+      const issues = scanElements(text).issues.filter((i) => i.kind === "syntax");
+      expect(issues, id).toHaveLength(1);
+      expect(issues[0]!.message).toContain("@");
+      expect(issues[0]!.offset).toBe(text.indexOf("<rect"));
+    }
+    // Gegenprobe: ein @ oder # mitten in der id stört nicht.
+    expect(scanElements(`<svg><rect id="a@b#c"/></svg>`).issues).toEqual([]);
+  });
+
   it("verschachtelt", () => {
     const text = `<svg><g id="w"><rect id="r"/></g></svg>`;
     const { elements } = scanElements(text);

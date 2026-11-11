@@ -375,6 +375,8 @@ export function scanElements(text: string): {
     // Ein fester Schlüssel schlägt die id (Spec § 5.1); die id bleibt im Feld `id`.
     const key = fixed ?? id ?? `@${++fallbackCount}`;
     if (id !== null) {
+      // `@n` und `#…` sind die Schlüssel für Elemente ohne id und für die festen Stellen; eine id mit diesem Anfang würde mit ihnen kollidieren.
+      if (id.startsWith("@") || id.startsWith("#")) issue(lt, `id "${id}" beginnt mit @ oder #; diese Zeichen sind den festen Schlüsseln vorbehalten`);
       if (ids.has(id)) issue(lt, `id "${id}" doppelt`, "duplicate-id");
       ids.add(id);
     }
