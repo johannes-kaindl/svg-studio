@@ -3,7 +3,7 @@
 // zusammengesetzt wie `loadSystem` im Messlabor (`Gemeinsam` + Leerzeile + Abschnitt). Eine Messzeile (`quality.ts`) gilt nur für DIESEN
 // Wortlaut: wer ihn ändert, ändert den Fingerabdruck und braucht eine neue Messung (`npm run lab`). Ein Test hält beide Texte gleich.
 // Der JSON-Abschnitt („Änderungsliste“) bleibt als Messartefakt in der Datei des Labors und kommt hier nicht vor.
-import { type TextMessage, type Verdict } from "../vendor/kit/answer-retry";
+import { type TextMessage } from "../vendor/kit/answer-retry";
 import { promptFingerprint as kitFingerprint } from "../vendor/kit/measured-quality";
 import { stripThinkBlocks } from "../vendor/kit/think-splitter";
 import { canonDocument } from "./canon";
@@ -124,7 +124,29 @@ export interface RefineValue {
   diff: DiffResult;
 }
 
-const NO_SVG = "Die Antwort enthält kein <svg>…</svg>.";
+/** Woran eine Modellantwort scheitert, als Wert ohne Sprache: `faultLine` macht den deutschen Satz für das Modell (Rückfrage), die Oberfläche übersetzt dieselbe Ursache für den Nutzer (`faultText` in `i18n/strings.ts`). */
+export type AnswerFault =
+  | { code: "no-svg" }
+  | { code: "not-wellformed"; detail: string; offset: number }
+  | { code: "guard"; problems: ReadonlyArray<GuardProblem> }
+  | { code: "no-id"; tag: string; n: number }
+  | { code: "unchanged" };
+
+/** Ein Verdict des Kerns: wie das des Kits, im Fehlerfall zusätzlich mit der Ursache als Wert. */
+export type AnswerVerdict<V> = { ok: true; value: V } | { ok: false; problem: string; fault: AnswerFault };
+
+const failWith = (fault: AnswerFault): { ok: false; problem: string; fault: AnswerFault } => ({ ok: false, problem: faultLine(fault), fault });
+
+/** Der Satz für das Modell zu einer Ursache (deutsch, geht in die Rückfrage). */
+export function faultLine(f: AnswerFault): string {
+  switch (f.code) {
+    case "no-svg": return "Die Antwort enthält kein <svg>…</svg>.";
+    case "not-wellformed": return `Das SVG ist nicht wohlgeformt: ${f.detail} (Offset ${String(f.offset)}).`;
+    case "guard": return guardProblemsLine(f.problems);
+    case "no-id": return `Element <${f.tag}> (Nummer ${String(f.n)}) hat keine id.`;
+    case "unchanged": return "Die Antwort ändert nichts am Ausgang; setze die Anweisung um.";
+  }
+}
 
 /** Zusatz für das Modell, wenn der Bereiniger `too-costly` wegen der Zeichenkosten meldet (nicht bei einer Mengengrenze: ein größeres Dokument wird nicht durch weniger Masken kleiner) (code-kit 0.58.0: das SVG ist klein und wohlgeformt, würde aber die Anzeige einfrieren). */
 export const COST_HINT = "Das SVG ist zu aufwendig zu zeichnen; nimm weniger verschachtelte Masken, Marker, Filter und Weichzeichner.";
@@ -141,51 +163,51 @@ export function guardProblemsLine(problems: ReadonlyArray<GuardProblem>): string
   return `Der Bereiniger lehnt ab: ${list}.${costOnly ? ` ${COST_HINT}` : ""}`;
 }
 
-/** Gemeinsame Prüfung: SVG finden, wohlgeformt, vom Bereiniger angenommen. Liefert das SVG oder das Problem (deutsch, geht ans Modell). */
-function check(raw: string, guard: GuardFn): { svg: string } | { problem: string } {
+/** Gemeinsame Prüfung: SVG finden, wohlgeformt, vom Bereiniger angenommen. Liefert das SVG oder die Ursache. */
+function check(raw: string, guard: GuardFn): { svg: string } | { fault: AnswerFault } {
   const svg = extractSvg(raw);
-  if (svg === null) return { problem: NO_SVG };
+  if (svg === null) return { fault: { code: "no-svg" } };
   const syntax = scanElements(svg).issues.find((i) => i.kind === "syntax");
-  if (syntax !== undefined) return { problem: `Das SVG ist nicht wohlgeformt: ${syntax.message} (Offset ${syntax.offset}).` };
+  if (syntax !== undefined) return { fault: { code: "not-wellformed", detail: syntax.message, offset: syntax.offset } };
   const g = guard(svg);
-  if (!g.ok) return { problem: guardProblemsLine(g.problems) };
+  if (!g.ok) return { fault: { code: "guard", problems: g.problems } };
   return { svg };
 }
 
-export function validateCreate(raw: string, o: { guard: GuardFn; prompt: string }): Verdict<CreateValue> {
+export function validateCreate(raw: string, o: { guard: GuardFn; prompt: string }): AnswerVerdict<CreateValue> {
   const c = check(raw, o.guard);
-  if ("problem" in c) return { ok: false, problem: c.problem };
+  if ("fault" in c) return failWith(c.fault);
   const withIds = assignMissingIds(c.svg);
   const svg = hasRealMeasures(o.prompt) ? ensureUnit(withIds.text, "cm") : withIds.text;
   return { ok: true, value: { svg, assignedIds: withIds.assigned } };
 }
 
 /** Elemente ohne `id` (außer `style`, `title`, `desc`): das Modell soll sie nicht anlegen (Spec § 5.1). */
-function missingId(svg: string): string | null {
+function missingId(svg: string): AnswerFault | null {
   const els = scanElements(svg).elements;
   for (let i = 0; i < els.length; i++) {
     const e = els[i];
     if (e.parentKey === null || e.id !== null || e.tag === "style" || e.tag === "title" || e.tag === "desc") continue;
-    return `Element <${e.tag}> (Nummer ${i + 1}) hat keine id.`;
+    return { code: "no-id", tag: e.tag, n: i + 1 };
   }
   return null;
 }
 
-export function validateRefine(raw: string, o: { guard: GuardFn; base: string }): Verdict<RefineValue> {
+export function validateRefine(raw: string, o: { guard: GuardFn; base: string }): AnswerVerdict<RefineValue> {
   const c = check(raw, o.guard);
-  if ("problem" in c) return { ok: false, problem: c.problem };
+  if ("fault" in c) return failWith(c.fault);
   const noId = missingId(c.svg);
-  if (noId !== null) return { ok: false, problem: noId };
+  if (noId !== null) return failWith(noId);
   const was = canonDocument(o.base);
-  if (was !== null && was === canonDocument(c.svg)) return { ok: false, problem: "Die Antwort ändert nichts am Ausgang; setze die Anweisung um." };
+  if (was !== null && was === canonDocument(c.svg)) return failWith({ code: "unchanged" });
   return { ok: true, value: { svg: c.svg, diff: diffSvg(o.base, c.svg) } };
 }
 
 /** Reparatur am Bestand: der Ausgang ist fehlerhaft, oft nicht lesbar; dann ist der Diff „nicht zerlegbar“ und die Oberfläche bietet nur „ganz ersetzen“. */
-export function validateRepair(raw: string, o: { guard: GuardFn; base: string }): Verdict<RefineValue> {
+export function validateRepair(raw: string, o: { guard: GuardFn; base: string }): AnswerVerdict<RefineValue> {
   const c = check(raw, o.guard);
-  if ("problem" in c) return { ok: false, problem: c.problem };
+  if ("fault" in c) return failWith(c.fault);
   const noId = missingId(c.svg);
-  if (noId !== null) return { ok: false, problem: noId };
+  if (noId !== null) return failWith(noId);
   return { ok: true, value: { svg: c.svg, diff: diffSvg(o.base, c.svg) } };
 }

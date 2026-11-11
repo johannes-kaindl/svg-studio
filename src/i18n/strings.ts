@@ -5,7 +5,7 @@ import { defineStrings, getLang, setLang, t, type Lang } from "../vendor/kit/i18
 import type { QualityTexts } from "../vendor/kit/measured-quality";
 import type { LabelTexts } from "../core/diff-labels";
 import type { MeasureTexts } from "../core/measure-line";
-import type { GuardProblem } from "../core/protocol";
+import type { AnswerFault, GuardProblem } from "../core/protocol";
 import type { Problem } from "../core/problem";
 import type { PanelStrings } from "../obsidian/panel/shell";
 import type { AcceptStrings } from "../vendor/kit-obsidian/panel-accept";
@@ -31,6 +31,11 @@ const EN: Record<string, string> = {
   "block.costly": "This SVG is expensive to draw (about {0} % of the allowed cost), so it is shown in the note only after a click.",
   "preview.costly": "This SVG is expensive to draw (about {0} % of the allowed cost), so the preview is shown only after a click.",
   "block.rejected": "This SVG cannot be shown: the sanitizer rejected it.",
+  "fault.no-svg": "The answer contains no <svg>…</svg>.",
+  "fault.not-wellformed": "The SVG is not well-formed: {0} (offset {1}).",
+  "fault.guard": "The checker rejects the SVG: {0}",
+  "fault.no-id": "Element <{0}> (number {1}) has no id.",
+  "fault.unchanged": "The answer changes nothing in the original; carry out the instruction.",
   "block.problem": "{0}: {1}",
   "block.problem.too-costly": "too-costly: this SVG would take too long to draw (about {0} times the allowed cost). Use fewer nested masks, markers or filters and fewer blurred shapes.",
   "block.problem.too-costly-over": "too-costly: this SVG would take far too long to draw (far above the allowed cost). Use fewer nested masks, markers or filters and fewer blurred shapes.",
@@ -313,6 +318,11 @@ const DE: Record<string, string> = {
   "block.costly": "Dieses SVG ist aufwendig zu zeichnen (rund {0} % der erlaubten Kosten) und wird in der Notiz erst nach einem Klick gezeigt.",
   "preview.costly": "Dieses SVG ist aufwendig zu zeichnen (rund {0} % der erlaubten Kosten), die Vorschau erscheint deshalb erst nach einem Klick.",
   "block.rejected": "Dieses SVG lässt sich nicht anzeigen: der Bereiniger hat es abgelehnt.",
+  "fault.no-svg": "Die Antwort enthält kein <svg>…</svg>.",
+  "fault.not-wellformed": "Das SVG ist nicht wohlgeformt: {0} (Offset {1}).",
+  "fault.guard": "Der Bereiniger lehnt ab: {0}",
+  "fault.no-id": "Element <{0}> (Nummer {1}) hat keine id.",
+  "fault.unchanged": "Die Antwort ändert nichts am Ausgang; setze die Anweisung um.",
   "block.problem": "{0}: {1}",
   "block.problem.too-costly": "too-costly: dieses SVG wäre zu aufwendig zu zeichnen (rund {0}-fach über den erlaubten Kosten). Nimm weniger verschachtelte Masken, Marker oder Filter und weniger weichgezeichnete Formen.",
   "block.problem.too-costly-over": "too-costly: dieses SVG wäre viel zu aufwendig zu zeichnen (weit über den erlaubten Kosten). Nimm weniger verschachtelte Masken, Marker oder Filter und weniger weichgezeichnete Formen.",
@@ -704,6 +714,17 @@ export function guardProblemText(p: GuardProblem, tr: T = t): string {
   if (p.cost === undefined || p.limit === undefined || !Number.isFinite(p.cost) || !(p.limit > 0)) return tr("block.problem.too-costly-over");
   const ratio = p.cost / p.limit;
   return tr("block.problem.too-costly", ratio >= 10 ? String(Math.round(ratio)) : String(Math.round(ratio * 10) / 10));
+}
+
+/** Die Ursache, an der eine Modellantwort scheiterte, als Satz in der Sprache der Oberfläche (der Satz für das Modell ist `faultLine` im Kern und bleibt deutsch). */
+export function faultText(f: AnswerFault, tr: T = t): string {
+  switch (f.code) {
+    case "no-svg": return tr("fault.no-svg");
+    case "not-wellformed": return tr("fault.not-wellformed", f.detail, f.offset);
+    case "guard": return tr("fault.guard", f.problems.map((p) => guardProblemText(p, tr)).join("; "));
+    case "no-id": return tr("fault.no-id", f.tag, f.n);
+    case "unchanged": return tr("fault.unchanged");
+  }
 }
 
 /** Die Wörter der Beschriftung von Einträgen (`core/diff-labels.ts`). */

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildCreateMessages, buildRefineMessages, buildRepairMessages, COST_HINT, CREATE_SYSTEM, extractSvg, guardProblemsLine, hasRealMeasures, promptFingerprint,
-  REFINE_SYSTEM, RETRY_INSTRUCTION, validateCreate, validateRefine, validateRepair, type GuardFn,
+  faultLine, REFINE_SYSTEM, RETRY_INSTRUCTION, validateCreate, validateRefine, validateRepair, type GuardFn,
 } from "../../src/core/protocol";
 
 // So setzt `loadSystem` in scripts/svg-lab.ts die Prompts der Messung zusammen.
@@ -149,7 +149,7 @@ describe("validateRefine", () => {
   });
   it("Bereiniger und Syntax wie beim Erzeugen", () => {
     expect(validateRefine(SVG, { guard: badGuard, base: BASE }).ok).toBe(false);
-    expect(validateRefine("nichts", o)).toEqual({ ok: false, problem: "Die Antwort enthält kein <svg>…</svg>." });
+    expect(validateRefine("nichts", o)).toEqual({ ok: false, problem: "Die Antwort enthält kein <svg>…</svg>.", fault: { code: "no-svg" } });
   });
 });
 
@@ -178,6 +178,24 @@ describe("guardProblemsLine (Satz für das Modell zu den Befunden des Bereiniger
   it("validateCreate reicht den Hinweis an die Rückfrage durch", () => {
     const g: GuardFn = () => ({ ok: false, problems: [{ code: "too-costly", kind: "cost", cost: 2000000, limit: 1000000, detail: "estimated render cost 2000000 exceeds the limit of 1000000" }] });
     const v = validateCreate(`<svg xmlns="http://www.w3.org/2000/svg"><rect id="a"/></svg>`, { guard: g, prompt: "x" });
-    expect(v).toEqual({ ok: false, problem: `Der Bereiniger lehnt ab: too-costly: estimated render cost 2000000 exceeds the limit of 1000000. ${COST_HINT}` });
+    expect(v).toMatchObject({ ok: false, problem: `Der Bereiniger lehnt ab: too-costly: estimated render cost 2000000 exceeds the limit of 1000000. ${COST_HINT}`, fault: { code: "guard" } });
+  });
+});
+
+describe("AnswerFault: die Ursache als Wert neben dem Satz für das Modell", () => {
+  it("jede Ursache hat einen deutschen Satz für das Modell und trägt ihre Parameter", () => {
+    expect(faultLine({ code: "no-svg" })).toBe("Die Antwort enthält kein <svg>…</svg>.");
+    expect(faultLine({ code: "not-wellformed", detail: "<g> nicht geschlossen", offset: 12 })).toBe("Das SVG ist nicht wohlgeformt: <g> nicht geschlossen (Offset 12).");
+    expect(faultLine({ code: "no-id", tag: "rect", n: 3 })).toBe("Element <rect> (Nummer 3) hat keine id.");
+    expect(faultLine({ code: "unchanged" })).toBe("Die Antwort ändert nichts am Ausgang; setze die Anweisung um.");
+  });
+  it("die Validatoren melden die Ursache: nicht wohlgeformt, ohne id, unverändert", () => {
+    const base = `<svg xmlns="http://www.w3.org/2000/svg"><rect id="a" width="1" height="1"/></svg>`;
+    const g: GuardFn = () => ({ ok: true });
+    const bad = validateCreate(`<svg xmlns="http://www.w3.org/2000/svg"><g></svg>`, { guard: g, prompt: "x" });
+    expect(!bad.ok && bad.fault.code).toBe("not-wellformed");
+    const noId = validateRefine(`<svg xmlns="http://www.w3.org/2000/svg"><rect width="2" height="2"/></svg>`, { guard: g, base });
+    expect(noId).toMatchObject({ ok: false, fault: { code: "no-id", tag: "rect", n: 2 } });
+    expect(validateRefine(base, { guard: g, base })).toMatchObject({ ok: false, fault: { code: "unchanged" } });
   });
 });

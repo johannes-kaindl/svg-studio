@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { HAND_LABEL } from "../src/core/fields";
-import { initStrings, problemText, STRINGS, t } from "../src/i18n/strings";
+import { faultText, initStrings, problemText, STRINGS, t } from "../src/i18n/strings";
 
 describe("Oberflächentexte", () => {
   it("beide Sprachen haben dieselben Schlüssel", () => {
@@ -89,5 +89,24 @@ describe("Zahlenfelder", () => {
     initStrings("de");
     expect(problemText({ code: "field-readonly", params: ["rotate", "matrix"] })).toBe("Das Feld „rotate“ ist schreibgeschützt: Das transform ist eine Matrix: im Code ändern.");
     initStrings("en");
+  });
+});
+
+describe("faultText: die Ursache einer ungültigen Modellantwort in der Sprache der Oberfläche", () => {
+  const guard = { code: "too-costly", kind: "cost" as const, cost: 2_000_000, limit: 1_000_000, detail: "estimated render cost 2000000 exceeds the limit of 1000000" };
+  it("englisch: kein deutscher Satz des Modells in der Oberfläche", () => {
+    initStrings("en");
+    expect(faultText({ code: "no-svg" })).toBe("The answer contains no <svg>…</svg>.");
+    expect(faultText({ code: "not-wellformed", detail: "x", offset: 4 })).toBe("The SVG is not well-formed: x (offset 4).");
+    expect(faultText({ code: "no-id", tag: "rect", n: 2 })).toBe("Element <rect> (number 2) has no id.");
+    expect(faultText({ code: "unchanged" })).toBe("The answer changes nothing in the original; carry out the instruction.");
+    const g = faultText({ code: "guard", problems: [guard] });
+    expect(g).toMatch(/^The checker rejects the SVG: too-costly: this SVG would take too long to draw \(about 2 times/);
+    expect(g).not.toMatch(/Bereiniger|Weichzeichner/);
+  });
+  it("deutsch: dieselben Ursachen", () => {
+    initStrings("de");
+    expect(faultText({ code: "no-svg" })).toBe("Die Antwort enthält kein <svg>…</svg>.");
+    expect(faultText({ code: "guard", problems: [guard] })).toMatch(/^Der Bereiniger lehnt ab: too-costly: dieses SVG wäre zu aufwendig/);
   });
 });

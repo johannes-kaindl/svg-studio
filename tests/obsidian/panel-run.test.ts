@@ -78,7 +78,8 @@ describe("Lauf: Erzeugen mit Rückfrage", () => {
     expect(round.art).toBe("create");
     expect(round.result).toBe(SVG_OK);
     expect(seen.start).toBe("Asking qwen/qwen3.8-27b… This can take minutes with local models.");
-    expect(seen.attempt2).toMatch(/^Attempt 2 of 3: answer invalid \(Der Bereiniger lehnt ab/);
+    expect(seen.attempt2).toMatch(/^Attempt 2 of 3: answer invalid \(The checker rejects the SVG: /);
+    expect(seen.attempt2).not.toMatch(/Bereiniger|Antwort/);
     expect(seen.tail2).toBe("");
     // Bei Erfolg zeigen Runde und Vorschau das Ergebnis; der rohe Quelltext der Antwort bleibt nicht stehen (C5: er schob die Vorschau nach unten).
     expect(tail(s.root)).toBe("");
@@ -142,7 +143,7 @@ describe("Lauf: Erzeugen mit Rückfrage", () => {
     await send(s, "x");
     expect(s.complete).toHaveBeenCalledTimes(3);
     expect(s.shell.session().rounds.rounds).toHaveLength(0);
-    expect(label(s.root)).toContain("The answer could not be used: Die Antwort enthält kein <svg>");
+    expect(label(s.root)).toContain("The answer could not be used: The answer contains no <svg>…</svg>.");
     expect(label(s.root)).toContain("The answer could not be turned into an SVG.");
     expect(tail(s.root)).toBe("Tut mir leid.");
   });
