@@ -54,7 +54,11 @@ function watch(doc: Document, o: EmbedButtonOptions): () => void {
 export function openDocuments(workspace: Workspace): Document[] {
   const docs = new Set<Document>([activeDocument]);
   if (typeof workspace.iterateAllLeaves === "function") {
-    workspace.iterateAllLeaves((leaf) => { docs.add(leaf.view.containerEl.ownerDocument); });
+    workspace.iterateAllLeaves((leaf) => {
+      // Ein Blatt, dessen Ansicht noch nicht geladen ist, hat nicht in jedem Zustand ein Wurzelelement.
+      const doc = (leaf.view as { containerEl?: { ownerDocument?: Document } } | undefined)?.containerEl?.ownerDocument;
+      if (doc !== undefined) docs.add(doc);
+    });
   }
   return [...docs];
 }

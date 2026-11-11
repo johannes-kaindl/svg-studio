@@ -106,7 +106,7 @@ describe("installEmbedButtons", () => {
   it("openDocuments: Hauptfenster plus die Fenster aller offenen Blätter, ohne Dubletten (Gesamtreview Befund 11)", () => {
     const pop = new Window();
     const leaf = (doc: unknown): { view: { containerEl: { ownerDocument: unknown } } } => ({ view: { containerEl: { ownerDocument: doc } } });
-    const ws = { iterateAllLeaves: (cb: (l: unknown) => void) => { [leaf(document), leaf(pop.document), leaf(pop.document)].forEach(cb); } };
+    const ws = { iterateAllLeaves: (cb: (l: unknown) => void) => { [leaf(document), leaf(pop.document), leaf(pop.document), { view: {} }, {}].forEach(cb); } };
     const docs = openDocuments(ws as never);
     expect(docs).toHaveLength(2);
     expect(docs).toContain(document);
