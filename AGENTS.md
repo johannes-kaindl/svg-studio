@@ -8,9 +8,9 @@ Orientierung für KI-Agenten (Claude Code, Codex, …) und Mitwirkende an diesem
 
 ## Project character
 
-Obsidian-Plugin `svg-studio` („SVG Studio“) von Johannes Kaindl, nicht veröffentlicht. Der Nutzer beschreibt ein Icon, Logo, Schema oder einen Grundriss in Worten und bekommt ein echtes, exaktes SVG in seine Notiz; danach verbessert er es in Runden, per Prompt oder an einzelnen Zahlen, und nimmt jede Änderung eines Elements einzeln an oder lehnt sie ab. Die 2D-Schwester von `3d-codeblocks`. Endpunkte und Modelle kommen über das Kit (`llm-endpoint-manager`), das Plugin trägt keine eigenen Schlüssel.
+Obsidian-Plugin `svg-studio` („SVG Studio“) von Johannes Kaindl, im Community-Store (0.1.2, Passed · Excellent, gemessen 2026-11-12). Der Nutzer beschreibt ein Icon, Logo, Schema oder einen Grundriss in Worten und bekommt ein echtes, exaktes SVG in seine Notiz; danach verbessert er es in Runden, per Prompt oder an einzelnen Zahlen, und nimmt jede Änderung eines Elements einzeln an oder lehnt sie ab. Die 2D-Schwester von `3d-codeblocks`. Endpunkte und Modelle kommen über das Kit (`llm-endpoint-manager`), das Plugin trägt keine eigenen Schlüssel.
 
-Stand 2026-11-05: Version 1 ist gebaut, aber nicht veröffentlicht (Plan 1 und Plan 2 abgeschlossen: Fachkern, Diff, Protokoll, Rendern als Bild, Panel mit Modellzeile, Lauf mit Rückfrage, Prüfliste, Zahlenfelder, Übernehmen als Datei und Block, Reparatur am Bestand; GUI-Smoke gegen eine Zweitinstanz grün). Das erste Release braucht Johannes' ausdrückliche Freigabe (E6). Spec, Pläne, Messnote und Tasks liegen im Coding-Cockpit des Maintainers unter `25_Coding/svg-studio/` (vault-relativ, maintainer-lokal, `$CODING_COCKPIT_VAULT`).
+Stand 2026-11-12: Version 1 ist gebaut und veröffentlicht (0.1.0 am 2026-11-05 ohne GitHub-Release, 0.1.1, 0.1.2; Plan 1 und Plan 2 abgeschlossen: Fachkern, Diff, Protokoll, Rendern als Bild, Panel mit Modellzeile, Lauf mit Rückfrage, Prüfliste, Zahlenfelder, Übernehmen als Datei und Block, Reparatur am Bestand; GUI-Smoke gegen eine Zweitinstanz grün). Jedes Release fährt der Master über `release.mjs` nach Johannes' Freigabe (eine Klickfrage je Welle und Linie). Spec, Pläne, Messnote und Tasks liegen im Coding-Cockpit des Maintainers unter `25_Coding/svg-studio/` (vault-relativ, maintainer-lokal, `$CODING_COCKPIT_VAULT`).
 
 ## Architecture principles
 
@@ -35,7 +35,7 @@ npm run smoke:gui -- --port 9660 [--nur <punkt,…>] [--bilder <ordner>]   # GUI
 sh tools/sync-kit.sh [--check]   # Kit vendoren bzw. Drift messen
 ```
 
-Release-Infra steht (`release.yml`, `versions.json`, Remote `github` privat; `npm run release` und `npm run preflight` brauchen das Dach, GitHub bekommt Branch und Tag nur über `release.mjs`); das erste Release fährt der Master mit Johannes' Freigabe. README-Bilder: `npm run shots` (Zweitinstanz, Vertrag `docs/images/README.md`), `npm run shots:check` prüft sie. `npm run deploy` kopiert den Build nach `$OBSIDIAN_PLUGIN_DIR` (für Messungen am Gerät).
+Release-Infra steht (`release.yml`, `versions.json`, Remote `github` öffentlich; `npm run release` und `npm run preflight` brauchen das Dach, GitHub bekommt Branch und Tag nur über `release.mjs`); ein Release fährt der Master mit Johannes' Freigabe, danach Rescan und Scorecard lesen. README-Bilder: `npm run shots` (Zweitinstanz, Vertrag `docs/images/README.md`), `npm run shots:check` prüft sie. `npm run deploy` kopiert den Build nach `$OBSIDIAN_PLUGIN_DIR` (für Messungen am Gerät).
 
 ## Conventions
 
