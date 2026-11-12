@@ -200,6 +200,14 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
     }
     return lo;
   };
+  // Die Schlüssel für die Meldung „kein Element“: höchstens 20, sonst wüchse sie mit jeder unbekannten id um das ganze Dokument (50 ids auf 2 000 Elementen: 648 000 Zeichen; Reste Plan 2 B2, Punkt 3). Einmal gebaut, nicht je Meldung.
+  let known: string | null = null;
+  const knownKeys = (): string => {
+    if (known !== null) return known;
+    const names = elements.filter((e) => !isUnnamedKey(e.key)).map((e) => e.key);
+    known = names.length === 0 ? "keine" : names.slice(0, 20).join(", ") + (names.length > 20 ? ` … und ${String(names.length - 20)} weitere` : "");
+    return known;
+  };
   const resolve = (label: string, key: string | null, asParent: boolean): SvgElement | null => {
     const k = key === null && asParent ? ROOT_KEY : key;
     if (k !== null && isUnnamedKey(k)) {
@@ -208,8 +216,7 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
     }
     const hits = k === null ? undefined : byKey.get(k);
     if (hits === undefined || k === null) {
-      const names = elements.filter((e) => !isUnnamedKey(e.key)).map((e) => e.key);
-      problems.push(`${label}: kein Element "${k}" (vorhanden: ${names.join(", ") || "keine"})`);
+      problems.push(`${label}: kein Element "${k}" (vorhanden: ${knownKeys()})`);
       return null;
     }
     if (hits.length > 1) {

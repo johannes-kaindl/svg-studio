@@ -10,7 +10,7 @@
 import { writeFileSync } from "node:fs";
 
 import { parseArgs, runDriver } from "../../tools/obsidian-cdp/bilanz.js";
-import { attachTo, requireVisible } from "../../tools/obsidian-cdp/cdp.js";
+import { attachTo, bereiteInstanzVor, requireVisible } from "../../tools/obsidian-cdp/cdp.js";
 // @ts-expect-error mjs ohne Typen (code-kit, Messfälle der Kostenschätzung)
 import * as cases from "../../../libs/code-kit/scripts/lib/svg-cost-cases.mjs";
 
@@ -30,7 +30,8 @@ const FAELLE: Fall[] = [
   { name: "10x mask600 gleichzeitig", svg: () => cases.maskMany(600, 1), anzahl: 10 },
 ];
 
-const LAUFE = 3;
+/** Läufe je Fall und Arm; `--laeufe <n>` überschreibt (Task „Raster-Messung in Ruhe wiederholen“: fünf). */
+const LAUFE_STANDARD = 3;
 
 /** Läuft im Renderer: zeichnet `anzahl` Bilder, misst bis zur Ruhe (1,5 s ohne Lücke über 100 ms, höchstens `maxMs`). */
 const messe = (svgTexte: string[], maxMs: number): string => `
@@ -72,9 +73,13 @@ async function main(): Promise<void> {
   if (!Number.isInteger(port)) throw new Error("--port <Port> ist Pflicht (Zweitinstanz)");
   const arm = args.value("arm") ?? "?";
   const aus = args.value("aus");
+  const LAUFE = Number(args.value("laeufe") ?? LAUFE_STANDARD);
   const cdp = await attachTo("workspace", port, "svg-studio");
   if (cdp === null) throw new Error(`Kein Obsidian-Hauptfenster auf Port ${String(port)}`);
-  await requireVisible(cdp);
+  // Frisches Profil: Vertrauensdialog bestätigen, damit der Workspace da ist (die Messung braucht kein Plugin).
+  const klar = await bereiteInstanzVor(cdp, { pluginIds: [], nurVault: "svg-studio", sprache: "en" });
+  console.log(`Instanz: ${klar.hinweis}`);
+  await requireVisible(cdp, args.has("vordergrund") ? { vordergrund: "nehmen" } : {});
   const info = await cdp.evaluate<string>(`return JSON.stringify({ dpr: window.devicePixelRatio, ua: navigator.userAgent, sichtbar: document.visibilityState, gpu: !!document.createElement("canvas").getContext("webgl") });`);
   console.log(`Arm ${arm}: ${info}`);
   const zeilen: Array<{ fall: string; laeufe: Messung[] }> = [];

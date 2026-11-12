@@ -668,3 +668,28 @@ describe("applyChanges: lange Zeilen (Review B2, Befund 3 und 7)", () => {
     expect(() => applyChanges(T, changes)).not.toThrow();
   });
 });
+
+describe("applyChanges: Meldung bei unbekannter id bleibt klein (Reste Plan 2 B2, Punkt 3)", () => {
+  const many = `<svg xmlns="http://www.w3.org/2000/svg">${Array.from({ length: 2000 }, (_, i) => `<g id="element-mit-langem-namen-${String(i)}"/>`).join("")}</svg>`;
+
+  it("50 unbekannte ids auf 2000 Elementen: jede Meldung nennt höchstens 20 vorhandene Schlüssel und die Zahl der übrigen", () => {
+    const changes: SvgChange[] = Array.from({ length: 50 }, (_, i) => ({ op: "change", id: `gibt-es-nicht-${String(i)}`, attrs: { fill: "red" } }));
+    const r = applyChanges(many, changes);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.problems).toHaveLength(50);
+    const first = r.problems[0]!;
+    expect(first).toContain(`kein Element "gibt-es-nicht-0"`);
+    expect(first).toContain("element-mit-langem-namen-18");
+    expect(first).not.toContain("element-mit-langem-namen-21");
+    expect(first).toContain("und 1981 weitere");
+    expect(r.problems.join("").length).toBeLessThan(50 * 800);
+  });
+
+  it("wenige Elemente: alle Schlüssel stehen da, kein „weitere“", () => {
+    const r = applyChanges(`<svg xmlns="http://www.w3.org/2000/svg"><g id="a"/><g id="b"/></svg>`, [{ op: "change", id: "x", attrs: { fill: "red" } }]);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.problems[0]).toBe(`Änderung 1 (change): kein Element "x" (vorhanden: #wurzel, a, b)`);
+  });
+});
