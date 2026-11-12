@@ -1,6 +1,7 @@
 // Der Lauf des Panels (Spec § 8 „In der Runde“): Erzeugen und Verfeinern mit Rückfrage bei ungültiger Antwort, dann eine Runde im Rundenmodell.
 // Formatgebunden (SVG); der Kern `shell.ts` ruft ihn über den Slot `run`. Sampling (Modus `transform`, Temperatur 0,2, Denken aus, `max_tokens` 16384) setzt
 // die Verbindung in `main.ts`; hier steht nur, was zum Protokoll gehört.
+import { inputOverflow, OPTIMISTIC_CHARS_PER_TOKEN } from "../../core/context-fit";
 import { describeEntry } from "../../core/diff-labels";
 import { buildCreateMessages, buildRefineMessages, buildRepairMessages, RETRY_INSTRUCTION, validateCreate, validateRefine, validateRepair, type AnswerVerdict, type GuardFn } from "../../core/protocol";
 import { svgFailureHint } from "../../core/quality";
@@ -28,6 +29,26 @@ export interface SvgRunDeps {
   llm: Pick<LlmConnection, "complete" | "source">;
   readTargetText: (t: Target) => Promise<string | null>;
   guard?: GuardFn;
+  /** Der Kontext, den das Modell am Endpunkt jetzt hat (Token), `null` wenn der Endpunkt ihn nicht nennt. Fehlt die Abhängigkeit oder wirft sie, wird nicht geprüft. */
+  contextLimit?: () => Promise<number | null>;
+}
+
+/** Unter dieser geschätzten Größe lohnt die Abfrage beim Endpunkt nicht: kein Modell, das ein Panel antreibt, hat weniger Kontext. */
+const CONTEXT_CHECK_FROM_TOKENS = 1000;
+
+/** Passt die Eingabe in den Kontext des Modells? Eine Meldung, wenn selbst die optimistische Schätzung nicht passt (Gesamtreview Befund 9), sonst `null`. Wirft nicht. */
+async function overflowMessage(messages: ReadonlyArray<{ content: string }>, d: SvgRunDeps): Promise<string | null> {
+  if (d.contextLimit === undefined) return null;
+  const chars = messages.reduce((n, m) => n + m.content.length, 0);
+  if (chars < CONTEXT_CHECK_FROM_TOKENS * OPTIMISTIC_CHARS_PER_TOKEN) return null;
+  let limit: number | null;
+  try {
+    limit = await d.contextLimit();
+  } catch {
+    return null;
+  }
+  const over = inputOverflow(messages, limit);
+  return over === null ? null : t("run.inputTooBig", over.tokens, over.limit);
 }
 
 const error = (message: string): RunResult<SvgSession> => ({ ok: false, kind: "error", message });
@@ -72,7 +93,11 @@ export async function runSvgPrompt(call: RunCall<SvgSession>, d: SvgRunDeps): Pr
     const last = activeRound(session.rounds);
     const texts = labelTexts();
     const feedback = last === null ? [] : feedbackOf(last, (e) => describeEntry(e, texts).title);
-    const res = await askUntilValid(ask, (raw) => wrap(validateRefine(raw, { guard, base })), opts(buildRefineMessages(base, instruction, feedback)));
+    const messages = buildRefineMessages(base, instruction, feedback);
+    const tooBig = await overflowMessage(messages, d);
+    if (call.signal.aborted) return { ok: false, kind: "aborted" };
+    if (tooBig !== null) return error(tooBig);
+    const res = await askUntilValid(ask, (raw) => wrap(validateRefine(raw, { guard, base })), opts(messages));
     if (!res.ok) return failed(res, call, task, d, shownProblem());
     const diff = res.value.diff;
     // Zerlegbar: die Einträge der Prüfliste; sonst ein Eintrag „Ganzes Bild ersetzt“ (Spec Nr. 12), nie still verloren.
@@ -128,7 +153,11 @@ export async function runSvgRepair(call: RunCall<SvgSession>, d: SvgRunDeps, o: 
   const start = session.rounds.rounds.length === 0 ? { ...session, startText: o.text } : session;
   call.io.start();
   try {
-    const res = await askUntilValid(ask, (raw) => wrap(validateRepair(raw, { guard, base: o.text })), opts(buildRepairMessages(o.text, o.problem)));
+    const messages = buildRepairMessages(o.text, o.problem);
+    const tooBig = await overflowMessage(messages, d);
+    if (call.signal.aborted) return { ok: false, kind: "aborted" };
+    if (tooBig !== null) return error(tooBig);
+    const res = await askUntilValid(ask, (raw) => wrap(validateRepair(raw, { guard, base: o.text })), opts(messages));
     if (!res.ok) return failed(res, call, "repair", d, shownProblem());
     const diff = res.value.diff;
     const body: SvgRound["body"] = diff.decomposable ? { form: "list", entries: diff.entries, decisions: [] } : { form: "whole", text: res.value.svg, decision: "accepted" };

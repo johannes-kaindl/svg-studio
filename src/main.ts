@@ -16,6 +16,8 @@ import { pickLang } from "./vendor/kit/i18n";
 import { checkSvg } from "./vendor/kit/svg-guard";
 import { onLevelFor, thinkingFor, withThinkingLevel, type ThinkingLevel } from "./vendor/kit/sampling-profiles";
 import { findEndpointManager, onEndpointManagerChanged } from "./vendor/kit-obsidian/endpoint-source";
+import { fetchEndpointContext } from "./vendor/kit-obsidian/backend-probe";
+import { effectiveContext } from "./vendor/kit/model-context";
 import { confirmAction } from "./vendor/kit-obsidian/confirm";
 import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
 import { obsidianWritePorts } from "./vendor/kit-obsidian/write-ports";
@@ -26,6 +28,27 @@ export default class SvgStudioPlugin extends Plugin {
   llm!: LlmConnection;
   /** Die Sitzung eines geschlossenen Panels, deren Runden der Nutzer behalten wollte. */
   private stashed: SvgSession | null = null;
+
+  /** Kontext je Endpunkt und Modell, nur kurz gemerkt: der Nutzer kann das Modell im Server jederzeit mit anderer Länge neu laden. */
+  private contextMemo = new Map<string, { at: number; limit: number | null }>();
+
+  /** Der Kontext des Modells, das die nächste Anfrage nutzt (Token), `null` wenn der Endpunkt ihn nicht nennt oder nichts aufgelöst ist. Wirft nicht (Gesamtreview Befund 9). */
+  async modelContextLimit(): Promise<number | null> {
+    try {
+      const r = await this.llm.resolve();
+      const url = r.config?.url;
+      const model = this.llm.modelInUse() || r.model;
+      if (url === undefined || model === "") return null;
+      const key = `${url}\n${model}`;
+      const hit = this.contextMemo.get(key);
+      if (hit !== undefined && Date.now() - hit.at < 60_000) return hit.limit;
+      const limit = effectiveContext(await fetchEndpointContext(url, model, r.config?.apiKey));
+      this.contextMemo.set(key, { at: Date.now(), limit });
+      return limit;
+    } catch {
+      return null;
+    }
+  }
 
   async onload(): Promise<void> {
     // Sprache zuerst, vor dem ersten Befehl und Tab (UI-STANDARD § i18n).
@@ -82,6 +105,7 @@ export default class SvgStudioPlugin extends Plugin {
       // Die letzte Stellung bleibt gespeichert (Spec § 7.3); sie betrifft nur die Vorschau.
       background: { get: () => this.settings.background, set: (s) => { this.settings.background = s; void this.saveSettings(); } },
       renderGuard: this.renderGuard,
+      contextLimit: () => this.modelContextLimit(),
       readTargetText: (target) => readTargetText(this.app, target),
       // Übernehmen: Kit `panel-accept` und `block-writer`, davor ein Schnappschuss der Datei und `checkSvg` auf dem fertigen Text (Spec § 3 Punkt 4, § 7.6).
       accept: (session) => acceptSvgSession(this.acceptEnv(), session, { guard: checkSvg, firstPromptLine: firstPromptLineOf(session), pluginId: this.manifest.id }),

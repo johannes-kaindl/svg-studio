@@ -24,6 +24,8 @@ export interface SvgSlotDeps {
   background: PreviewViewDeps["background"];
   /** Absturzmarken (Laufzeit-Schutz): Vorschau und Vergleich zeichnen erst nach der Marke und nicht, solange eine steht. */
   renderGuard?: PreviewViewDeps["renderGuard"];
+  /** Der Kontext des Modells am Endpunkt (Token) für die Prüfung der Eingabe im Lauf; `null`: der Endpunkt nennt ihn nicht. */
+  contextLimit?: () => Promise<number | null>;
   /** Der Kommentar-Dialog der Prüfliste (`promptText` des Kits, vom Panel mit der App verdrahtet); ohne ihn gibt es keine Kommentar-Taste. */
   comment?: ReviewDeps["comment"];
 }
@@ -57,7 +59,7 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
     roundMeta,
     roundText: (r) => r.result,
     quality: (model, task) => svgQualityLine(model, task, { family: d.llm.source().family, thinking: d.thinkingOn(), texts: qualityTexts() }),
-    run: (call) => runSvgPrompt(call, { llm: d.llm, readTargetText: d.readTargetText }),
+    run: (call) => runSvgPrompt(call, { llm: d.llm, readTargetText: d.readTargetText, ...(d.contextLimit === undefined ? {} : { contextLimit: d.contextLimit }) }),
     renderPreview(host, _round, text) {
       view?.dispose();
       view = null;
@@ -138,7 +140,7 @@ async function renderNotices(host: HTMLElement, ctx: NoticeCtx<SvgSession>, d: S
   renderBestandNotice(host, b, {
     repair: () => {
       const instruction = t("round.repair");
-      ctx.run(instruction, (call) => runSvgRepair(call, { llm: d.llm, readTargetText: d.readTargetText }, { text, problem: repairProblem(b), instruction }));
+      ctx.run(instruction, (call) => runSvgRepair(call, { llm: d.llm, readTargetText: d.readTargetText, ...(d.contextLimit === undefined ? {} : { contextLimit: d.contextLimit }) }, { text, problem: repairProblem(b), instruction }));
     },
     names: () => { rule("names", "assign-ids", t("round.names"), t("bestand.doneNames")); },
     cleanup: () => { rule("cleanup", "strip-editor-metadata", t("round.cleanup"), t("bestand.doneCleanup")); },
