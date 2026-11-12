@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-11-12
+
 ### Added
 
 - Refining or repairing an image now checks the size of the request against the context window the model has loaded (asked from the endpoint, LM Studio and Ollama). If the input cannot fit even by a generous estimate, nothing is sent and the panel says how many tokens it needs and how many the model has; before, the server answered with an error or cut the input silently. If the endpoint does not report a context length, the request is sent as before.
