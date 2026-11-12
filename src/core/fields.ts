@@ -4,7 +4,7 @@
 // der Grund eines schreibgeschützten Felds ist ein Code (`ReadonlyReason`); nur das Wort für den Rundentitel („Von Hand“) steht hier, weil der Vertrag es mit `lang` verlangt.
 import { buildCanonTree, canonNode } from "./canon";
 import type { SvgChange } from "./changes";
-import { attr, decodeEntities, scanElements, type SvgElement } from "./elements";
+import { attr, decodeEntities, isUnnamedKey, scanElements, type SvgElement } from "./elements";
 import type { Problem } from "./problem";
 
 export type FieldKind = "number" | "text" | "color" | "translate" | "rotate";
@@ -163,15 +163,15 @@ function textContentOf(el: SvgElement, text: string, all: readonly SvgElement[])
 /** Eltern- und Vorgängerschlüssel eines Elements für das Ersetzen (`add` braucht beide); `null` mit Grund, wenn einer positionsabhängig (`@n`) wäre. */
 function placement(el: SvgElement, all: readonly SvgElement[]): { parent: string | null; after: string | null } | null {
   const parent = el.parentKey === null || el.parentKey === "#wurzel" ? null : el.parentKey;
-  if (parent !== null && parent.startsWith("@")) return null;
+  if (parent !== null && isUnnamedKey(parent)) return null;
   let prev: SvgElement | null = null;
   for (const e of all) if (e.parentKey === el.parentKey && e.start < el.start && (prev === null || e.start > prev.start)) prev = e;
-  if (prev !== null && prev.key.startsWith("@")) return null;
+  if (prev !== null && isUnnamedKey(prev.key)) return null;
   return { parent, after: prev === null ? null : prev.key };
 }
 
 function blocked(el: SvgElement, all: readonly SvgElement[]): ReadonlyReason | null {
-  if (el.key.startsWith("@")) return "unnamed";
+  if (isUnnamedKey(el.key)) return "unnamed";
   if (all.filter((e) => e.key === el.key).length > 1) return "ambiguous";
   return null;
 }

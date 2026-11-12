@@ -35,7 +35,7 @@
 //   geschrieben (ein wörtlicher Zeilenumbruch würde vom XML-Parser zu einem Leerzeichen normalisiert).
 // - Der Schreibweg (Plan 2) prüft das Ergebnis vor dem Schreiben per DOMParser auf Wohlgeformtheit (nicht den ganzen svg-guard).
 import { canonNode, canonTreeOf } from "./canon";
-import { attr, scanElements, type SvgElement } from "./elements";
+import { attr, isUnnamedKey, scanElements, type SvgElement } from "./elements";
 
 export type SvgChange =
   | { op: "change"; id: string; attrs: Record<string, string | null> }
@@ -202,13 +202,13 @@ export function applyChanges(text: string, changes: readonly SvgChange[]): Apply
   };
   const resolve = (label: string, key: string | null, asParent: boolean): SvgElement | null => {
     const k = key === null && asParent ? ROOT_KEY : key;
-    if (k !== null && k.startsWith("@")) {
+    if (k !== null && isUnnamedKey(k)) {
       problems.push(`${label}: Schlüssel "${k}" ist positionsabhängig und nicht zulässig (nur id oder fester Schlüssel wie #wurzel)`);
       return null;
     }
     const hits = k === null ? undefined : byKey.get(k);
     if (hits === undefined || k === null) {
-      const names = elements.filter((e) => !e.key.startsWith("@")).map((e) => e.key);
+      const names = elements.filter((e) => !isUnnamedKey(e.key)).map((e) => e.key);
       problems.push(`${label}: kein Element "${k}" (vorhanden: ${names.join(", ") || "keine"})`);
       return null;
     }

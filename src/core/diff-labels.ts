@@ -11,6 +11,7 @@
 // in dem Ganzen steckt (Reste aus Plan 2 B3, Punkt 1: Attributänderungen an Nachkommen eines ersetzten oder eingepackten Elements).
 import { canonDocument } from "./canon";
 import type { DiffEntry } from "./diff";
+import { isUnnamedKey } from "./elements";
 import { diffWords, wordDiffSegments } from "../vendor/kit/word-diff";
 
 export interface LabelTexts {
@@ -110,7 +111,7 @@ function shorten(segs: Seg[]): Seg[] {
 export function describeEntry(e: DiffEntry, t: LabelTexts): EntryText {
   const fixed = fixedKind(e.key);
   const subject = e.key === "#wurzel" ? t.root : fixed !== null ? t.fixed(fixed) : `${t.tag(e.tag)} ${e.key}`;
-  const jumpId = e.key.startsWith("#") || e.key.startsWith("@") ? null : e.key;
+  const jumpId = e.key.startsWith("#") || isUnnamedKey(e.key) ? null : e.key;
   const whole = (title: string, kind: Seg["kind"], changeKind: EntryText["changeKind"]): EntryText => ({ title, segments: [{ kind, text: title }], changeKind, jumpId });
   // Feste Schlüssel stehen ohne Doppelpunkt („Stil geändert“): es gibt nur einen davon, eine `id` braucht der Leser nicht.
   const verb = (word: string): string => (fixed !== null ? `${subject} ${word}` : `${subject}: ${word}`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attr, scanElements } from "../../src/core/elements";
+import { attr, isUnnamedKey, scanElements } from "../../src/core/elements";
 
 const find = (els: ReturnType<typeof scanElements>["elements"], key: string) => {
   const el = els.find((e) => e.key === key);
@@ -243,5 +243,14 @@ describe("scanElements: Attributwerte nach XML-Normalisierung und Kommentare", (
     const { comments, issues } = scanElements(text);
     expect(issues).toEqual([]);
     expect(comments).toEqual([{ start: text.indexOf("<!--"), end: text.indexOf("-->") + 3 }]);
+  });
+});
+
+describe("isUnnamedKey (ein Schlüssel für ein Element ohne id, Spec § 5.1)", () => {
+  it("`@n` ist der Schlüssel eines Elements ohne id, id und feste Schlüssel nicht", () => {
+    const { elements } = scanElements(`<svg xmlns="http://www.w3.org/2000/svg"><title>t</title><circle id="mond"/><rect/></svg>`);
+    expect(elements.map((e) => [e.key, isUnnamedKey(e.key)])).toEqual([["#wurzel", false], ["#title", false], ["mond", false], ["@1", true]]);
+    expect(isUnnamedKey("")).toBe(false);
+    expect(isUnnamedKey("a@b")).toBe(false);
   });
 });

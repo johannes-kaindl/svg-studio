@@ -6,7 +6,7 @@ import { buildCanonTree, canonDocument, canonNode, normalizeValue } from "./cano
 import { applyChanges, type SvgChange } from "./changes";
 import { changesFor, type DiffEntry } from "./diff";
 import { stripEditorMetadata } from "./editor-metadata";
-import { attr, scanElements } from "./elements";
+import { attr, isUnnamedKey, scanElements } from "./elements";
 import { assignMissingIds } from "./format";
 import type { Problem } from "./problem";
 import type { Feedback } from "./protocol";
@@ -319,7 +319,7 @@ export function refineBaseText(s: SvgSession, current: string | null): string | 
 
 /** Darf verfeinert werden? Elemente ohne `id` kann keine Änderungsliste ansprechen: dann erst „Namen vergeben“ (Review-Fokus 5 des Plans). */
 export function canRefine(base: string): { ok: true } | { ok: false; unnamed: number } {
-  const unnamed = scanElements(base).elements.filter((e) => e.key.startsWith("@")).length;
+  const unnamed = scanElements(base).elements.filter((e) => isUnnamedKey(e.key)).length;
   return unnamed === 0 ? { ok: true } : { ok: false, unnamed };
 }
 

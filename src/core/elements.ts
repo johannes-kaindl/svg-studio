@@ -408,6 +408,12 @@ export function scanElements(text: string): {
   return { elements, issues, comments };
 }
 
+/** Ist das der Schlüssel eines Elements ohne `id` (`@<laufende Nummer>`, positionsabhängig)? Er taugt weder als Anker einer Änderung noch als Ziel einer Zeile; eine echte `id` mit
+ *  diesem Anfang meldet der Scanner als Syntaxfehler, sie kann hier nie vorkommen. Die eine Stelle für die Frage, die bis dahin zehnmal als `startsWith("@")` stand. */
+export function isUnnamedKey(key: string): boolean {
+  return key.startsWith("@");
+}
+
 /** Dekodierter Wert des ersten Attributs mit diesem Namen (mit Präfix), sonst `null`. */
 export function attr(el: SvgElement, name: string): string | null {
   for (const a of el.attrs) if (a.name === name) return a.value;

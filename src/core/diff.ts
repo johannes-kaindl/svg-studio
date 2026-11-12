@@ -28,7 +28,7 @@
 // Voraussetzung: Ausgang und Antwort haben genau ein Wurzelelement und keinen DOCTYPE; `svg-guard` lehnt beides ab, bevor ein Diff gebildet wird.
 import { buildCanonTree, canonDocument, canonNode, normalizeValue, type CanonTree } from "./canon";
 import { applyChanges, type SvgChange } from "./changes";
-import { scanElements, type SvgElement } from "./elements";
+import { isUnnamedKey, scanElements, type SvgElement } from "./elements";
 
 export type ReplaceReason = "text" | "style" | "tag" | "moved-and-text" | "wrap" | "unwrap";
 export type DiffEntry =
@@ -136,7 +136,7 @@ export function diffSvg(baseText: string, answerText: string): DiffResult {
   };
   /** Schlüssel eines Elements des Ausgangs, wie eine Änderungsliste ihn ansprechen kann (Regel 8). */
   const use = (el: SvgElement): string => {
-    if (el.key.startsWith("@")) fail(`Element <${el.tag}> ohne id`);
+    if (isUnnamedKey(el.key)) fail(`Element <${el.tag}> ohne id`);
     else if ((keyCount.get(el.key) ?? 0) > 1) fail(`"${el.key}" ist mehrdeutig (${keyCount.get(el.key)} Elemente)`);
     return el.key;
   };
@@ -264,7 +264,7 @@ export function diffSvg(baseText: string, answerText: string): DiffResult {
       units.push({ pos: a, key: ea.key, tag: ea.tag, ...u });
     };
     if (root === "new") {
-      if (ea.key.startsWith("@")) fail(`Element <${ea.tag}> ohne id`);
+      if (isUnnamedKey(ea.key)) fail(`Element <${ea.tag}> ohne id`);
       let hasPaired = false;
       for (let j = a + 1; j < nA && A.elements[j].start < ea.end; j++) {
         if (aToB[j] >= 0) {

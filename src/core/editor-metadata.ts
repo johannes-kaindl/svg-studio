@@ -4,7 +4,7 @@
 // Diff sieht und annimmt. Pure.
 import type { SvgChange } from "./changes";
 import type { Problem } from "./problem";
-import { scanElements, type SvgElement } from "./elements";
+import { isUnnamedKey, scanElements, type SvgElement } from "./elements";
 
 /** Präfixe der Editor-Namensräume (Inkrementweise Liste, ergänzt nur nach Fund in einem echten Bestand). */
 const EDITOR_PREFIXES = ["sodipodi", "inkscape", "rdf", "cc", "dc"] as const;
@@ -71,7 +71,7 @@ export function stripEditorMetadata(text: string): { ok: true; changes: SvgChang
   els.forEach((e, i) => {
     if (gone[i] && !removed[i]) return;
     if (removed[i]) {
-      if (e.key.startsWith("@")) unnamed.push(names[i]);
+      if (isUnnamedKey(e.key)) unnamed.push(names[i]);
       else removes.push({ op: "remove", id: e.key });
       return;
     }
@@ -86,7 +86,7 @@ export function stripEditorMetadata(text: string): { ok: true; changes: SvgChang
       }
     }
     if (Object.keys(attrs).length === 0) return;
-    if (e.key.startsWith("@")) unnamed.push(names[i]);
+    if (isUnnamedKey(e.key)) unnamed.push(names[i]);
     else changes.push({ op: "change", id: e.key, attrs });
   });
   if (unnamed.length > 0) {
