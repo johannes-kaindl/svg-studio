@@ -3,6 +3,7 @@
 import { setIcon } from "obsidian";
 import { binaryToDataUrl } from "../vendor/kit/data-url";
 import type { checkSvg } from "../vendor/kit/svg-guard";
+import { distinctGuardProblems } from "../core/protocol";
 import { CLICK_COST, COST_LIMIT } from "../core/render-guard";
 import { guardProblemText, type T } from "../i18n/strings";
 import type { RenderGuard } from "./render-guard";
@@ -107,7 +108,7 @@ export function renderSvgBlock(source: string, el: HTMLElement, o: RenderBlockOp
   const box = wrap.createDiv({ cls: "svg-studio-error" });
   box.createEl("p", { cls: "svg-studio-error-head", text: o.t("block.rejected") });
   const list = box.createEl("ul");
-  for (const p of checked.problems) list.createEl("li", { text: guardProblemText(p, o.t) });
+  for (const p of distinctGuardProblems(checked.problems)) list.createEl("li", { text: guardProblemText(p, o.t) });
   const row = box.createDiv({ cls: "svg-studio-error-actions" });
   textButton(row, "svg-studio-repair mod-cta", o.t("block.repair"), o.onRepair);
   textButton(row, "svg-studio-edit-text", o.t("block.editShort"), o.onEdit);

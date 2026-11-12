@@ -5,7 +5,7 @@ import { defineStrings, getLang, setLang, t, type Lang } from "../vendor/kit/i18
 import type { QualityTexts } from "../vendor/kit/measured-quality";
 import type { LabelTexts } from "../core/diff-labels";
 import type { MeasureTexts } from "../core/measure-line";
-import type { AnswerFault, GuardProblem } from "../core/protocol";
+import { distinctGuardProblems, type AnswerFault, type GuardProblem } from "../core/protocol";
 import type { Problem } from "../core/problem";
 import type { PanelStrings } from "../obsidian/panel/shell";
 import type { AcceptStrings } from "../vendor/kit-obsidian/panel-accept";
@@ -725,7 +725,7 @@ export function faultText(f: AnswerFault, tr: T = t): string {
   switch (f.code) {
     case "no-svg": return tr("fault.no-svg");
     case "not-wellformed": return tr("fault.not-wellformed", f.detail, f.offset);
-    case "guard": return tr("fault.guard", f.problems.map((p) => guardProblemText(p, tr)).join("; "));
+    case "guard": return tr("fault.guard", distinctGuardProblems(f.problems).map((p) => guardProblemText(p, tr)).join("; "));
     case "no-id": return tr("fault.no-id", f.tag, f.n);
     case "unchanged": return tr("fault.unchanged");
   }

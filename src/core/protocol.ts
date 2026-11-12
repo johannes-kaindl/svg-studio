@@ -154,11 +154,18 @@ export const COST_HINT = "Das SVG ist zu aufwendig zu zeichnen; nimm weniger ver
 /** Ein Befund des Bereinigers, soweit der Kern ihn liest (`code`, `detail` und bei `too-costly` die Felder des Kits seit code-kit 0.59.0: `kind`, `cost`, `limit`). */
 export type GuardProblem = Pick<SvgProblem, "detail" | "kind" | "cost" | "limit"> & { code: string };
 
+/** Die Befunde, die der Nutzer und das Modell sehen: bei einer Mengengrenze (`kind: "limit"`) bringt das Kit einen zweiten Eintrag `kind: "cost"` mit unendlichen Kosten mit, dieselbe Ursache
+ *  ein zweites Mal. Er fällt weg; ohne Mengengrenze bleibt alles, wie es ist. */
+export function distinctGuardProblems<P extends GuardProblem>(problems: readonly P[]): P[] {
+  const limited = problems.some((p) => p.code === "too-costly" && p.kind === "limit");
+  return problems.filter((p) => !(limited && p.code === "too-costly" && p.kind === "cost" && !Number.isFinite(p.cost ?? Infinity)));
+}
+
 /** Der Satz für das Modell zu den Befunden des Bereinigers (Rückfrage und Reparatur). Den Rat zu weniger Masken und Filtern gibt es nur, wenn die Zeichenkosten die Ursache sind (`kind: "cost"`) und kein
  *  Befund eine Mengengrenze oder eine nicht schätzbare Zeichnung meldet (`kind: "limit"`): ein größeres Dokument wird nicht durch weniger Masken kleiner, und eine Mengengrenze bringt im Kit einen zweiten Eintrag
  *  `kind: "cost"` mit unendlichen Kosten mit. */
 export function guardProblemsLine(problems: ReadonlyArray<GuardProblem>): string {
-  const list = problems.map((p) => `${p.code}: ${p.detail}`).join("; ");
+  const list = distinctGuardProblems(problems).map((p) => `${p.code}: ${p.detail}`).join("; ");
   const costOnly = problems.some((p) => p.kind === "cost") && !problems.some((p) => p.kind === "limit");
   return `Der Bereiniger lehnt ab: ${list}.${costOnly ? ` ${COST_HINT}` : ""}`;
 }

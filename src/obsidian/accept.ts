@@ -4,6 +4,7 @@
 // Lesemodus: `readingMode: "append"` (Plan 2, E2). Der Aufrufer (das Panel) sperrt den Knopf während des Laufs und des Schreibens und leert die Runden nach einem
 // Erfolg (Grenze 1 im Kopf von `panel-accept`).
 import type { App, MarkdownView } from "obsidian";
+import { distinctGuardProblems } from "../core/protocol";
 import type { AcceptAs } from "../core/settings";
 import { acceptText, type SvgSession } from "../core/session";
 import { acceptStrings, guardProblemText, problemText, t } from "../i18n/strings";
@@ -112,7 +113,7 @@ export async function acceptSvgSession(env: AcceptEnv, s: SvgSession, o: { guard
     },
     checkWrite: (text) => {
       const r = o.guard(text);
-      return r.ok ? null : t("accept.invalid", r.problems.map((p) => guardProblemText(p)).join("; "));
+      return r.ok ? null : t("accept.invalid", distinctGuardProblems(r.problems).map((p) => guardProblemText(p)).join("; "));
     },
     beforeWrite: (path, oldText) => backup(env.app, o.pluginId, path, oldText),
   };

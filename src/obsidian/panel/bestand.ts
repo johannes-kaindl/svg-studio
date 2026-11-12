@@ -4,7 +4,7 @@
 import { applyChanges } from "../../core/changes";
 import { stripEditorMetadata } from "../../core/editor-metadata";
 import { scanElements } from "../../core/elements";
-import { guardProblemsLine } from "../../core/protocol";
+import { distinctGuardProblems, guardProblemsLine } from "../../core/protocol";
 import { canRefine } from "../../core/session";
 import { guardProblemText, problemText, t } from "../../i18n/strings";
 import type { SvgProblem, checkSvg } from "../../vendor/kit/svg-guard";
@@ -40,7 +40,7 @@ export function bestandProblems(text: string, guard: typeof checkSvg): BestandPr
   const seen = new Map<string, number>();
   for (const e of scanElements(text).elements) if (e.id !== null) seen.set(e.id, (seen.get(e.id) ?? 0) + 1);
   const duplicateIds = [...seen].filter(([, n]) => n > 1).map(([id]) => id);
-  return { parse: null, guard: g.ok ? [] : g.problems, unnamed: can.ok ? 0 : can.unnamed, editorMetadata, duplicateIds };
+  return { parse: null, guard: g.ok ? [] : distinctGuardProblems(g.problems), unnamed: can.ok ? 0 : can.unnamed, editorMetadata, duplicateIds };
 }
 
 /** Der Befund, mit dem die Reparatur ans Modell geht: das Parserproblem, sonst die Befunde des Bereinigers (Wortlaut wie in `protocol.ts`). */

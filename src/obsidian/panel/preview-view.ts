@@ -3,6 +3,7 @@
 import { backgroundColor, type BackgroundState } from "../../core/background";
 import { scanElements } from "../../core/elements";
 import { measureCanvas } from "../../core/measure";
+import { distinctGuardProblems } from "../../core/protocol";
 import { COST_LIMIT } from "../../core/render-guard";
 import { formatMeasureLine } from "../../core/measure-line";
 import { guardProblemText, measureTexts, t } from "../../i18n/strings";
@@ -103,7 +104,7 @@ export function renderPreviewView(host: HTMLElement, text: string, d: PreviewVie
     const err = host.createDiv({ cls: "svg-studio-error" });
     err.createEl("p", { cls: "svg-studio-error-head", text: t("block.rejected") });
     const list = err.createEl("ul");
-    for (const p of shown.problems.slice(0, SHOWN_PROBLEMS)) list.createEl("li", { text: guardProblemText(p) });
+    for (const p of distinctGuardProblems(shown.problems).slice(0, SHOWN_PROBLEMS)) list.createEl("li", { text: guardProblemText(p) });
     return { dispose: () => undefined, select: () => undefined, localBoxOf: () => null };
   }
   preview.select(selection.id);

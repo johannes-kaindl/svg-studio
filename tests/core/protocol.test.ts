@@ -172,8 +172,8 @@ describe("guardProblemsLine (Satz für das Modell zu den Befunden des Bereiniger
     expect(line.split(COST_HINT)).toHaveLength(2);
     expect(COST_HINT).toContain("Masken, Marker, Filter");
   });
-  it("too-costly wegen einer Mengengrenze (riesiges Stilblatt, mit dem zweiten Eintrag „unendliche Kosten“, den das Kit dazulegt): kein Rat zu Masken und Filtern", () => {
-    expect(guardProblemsLine([{ code: "too-costly", kind: "limit", detail: "the style sheets have 303889 characters, the limit is 250000" }, { code: "too-costly", kind: "cost", cost: Infinity, limit: 1000000, detail: "estimated render cost unbounded exceeds the limit of 1000000" }])).toBe("Der Bereiniger lehnt ab: too-costly: the style sheets have 303889 characters, the limit is 250000; too-costly: estimated render cost unbounded exceeds the limit of 1000000.");
+  it("too-costly wegen einer Mengengrenze (riesiges Stilblatt, mit dem zweiten Eintrag „unendliche Kosten“, den das Kit dazulegt): eine Zeile, kein Rat zu Masken und Filtern", () => {
+    expect(guardProblemsLine([{ code: "too-costly", kind: "limit", detail: "the style sheets have 303889 characters, the limit is 250000" }, { code: "too-costly", kind: "cost", cost: Infinity, limit: 1000000, detail: "estimated render cost unbounded exceeds the limit of 1000000" }])).toBe("Der Bereiniger lehnt ab: too-costly: the style sheets have 303889 characters, the limit is 250000.");
   });
   it("validateCreate reicht den Hinweis an die Rückfrage durch", () => {
     const g: GuardFn = () => ({ ok: false, problems: [{ code: "too-costly", kind: "cost", cost: 2000000, limit: 1000000, detail: "estimated render cost 2000000 exceeds the limit of 1000000" }] });
