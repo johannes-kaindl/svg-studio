@@ -28,6 +28,9 @@ const FAELLE: Fall[] = [
   { name: "cssBlur95 (266k)", svg: () => cases.cssBlur(95, 20) },
   { name: "cssBlur200 (560k)", svg: () => cases.cssBlur(200, 20) },
   { name: "10x mask600 gleichzeitig", svg: () => cases.maskMany(600, 1), anzahl: 10 },
+  // Positivkontrolle (CORE-TEST-13/20): Fälle weit über der Grenze 1 Mio.; zeigt auch hier nichts eine Lücke, misst der Aufbau die Raster-Last nicht.
+  { name: "KONTROLLE blur2000 (sigma 30)", svg: () => cases.blur(2000, 30) },
+  { name: "KONTROLLE turbulence300 (255 Oktaven)", svg: () => cases.turbulence(300, 255) },
 ];
 
 /** Läufe je Fall und Arm; `--laeufe <n>` überschreibt (Task „Raster-Messung in Ruhe wiederholen“: fünf). */
@@ -84,7 +87,9 @@ async function main(): Promise<void> {
   console.log(`Arm ${arm}: ${info}`);
   const zeilen: Array<{ fall: string; laeufe: Messung[] }> = [];
   let nonce = 0;
+  const nur = args.value("nur");
   for (const fall of FAELLE) {
+    if (nur !== undefined && !fall.name.startsWith(nur)) continue;
     const laeufe: Messung[] = [];
     for (let i = 0; i < LAUFE; i++) {
       // Frische URL je Lauf (Dekodier-Cache): ein Kommentar vor der Wurzel ändert Kosten nicht, aber den Text.
