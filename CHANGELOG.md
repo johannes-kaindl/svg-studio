@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Refining or repairing an image now checks the size of the request against the context window the model has loaded (asked from the endpoint, LM Studio and Ollama). If the input cannot fit even by a generous estimate, nothing is sent and the panel says how many tokens it needs and how many the model has; before, the server answered with an error or cut the input silently. If the endpoint does not report a context length, the request is sent as before.
+- The panel lists duplicate `id`s of an opened SVG: their number fields are locked because the element is ambiguous, and now the notice says so.
+
+### Fixed
+
+- An `id` that starts with `@` or `#` is reported as a syntax error: it collides with the keys the plugin uses for elements without a name and for the fixed places (root, `<style>`, `<title>`, `<desc>`).
+- The "Edit in SVG Studio" buttons also appear in pop-out windows that are already open when the plugin is switched on, and a leaf without a loaded view no longer stops the buttons from being added.
+- Reasons given to you when the model's answer is rejected (for example "not well-formed", "rejected by the sanitizer") are shown in the language of the interface; the sentence sent back to the model stays German.
+- A SVG whose style sheet is over the size limit shows one reason, not two (the second entry with unbounded cost repeated the first).
+- A change that names a missing element lists at most 20 existing keys and the number of the rest instead of every key of the document.
+
 ## [0.1.1] — 2026-11-05
 
 ### Fixed
