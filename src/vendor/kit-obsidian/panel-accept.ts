@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.80.1, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.88.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -17,6 +17,7 @@
 //   ein zweites Mal vor dem Schreiben prüft. **Wiederfinden (0.80.1):** steht der Block unverändert woanders (der Nutzer tippt während des Laufs eine Zeile
 //   darüber), findet `locateBlock` ihn nach Inhalt, aber nur bei **genau einem** Zaun gleicher Sprache, Länge und gleichen Rumpfs; die neue Lage kommt als
 //   `retarget` zurück (auch bei `unchanged`). Zwei gleiche Blöcke bleiben `blockMoved`, ein geänderter Rumpf bleibt `blockChanged`.
+//   **Im echten Obsidian gemessen (1.15.1, Live Preview, `pilot/insert-cursor.ts`, 2026-11-12):** ein getippte Zeile über dem Block (`Input.insertText`) steht sofort im Editor (`editorFor(path).getValue()`), die Datei im Vault erst später: deshalb liest `readNoteText` zuerst den Editor. Der Block wird wiedergefunden (`retarget` +1 Zeile), Cmd+Z (und `editor.undo()`) stellt den Rumpf wieder her; zwei gleiche Blöcke bleiben `blockMoved`; ein Block in Callout oder Zitat wird abgelehnt (`blockMoved`, nichts geschrieben). Messfalle: `executeCommandById("editor:undo")` nahm im Treiber nicht einmal ein einfaches Tippen zurück, die Taste und die Editor-API schon.
 // - **Datei:** lesen, `compute(aktueller Text)`, `checkWrite`, dann `beforeWrite(path, alterText)` (der Haken für den Schnappschuss, `file-snapshot`),
 //   dann `vault.process`, das nur schreibt, wenn die Datei seit dem Lesen unverändert ist. Wirft `beforeWrite`, wird nichts geschrieben: ein
 //   Schreibvorgang ohne Rückweg findet nicht statt.
@@ -32,15 +33,17 @@
 // - **Grenzen, die der Aufrufer kennt (Opus-Review 2026-11-04):** (1) **Keine Sperre gegen einen zweiten Aufruf.** Block und Datei lehnen einen gleichzeitigen zweiten
 //   Aufruf ab (`noteChanged`: der Fingerabdruck bzw. der Datei-Stand trägt), das Ziel `new` schreibt aber zweimal. Der Aufrufer sperrt den Knopf während des Laufs und
 //   leert die Runden nach einem Erfolg. (2) **Der Zaun-Scanner liest flach:** ein Zaun in einem Zitat oder Callout (`> ```js`) oder mit vier und mehr Leerzeichen Einzug
-//   ist für ihn keiner. Schreiben in einen solchen Block wird sicher abgelehnt (`blockMoved`/`blockChanged`), Einfügen am Cursor dort landet aber im Zaun des Zitats.
-//   (3) `insertAtCursor` nutzt `replaceSelection`; bei mehreren Cursorn ist das Verhalten ungemessen.
+//   ist für ihn keiner. Schreiben in einen solchen Block wird sicher abgelehnt (`blockMoved`/`blockChanged`); Einfügen am Cursor dort lehnt `insertAtCursor` seit 0.86.0 ab
+//   (`NestedFenceError`, `findNestedFenceAt`), statt im Zaun des Zitats zu landen.
+//   (3) Bei mehreren Cursorn (Mehrfachauswahl) fügt `insertAtCursor` seit 0.86.0 nur am Hauptcursor ein (`replaceRange` statt `replaceSelection`; gemessen 1.15.1: `replaceSelection` fügte an jedem Cursor ein).
 // Nicht Teil des Bausteins: ungespeicherte Puffer einer Plugin-eigenen Dateiansicht (der Aufrufer speichert sie vor `acceptPanel`), die
 // Zwei-Wege-Wahl bei `ask` (`env.choose`, das Kit-`confirm` ist Ja/Nein) und das Zeichnen des Panels.
 
 import { MarkdownView, TFile, getFrontMatterInfo, type App } from "obsidian";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "../kit/block-writer";
-import { findFenceAt, listFences, type Fence } from "../kit/fence-scan";
+import { findFenceAt, findNestedFenceAt, listFences, type Fence } from "../kit/fence-scan";
 import { closesFence } from "../kit/fences";
+import { errorMessage } from "../kit/error-message";
 import type { Target } from "../kit/panel-session";
 
 export type BlockTarget = Extract<Target, { kind: "block" }>;
@@ -57,6 +60,21 @@ export class UnclosedFenceError extends Error {
     this.selected = selected;
   }
 }
+
+/** Der Zaun am Cursor oder am Ende der Auswahl steht in einem Zitat, Callout oder Listenpunkt (Einzug ab vier Leerzeichen): `insertAtCursor` sieht dort keinen Zaun, und ein Block mitten hinein
+ *  ließe den Callout zerfallen. Abgelehnt statt eingefügt (Opus-Review A3, Empfehlung „zuerst ablehnen“); der Nutzer setzt den Cursor außerhalb. */
+export class NestedFenceError extends Error {
+  readonly selected: boolean;
+  constructor(selected: boolean) {
+    super("the cursor or selection is in a code block inside a quote, callout or list");
+    this.name = "NestedFenceError";
+    this.selected = selected;
+  }
+}
+
+/** Text, wenn die `strings` des Konsumenten `nestedFence` (seit 0.86.0, optional) noch nicht kennen. */
+const NESTED_FENCE_FALLBACK = (selected: boolean): string =>
+  `${selected ? "The selection ends" : "The cursor is"} in a code block inside a quote, callout or list. Nothing was written; move the cursor outside it and try again.`;
 
 export interface AcceptStrings {
   unsupported(label: string): string;
@@ -86,6 +104,8 @@ export interface AcceptStrings {
   savedFileAppended(path: string): string;
   savedFileReferenceFailed(path: string, reason: string): string;
   unclosedFence(selected: boolean): string;
+  /** Seit 0.86.0, optional: Cursor oder Auswahlende liegt in einem Zaun in Zitat, Callout oder Liste (`NestedFenceError`). Fehlt der Text, gilt ein englischer Standard. */
+  nestedFence?(selected: boolean): string;
   couldNotApply(reason: string): string;
 }
 
@@ -118,7 +138,6 @@ export interface AcceptEnv {
 /** `retarget`: nach einem erfolgreichen Block-Apply das neue Ziel (geschriebener Rumpf, neue Schlusszeile), damit das Panel weiterarbeiten kann. */
 export type AcceptOutcome = { ok: true; message: string; retarget?: Target } | { ok: false; message: string };
 
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** Vergleichsform eines Rumpfs: CRLF → LF, ein Zeilenende am Ende zählt nicht. */
 const normBody = (t: string): string => t.replace(/\r\n/g, "\n").replace(/\n$/, "");
@@ -145,7 +164,7 @@ export async function createAttachmentFile(
     const file = typeof o.content === "string" ? await app.vault.create(path, o.content) : await app.vault.createBinary(path, o.content);
     return { ok: true, file, path };
   } catch (error) {
-    return { ok: false, code: "error", path, message: errorText(error) };
+    return { ok: false, code: "error", path, message: errorMessage(error) };
   }
 }
 
@@ -155,7 +174,8 @@ export async function createAttachmentFile(
  *  `---`-Zeile, `after-frontmatter`; eine Einfügung davor machte sie zur Nicht-Frontmatter, eine in einer YAML-Zeile zerrisse sie). Was Frontmatter ist, sagt Obsidian
  *  selbst (`getFrontMatterInfo`, gemessen 1.15.1: erste Zeile genau `---`, schließende Zeile genau `---`, ein leerer Block zählt, ohne schließende Zeile gibt es keine). Ein Zaun unter dem Cursor
  *  bzw. am Ende der Auswahl bekommt den Text dahinter (sonst entstünde ein Block im Block); eine Auswahl außerhalb von Frontmatter und Zaun bleibt (Einfügung an ihrem Ende). Ein Zaun, der nie
- *  geschlossen wird, hat kein „dahinter“: `UnclosedFenceError`, nichts geschrieben. Die Zeilenenden der Notiz bleiben einheitlich. */
+ *  geschlossen wird, hat kein „dahinter“: `UnclosedFenceError`, nichts geschrieben. Ein Zaun in einem Zitat, Callout oder Listenpunkt (Einzug ab vier Leerzeichen), den der flache Scanner nicht sieht,
+ *  wird abgelehnt: `NestedFenceError`, nichts geschrieben (seit 0.86.0). Die Zeilenenden der Notiz bleiben einheitlich. */
 export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
   const editor = view.editor;
   const value = editor.getValue();
@@ -169,6 +189,7 @@ export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
     return "after-frontmatter";
   }
   const fence = findFenceAt(value, anchor.line);
+  if (!fence && findNestedFenceAt(value, anchor.line)) throw new NestedFenceError(selected);
   if (fence) {
     if (isUnclosed(fence, lines)) throw new UnclosedFenceError(selected);
     editor.replaceRange(`${eol}${text.replace(/\r?\n/g, eol)}`, { line: fence.closeLine, ch: (lines[fence.closeLine] ?? "").length });
@@ -178,7 +199,9 @@ export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
     editor.replaceRange(text, anchor);
     return "after-selection";
   }
-  editor.replaceSelection(text);
+  // Nicht `replaceSelection`: bei mehreren Cursorn fügt CodeMirror an jedem ein, an den Nebencursorn ohne die Prüfungen oben (gemessen in Obsidian 1.15.1, `pilot/insert-cursor.ts`:
+  // zwei Cursor, zweimal der Block, einer davon mitten in einem Zaun). `replaceRange` am Hauptcursor fügt genau einmal ein, bei einem Cursor wie vorher.
+  editor.replaceRange(text, anchor);
   return "at-cursor";
 }
 
@@ -223,7 +246,7 @@ export async function processGuarded(
     });
     return { ok: true, changed };
   } catch (error) {
-    return { ok: false, message: errorText(error) };
+    return { ok: false, message: errorMessage(error) };
   }
 }
 
@@ -283,7 +306,7 @@ export async function acceptPanel(env: AcceptEnv, spec: AcceptSpec, target: Targ
     if (target.kind === "file") return await acceptIntoFile(env, spec, target);
     return await acceptAsNew(env, spec);
   } catch (error) {
-    return { ok: false, message: env.strings.couldNotApply(errorText(error)) };
+    return { ok: false, message: env.strings.couldNotApply(errorMessage(error)) };
   }
 }
 
@@ -377,7 +400,8 @@ async function insertAsBlock(env: AcceptEnv, spec: AcceptSpec, text: string): Pr
     try {
       await appendToNote(env, src.reading.file?.path ?? "", spec.wrap(text));
     } catch (error) {
-      if (error instanceof UnclosedFenceError) return { ok: false, message: strings.unclosedFence(error.selected) };
+      const refusal = fenceRefusal(error, strings);
+      if (refusal !== null) return { ok: false, message: refusal };
       throw error;
     }
     return { ok: true, message: strings.appendedToNote };
@@ -385,9 +409,17 @@ async function insertAsBlock(env: AcceptEnv, spec: AcceptSpec, text: string): Pr
   try {
     return { ok: true, message: strings.appliedAsBlock(insertAtCursor(src.view, `\n${spec.wrap(text)}\n`)) };
   } catch (error) {
-    if (error instanceof UnclosedFenceError) return { ok: false, message: strings.unclosedFence(error.selected) };
+    const refusal = fenceRefusal(error, strings);
+    if (refusal !== null) return { ok: false, message: refusal };
     throw error;
   }
+}
+
+/** Die Meldung zu einer Ablehnung durch einen Zaun (`UnclosedFenceError`, `NestedFenceError`), sonst `null`. */
+function fenceRefusal(error: unknown, strings: AcceptStrings): string | null {
+  if (error instanceof UnclosedFenceError) return strings.unclosedFence(error.selected);
+  if (error instanceof NestedFenceError) return (strings.nestedFence ?? NESTED_FENCE_FALLBACK)(error.selected);
+  return null;
 }
 
 async function createAsFile(env: AcceptEnv, spec: AcceptSpec, text: string): Promise<AcceptOutcome> {
@@ -419,7 +451,7 @@ async function createAsFile(env: AcceptEnv, spec: AcceptSpec, text: string): Pro
     insertAtCursor((now as { view: MarkdownView }).view, `\n${reference}\n`);
     return { ok: true, message: strings.savedFileWithReference(path) };
   } catch (error) {
-    const reason = error instanceof UnclosedFenceError ? strings.unclosedFence(error.selected) : errorText(error);
+    const reason = fenceRefusal(error, strings) ?? errorMessage(error);
     return { ok: true, message: strings.savedFileReferenceFailed(path, reason) };
   }
 }

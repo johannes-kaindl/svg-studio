@@ -1,10 +1,14 @@
-// vendored from obsidian-kit@0.80.1, src/obsidian/chat-host.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.88.0, src/obsidian/chat-host.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /** Der Host eines Chats auf dem Handy (seit 0.76.1 ein eigener Baustein; `buildChatWindow` benutzt ihn selbst). Für Chats, die ihr Fenster von Hand bauen (koda-agent) und deshalb weder
  *  `buildChatWindow` noch `chat-window.ts` vendoren.
  *
  *  Ein Chat im Hauptbereich steht in einem `view-content`. Dort wirken auf dem Handy zwei Dinge auf den unteren Abstand: Obsidians eigene Regel (`.workspace-leaf-content .view-content`,
  *  `padding-bottom: max(var(--safe-area-inset-bottom), …)`) und die schwebende Navigationsleiste. Bei offener Tastatur ergibt das 328 px leere Fläche (am iPhone gemessen, Welle 30), weil Obsidian
  *  `--safe-area-inset-bottom` dann auf die Tastaturhöhe setzt und zugleich den App-Container verkleinert.
+ *
+ *  **Baue in `contentEl`, nicht in `containerEl`.** Eine ItemView hat zwei Wurzeln: `contentEl` ist der `view-content`, `containerEl` das `workspace-leaf-content` darüber, das keinen `view-content` als Vorfahren hat.
+ *  `markChatHost(this.containerEl)` tut deshalb still nichts (leere Rücknahme, keine Warnung, der Abstand am Handy greift nie; kuro-gamification baute bis Welle 30 so). Bewusst keine Warnung und kein Rückfall auf
+ *  `.workspace-leaf-content` (anderes Padding-Modell, ungemessen): ein Fehler, ein Konsument; eine Warnung kommt, wenn ein zweiter Konsument denselben Fehler macht (Entscheidung Welle 33).
  *
  *  Benutzung: `const off = markChatHost(this.contentEl)` beim Aufbau, `off()` beim Abbau; `CHAT_HOST_CSS` in die `styles.css` kopieren (das Kit injiziert kein CSS). Wer `CHAT_WINDOW_CSS` kopiert, hat die Regel schon:
  *  sie steht dort wortgleich (ein Test hält beide gleich, die Konstanten sind reine Template-Literale ohne Einsetzung, damit `findVendoredCss` sie liest). */

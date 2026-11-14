@@ -40,6 +40,13 @@ export function fakeLlm(responders: Responder[], o: { model?: string; family?: s
     resolve: vi.fn(),
     setModel: vi.fn(async () => undefined),
     modelInUse: vi.fn(() => model),
+    // Seit Kit 0.87.0 Pflicht der Modellzeile: ein Endpunkt ohne Gruppen (leere Liste = keine optgroup), keine gespeicherte Wahl.
+    endpoints: vi.fn(() => []),
+    activeEndpointId: vi.fn(() => undefined),
+    modelsOf: vi.fn(async () => ({ models: [model], reachable: true })),
+    choice: vi.fn(() => ({})),
+    setChoice: vi.fn(async () => undefined),
+    subscribe: vi.fn(() => () => undefined),
     source: vi.fn(() => ({ family: o.family ?? null, familySource: "none", backend: "unknown", backendSource: "none", model, sentModel: model })),
   } as unknown as LlmConnection;
   return { llm, complete, requests };

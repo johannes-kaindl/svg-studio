@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.80.1, src/obsidian/file-snapshot.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.88.0, src/obsidian/file-snapshot.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: obsidian-transmute `src/obsidian/snapshot-io.ts` (`snapshotRoot`, `ensureDir`, `writeSnapshot`, `rotateSnapshots`) und `src/core/vault/snapshot.ts`
 // (`snapshotDirName`), auf eine Einzeldatei zugeschnitten; REGISTRY „Rückholbarkeit für Schreibvorgänge“ führte transmute als Kit-Kandidaten, svg-studio ist
 // der zweite Träger (K15, bedingt durch die Messung A4 vom 2026-11-04: Obsidians Dateiwiederherstellung erfasst nur Markdown, `.svg` und andere Dateien nicht).
@@ -24,11 +24,11 @@
 
 import type { App } from "obsidian";
 import { isValidPluginId } from "../kit/plugin-id";
+import { errorMessage } from "../kit/error-message";
 import { type GfsCalendar, type GfsPolicy, selectGfsRetention, stampedName, timeFromStampedName } from "../kit/rotation";
 
 export type SnapshotResult = { ok: true; snapshotPath: string } | { ok: false; message: string };
 
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** Ein Vault-Pfad, der sicher unter den Schnappschuss-Ordner passt: relativ, mit `/`, ohne leere, `.`- oder `..`-Teile. */
 function isSafeVaultPath(path: string): boolean {
@@ -70,7 +70,7 @@ export async function snapshotFile(
     await app.vault.adapter.write(snapshotPath, o.content);
     ownTime = time;
   } catch (error) {
-    return { ok: false, message: `could not write the snapshot${snapshotPath ? ` ${snapshotPath}` : ""}: ${errorText(error)}` };
+    return { ok: false, message: `could not write the snapshot${snapshotPath ? ` ${snapshotPath}` : ""}: ${errorMessage(error)}` };
   }
   try {
     const listing = await app.vault.adapter.list(root);

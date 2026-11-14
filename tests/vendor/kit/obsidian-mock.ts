@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.80.1, src/testing/obsidian-mock.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.88.0, src/testing/obsidian-mock.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Self-contained Obsidian test double for obsidian-kit.
 // - Zero external imports (NOT from "obsidian", NOT from "vitest").
 // - Consumed via vitest `resolve.alias` as a drop-in for `import ... from "obsidian"`,
@@ -125,6 +125,9 @@ export function makeFakeEl(tagName = "DIV"): any {
     focus() { el.__focusCount = (el.__focusCount ?? 0) + 1; },
     select() { el.__selectCount = (el.__selectCount ?? 0) + 1; },
     blur() {},
+    /** Wie Obsidians `hide()`/`show()` (0.85.0): setzt und löscht `style.display`, damit ein Test das Ausblenden sieht. */
+    hide() { style.display = "none"; },
+    show() { style.display = ""; },
 
     createEl: (tag: string, o?: any) => makeChild(tag, o),
     createDiv: (o?: any) => makeChild("div", o),
@@ -828,7 +831,11 @@ export function setIcon(el: any, iconId: string): void {
 export function setTooltip(el: any, tooltip: string): void {
   el.setAttribute?.("data-tooltip", tooltip);
 }
-export function getLanguage(): string { return "en"; }
+let mockLanguage = "en";
+/** Die Sprache, die `getLanguage()` liefert (Standard `en`); ohne Argument oder mit leerem Text zurück auf `en`. Für Konsumenten, die die Obsidian-Sprache lesen
+ *  (`detectLang`, Seeding in der Oberflächensprache) und ihre deutschen Zweige prüfen. Nach dem Test zurücksetzen (`afterEach(() => __setMockLanguage())`). */
+export function __setMockLanguage(lang?: string): void { mockLanguage = lang === undefined || lang === "" ? "en" : lang; }
+export function getLanguage(): string { return mockLanguage; }
 
 // ---------------------------------------------------------------------------
 // Welle 19: Zusätze aus den Hand-Kopien (calendar-notes, health-vitals/vault-rag).

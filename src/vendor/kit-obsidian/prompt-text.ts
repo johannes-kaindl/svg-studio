@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.80.1, src/obsidian/prompt-text.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.88.0, src/obsidian/prompt-text.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 import { App, ButtonComponent, Modal } from "obsidian";
 
 /** Texteingabe-Dialog hinter einer Promise-Fassade (Gegenstück zu `confirmAction` und `askChoice`, die Knopfdialoge sind).

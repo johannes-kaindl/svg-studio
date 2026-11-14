@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The model dropdown in the panel lists every model of every endpoint, grouped by endpoint (obsidian-kit 0.87.0). Choosing a model also binds its endpoint for this plugin only; a choice whose endpoint was switched off or deleted no longer sends the old model name to the automatic endpoint. The row redraws itself when the endpoint manager changes.
+- Deleted and inserted words in the change list use text colours with a contrast of at least 4.5 : 1 in light and dark themes (obsidian-kit 0.83.0).
+- Updated the vendored kit to obsidian-kit 0.88.0 and code-kit 0.68.0 (the SVG sanitizer stays on 0.59.0).
+
 ### Fixed
 
 - The colour fields (fill, stroke) in the panel no longer accept a word that is not a CSS colour. Typing `rot` used to write `fill="rot"`, which draws black without any hint; now the field says it is not a colour. The check asks the renderer (`CSS.supports`), so every name the browser knows keeps working.
