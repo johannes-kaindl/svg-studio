@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.88.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.89.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -44,6 +44,7 @@ import { BlockChangedError, writeBlockBody, type WritePorts } from "../kit/block
 import { findFenceAt, findNestedFenceAt, listFences, type Fence } from "../kit/fence-scan";
 import { closesFence } from "../kit/fences";
 import { errorMessage } from "../kit/error-message";
+import { detectEol } from "../kit/text-window";
 import type { Target } from "../kit/panel-session";
 
 export type BlockTarget = Extract<Target, { kind: "block" }>;
@@ -182,7 +183,7 @@ export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
   const lines = value.split(/\r?\n/);
   const selected = editor.somethingSelected();
   const anchor = selected ? editor.getCursor("to") : editor.getCursor();
-  const eol = value.includes("\r\n") ? "\r\n" : "\n";
+  const eol = detectEol(value);
   const fmEnd = frontmatterCloseLine(value);
   if (fmEnd !== null && anchor.line <= fmEnd) {
     editor.replaceRange(`${eol}${text.replace(/\r?\n/g, eol)}`, { line: fmEnd, ch: (lines[fmEnd] ?? "").length });
@@ -385,7 +386,7 @@ async function appendToNote(env: AcceptEnv, path: string, text: string): Promise
   await env.ports.vault.process(path, (cur) => {
     const last = listFences(cur).at(-1);
     if (last && isUnclosed(last, cur.split(/\r?\n/))) throw new UnclosedFenceError(false);
-    const eol = cur.includes("\r\n") ? "\r\n" : "\n";
+    const eol = detectEol(cur);
     const gap = cur === "" ? "" : cur.endsWith("\n") ? eol : eol + eol;
     return `${cur}${gap}${text.replace(/\r?\n/g, eol)}${eol}`;
   });

@@ -1,6 +1,6 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.88.0" },
+    "obsidian-kit": { "ref": "0.89.0" },
     "code-kit": { "ref": "0.59.0" }
   },
   "targets": [
@@ -16,7 +16,7 @@
     {
       "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure", "ref": "0.68.0",
       "modules": ["anthropic-wire", "backend-probe", "capabilities", "embeddings-client", "endpoint", "endpoint_config", "endpoint_diagnostics", "error_body", "model-choice", "model-context",
-        "model-list-cache", "reasoning", "redact", "sampling-profiles", "secrets", "sse", "timeout"]
+        "model-list-cache", "reasoning", "redact", "text-window", "sampling-profiles", "secrets", "sse", "timeout"]
     },
     { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "ref": "0.68.0", "modules": ["clipboard"] },
     {
@@ -26,7 +26,7 @@
     },
     {
       "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "from": "src/obsidian",
-      "modules": ["status-indicator", "choice-modal", "write-ports", "help-setting", "settings_walker", "folder-suggest", "confirm", "prompt-text", "segmented-control", "panel-accept", "review-list", "redline", "file-snapshot",
+      "modules": ["status-indicator", "choice-modal", "write-ports", "help-setting", "settings_walker", "setting-body-host", "folder-suggest", "confirm", "prompt-text", "segmented-control", "panel-accept", "review-list", "redline", "file-snapshot",
         "llm-connection", "llm-connection-strings", "endpoint-source", "request-section", "model-bar", "model-bar-strings", "thinking-control", "stream-area", "copy-button", "version-list", "chat-host",
         "endpoint-list", "endpoint-secrets", "secrets", "shortcuts-bridge", "request-session", "model-picker", "collapsible", "clipboard", "clock", "backend-probe", "endpoint-plumbing",
         "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport", "chat-client", "chat-transport"],

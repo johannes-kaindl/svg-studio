@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.88.0, src/obsidian/copy-button.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.89.0, src/obsidian/copy-button.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Kopier-Knopf mit Quittung: ein Symbolknopf, der einen Text in die Zwischenablage legt und dann kurz einen Haken zeigt.
 //
 // Warum es ihn gibt (Welle 33, Auftrag F, Paket 7): dieselbe Logik (`setIcon` copy/check, 1500 ms, `is-copied`, Tippfläche am Handy) stand dreimal im Bestand,
@@ -87,7 +87,7 @@ export function createCopyButton(parent: HTMLElement, o: CopyButtonOptions): Cop
   return { el, dispose: () => { disposed = true; clearTimer(); } };
 }
 
-/** Regeln des Kopier-Knopfs. Chat-Fenster (`CHAT_WINDOW_CSS`) und Stream-Bereich (`STREAM_AREA_CSS`) tragen sie mit; wer den Knopf allein nutzt, kopiert diese Konstante in seine `styles.css`.
+/** Regeln des Kopier-Knopfs. Seit 0.89.0 setzen `CHAT_WINDOW_CSS` und `STREAM_AREA_CSS` sie nicht mehr ein (eine Einsetzung landete als Rohtext in der `styles.css` der Konsumenten): wer das Chat-Fenster, den Stream-Bereich oder den Knopf allein nutzt, kopiert diese Konstante einmal in seine `styles.css`, zusätzlich zu den anderen.
  *  Die Tippfläche von 44 px (`calc(var(--size-4-10) + var(--size-4-1))`) gilt nur auf Mobil; die Regel nennt die Klasse zweimal tief, weil Obsidians Mobilregeln eine einfache Klasse überstimmen. */
 export const COPY_BUTTON_CSS = `
 .okit-copy-button { color: var(--text-faint); height: auto; padding: var(--size-2-1) var(--size-2-2); }

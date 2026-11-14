@@ -9,14 +9,8 @@ describe("Kit-CSS in styles.css", () => {
     expect(findVendoredCss("src/vendor/kit-obsidian").length).toBeGreaterThan(0);
   });
   it("jede steht wortgleich in styles.css", () => {
-    // Eine Konstante, die eine andere einsetzt (`${COPY_BUTTON_CSS}` in STREAM_AREA_CSS), steht in styles.css ohne die Einsetzung; die eingesetzte steht als eigener Block
-    // (der Wächter des Kits prüft den Rohtext und würde ein `${…}` im Stylesheet verlangen, das dort kein CSS ist: Scorecard 0.1.3 „Unknown word COPY_BUTTON_CSS“).
-    const vendored = findVendoredCss("src/vendor/kit-obsidian");
-    const missing = missingKitCss("src/vendor/kit-obsidian", css).filter((n) => {
-      const c = vendored.find((v) => v.name === n)!.css;
-      return !(/\$\{[A-Z0-9_]+\}/.test(c) && css.includes(c.replace(/\$\{[A-Z0-9_]+\}/g, "")));
-    });
-    expect(missing).toEqual([]);
+    // Der Wächter des Kits (ab 0.89.0) löst eingesetzte Konstanten auf; svg-studio 0.1.3 trug ein rohes `${COPY_BUTTON_CSS}` (Scorecard: Unknown word).
+    expect(missingKitCss("src/vendor/kit-obsidian", css)).toEqual([]);
   });
   it("kein Platzhalter `${…}` im Stylesheet (ungültiges CSS, die Scorecard meldet „Unknown word“)", () => {
     expect(css).not.toMatch(/\$\{/);

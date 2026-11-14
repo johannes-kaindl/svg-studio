@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.88.0, src/obsidian/stream-area.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.89.0, src/obsidian/stream-area.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /**
  * Streaming-Antwortbereich (UI-STANDARD §8): der Bereich, in dem eine laufende
  * LLM-Antwort sichtbar wird — Gedankenblock, fertiger Text, laufender Absatz,
@@ -57,7 +57,7 @@
  ## Fallen beim Übernehmen
  *
  * 1. **Das Kit injiziert kein CSS.** `STREAM_AREA_CSS` gehört in die `styles.css` des
- *    Consumers (Muster von `COLLAPSIBLE_CSS`/`HUB_CSS`/`ENDPOINT_LIST_CSS`).
+ *    Consumers, mit `COPY_BUTTON_CSS` daneben (seit 0.89.0 nicht mehr in `STREAM_AREA_CSS` enthalten; Muster von `COLLAPSIBLE_CSS`/`HUB_CSS`/`ENDPOINT_LIST_CSS`).
  * 2. **Der Body beansprucht den freien Platz — alles andere in derselben Flex-Spalte muss
  *    sich dagegen wehren.** `.okit-stream-body` trägt `flex: 1 1 auto` und `min-height: 0`,
  *    ist also das Einzige, was wachsen UND unter seinen Inhalt schrumpfen darf. Innerhalb
@@ -74,7 +74,7 @@
  *    schlicht unerreichbar. *Nicht selbst reproduziert; die Zahlen stammen aus deren Sweep.*
  */
 
-import { createCopyButton, COPY_BUTTON_CSS, type CopyButton } from "./copy-button";
+import { createCopyButton, type CopyButton } from "./copy-button";
 import { realClock, type ClockPort } from "./clock";
 
 /** Wie lange der Kopier-Knopf nach dem Kopieren das Häkchen zeigt. */
@@ -415,8 +415,8 @@ export const STREAM_AREA_CSS = `
   font-size: var(--font-ui-smaller); color: var(--text-muted);
 }
 .okit-stream-reasoning > summary { cursor: var(--cursor); color: var(--text-faint); }
-/* Der Kopier-Knopf sitzt IN der Zusammenfassung, bleibt inline und nimmt der Zeile keine Höhe. Sein Aussehen steht in COPY_BUTTON_CSS (Baustein createCopyButton). */
-${COPY_BUTTON_CSS}.okit-stream-reasoning-copy { display: inline-flex; vertical-align: middle; margin-inline-start: var(--size-4-2); }
+/* Der Kopier-Knopf sitzt IN der Zusammenfassung, bleibt inline und nimmt der Zeile keine Höhe. Sein Aussehen steht in COPY_BUTTON_CSS (Baustein createCopyButton), die der Konsument einmal selbst kopiert. */
+.okit-stream-reasoning-copy { display: inline-flex; vertical-align: middle; margin-inline-start: var(--size-4-2); }
 .okit-stream-reasoning > pre {
   max-height: 12em; overflow-y: auto; white-space: pre-wrap;
   background: var(--background-secondary); padding: var(--size-4-2);

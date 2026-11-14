@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The model dropdown and the model choice now name and bind the endpoint the manager really uses (before: the first enabled one, even when it was unreachable). A model choice made while its endpoint is switched off or deleted now applies to the automatically chosen endpoint. (obsidian-kit 0.89.0)
+
 ## [0.1.4] — 2026-11-14
 
 ### Fixed
