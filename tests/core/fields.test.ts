@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges } from "../../src/core/changes";
 import { attr, scanElements, type SvgElement } from "../../src/core/elements";
-import { fieldChange, fieldsFor, HAND_LABEL, parseTransform, writeTransform, type FieldSpec } from "../../src/core/fields";
+import { fieldChange, fieldsFor, HAND_LABEL, parseTransform, writeTransform, type FieldCtx, type FieldSpec } from "../../src/core/fields";
 
 const NS = `xmlns="http://www.w3.org/2000/svg"`;
 const S = (inner: string): string => `<svg ${NS} viewBox="0 0 400 400">\n${inner}\n</svg>\n`;
 const find = (text: string, id: string): SvgElement => scanElements(text).elements.find((e) => e.id === id)!;
 const names = (specs: FieldSpec[]): string[] => specs.map((f) => f.name);
 const CTX = { lang: "de" as const };
-const change = (text: string, id: string, field: string, input: string, ctx: { center?: [number, number]; lang: "de" | "en" } = CTX) => fieldChange(find(text, id), text, field, input, ctx);
+const change = (text: string, id: string, field: string, input: string, ctx: FieldCtx = CTX) => fieldChange(find(text, id), text, field, input, ctx);
 const okChanges = (r: ReturnType<typeof fieldChange>) => {
   if (!r.ok) throw new Error(`${r.problem.code} ${r.problem.params.join(",")}`);
   return r.changes;
 };
 /** Wendet die Felder-Eingabe an und liefert den neuen Text. */
-const applied = (text: string, id: string, field: string, input: string, ctx?: { center?: [number, number]; lang: "de" | "en" }): string => {
+const applied = (text: string, id: string, field: string, input: string, ctx?: FieldCtx): string => {
   const r = applyChanges(text, okChanges(change(text, id, field, input, ctx)));
   if (!r.ok) throw new Error(r.problems.join("; "));
   return r.text;
@@ -211,6 +211,19 @@ describe("fieldChange: Farben", () => {
     for (const bad of ["#ff", "#12345", "red;fill:blue", "<x>", "1 2", "url(javascript:x)", "rgb(1,2,3)}"]) {
       expect(change(DOC, "mond", "stroke", bad), bad).toEqual({ ok: false, problem: { code: "field-color", params: ["stroke", bad] } });
     }
+  });
+
+  it("ein Wort, das der Renderer nicht als Farbe kennt, wird abgelehnt; none und currentColor brauchen die Prüfung nicht", () => {
+    const known = new Set(["red", "transparent"]);
+    const ctx = { lang: "de" as const, isColorWord: (w: string) => known.has(w.toLowerCase()) };
+    for (const ok of ["red", "RED", "transparent", "none", "currentColor", "inherit", "#f00", "rgb(1, 2, 3)"]) {
+      expect(change(DOC, "mond", "stroke", ok, ctx), ok).toMatchObject({ ok: true });
+    }
+    for (const bad of ["rot", "gruen", "reddish"]) {
+      expect(change(DOC, "mond", "stroke", bad, ctx), bad).toEqual({ ok: false, problem: { code: "field-color", params: ["stroke", bad] } });
+    }
+    // Gegenprobe: ohne die Funktion bleibt es beim Verhalten davor.
+    expect(change(DOC, "mond", "stroke", "rot")).toMatchObject({ ok: true });
   });
 
   it("Wertform (Rest B2 Punkt 2): Leerraum und Zeilenumbruch in rgb( … ) werden ein Leerzeichen, nie &#10; im Quelltext", () => {

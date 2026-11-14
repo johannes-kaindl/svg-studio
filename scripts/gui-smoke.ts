@@ -107,6 +107,7 @@ const PUNKTE = [
   "pruefliste-kommentar",
   "bestand-ohne-runde-vorschau",
   "zahlenfeld-genau-ein-attribut",
+  "farbfeld-lehnt-unbekanntes-wort-ab",
   "handrunde-in-versionsliste",
   "drehmitte-in-gruppe",
   "schliessen-mit-offener-runde",
@@ -1735,6 +1736,25 @@ async function punktFelder(): Promise<void> {
     const erwartet = ersetze(fixtur("felder.svg"), `r="40"`, `r="60"`);
     record("zahlenfeld-genau-ein-attribut", runde !== null && r.ok && nach === erwartet && r0?.value === "40",
       `Feld r stand auf ${q(r0?.value)} · Runde ${q(runde?.labels)} · Übernehmen ${r.ok ? "ok" : q(r.snap.status)} · Quelltext nachher = Quelltext vorher mit genau r="40" → r="60", sonst byte-gleich: ${nach === erwartet}`);
+  });
+
+  await lauf("farbfeld-lehnt-unbekanntes-wort-ab", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await oeffneDateiImPanel("felder.svg");
+    if ((await warteSnap((x) => !x.previewHidden && x.svgIds !== null, 8000)) === null) throw new Vorbedingung("Keine Vorschau am Bestand felder.svg");
+    await klickImBild("mond");
+    const meldung = (): Promise<string> => cdp.evaluate<string>(`const n = document.querySelector('.svg-studio-field-input[data-field="fill"]'); const row = n ? n.closest(".svg-studio-field") : null; const note = row ? row.querySelector(".svg-studio-field-note") : null; return note ? note.textContent || "" : "<kein Feld>";`);
+    await setzeFeld("fill", "rot");
+    await sleep(400);
+    const nachRot = await meldung();
+    const s1 = await snap();
+    const rotUnveraendert = (await liesDatei("felder.svg")) === fixtur("felder.svg");
+    // Gegenprobe: ein gültiger Name geht durch und macht eine Runde (sonst prüfte der Punkt nur, dass das Feld nichts annimmt).
+    await setzeFeld("fill", "red");
+    const runde = await warteSnap((x) => x.rounds === 1, 5000);
+    record("farbfeld-lehnt-unbekanntes-wort-ab", nachRot !== "" && nachRot !== "<kein Feld>" && s1?.rounds === 0 && rotUnveraendert && runde !== null,
+      `„rot“: Meldung ${q(nachRot)}, Runden ${q(s1?.rounds)}, Datei unverändert ${String(rotUnveraendert)} · Gegenprobe „red“: Runde ${q(runde?.labels)}`);
   });
 
   await lauf("handrunde-in-versionsliste", async () => {

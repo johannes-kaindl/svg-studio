@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The colour fields (fill, stroke) in the panel no longer accept a word that is not a CSS colour. Typing `rot` used to write `fill="rot"`, which draws black without any hint; now the field says it is not a colour. The check asks the renderer (`CSS.supports`), so every name the browser knows keeps working.
+
 ## [0.1.2] — 2026-11-12
 
 ### Added

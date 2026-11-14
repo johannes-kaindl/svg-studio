@@ -34,6 +34,9 @@ export interface FieldCtx {
   /** Mitte des Elements im Koordinatenraum VOR seinem eigenen `transform` (Mitte von `getBBox()`); nur die erste Drehung braucht sie. */
   center?: [number, number];
   lang: "de" | "en";
+  /** Ist dieses einzelne Wort ein Farbname? Der Kern führt keine Namensliste (die Quelle der Wahrheit ist der Renderer: `CSS.supports("color", wort)`);
+   *  fehlt die Funktion, gilt jedes Wort aus Buchstaben (Verhalten vor 2026-11-14). `none` und `currentColor` brauchen sie nicht. */
+  isColorWord?: (word: string) => boolean;
 }
 
 /** Das Wort vor der Aufzählung („Von Hand: mond r 60“); dieselben Wörter wie `review.author.hand` in `src/i18n/strings.ts` (ein Test hält sie gleich). */
@@ -216,6 +219,9 @@ export function fieldsFor(el: SvgElement, text: string): FieldSpec[] {
 
 // ---- Änderung -----------------------------------------------------------------------------------------------------------------------
 
+/** Schlüsselwörter der Füllung, die kein Farbname sind und der Renderer-Prüfung nicht bedürfen. */
+const PAINT_KEYWORDS: ReadonlySet<string> = new Set(["none", "currentcolor", "inherit", "context-fill", "context-stroke"]);
+
 const COLOR = /^(?:#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|[A-Za-z]+|(?:rgb|rgba|hsl|hsla)\([0-9A-Za-z.,%\s/+-]*\)|url\(#[^\s()'"]+\))$/;
 
 /** Steuerzeichen (C0, U+007F): in XML nicht darstellbar bzw. in einem einzeiligen Feld (Tab, Zeilenumbruch) nicht gemeint. */
@@ -246,6 +252,8 @@ export function fieldChange(el: SvgElement, text: string, field: string, input: 
     // Leerraum in `rgb( … )` wird ein Leerzeichen: ein wörtlicher Zeilenumbruch im Wert würde als `&#10;` geschrieben (Rest-Task B2, Punkt 2: Wertform).
     const color = raw.replace(/\s+/g, " ");
     if (!COLOR.test(color)) return fail("field-color", field, input);
+    // Ein Wort wie „rot“ passt zur Form, ist aber keine Farbe: das Attribut bliebe stehen und das Element würde schwarz.
+    if (/^[A-Za-z]+$/.test(color) && !PAINT_KEYWORDS.has(color.toLowerCase()) && ctx.isColorWord !== undefined && !ctx.isColorWord(color)) return fail("field-color", field, input);
     return color === spec.value ? done([]) : setAttr(field, color);
   }
 

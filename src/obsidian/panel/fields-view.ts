@@ -116,7 +116,9 @@ export function renderFields(host: HTMLElement, o: FieldsInput): void {
   const grid = group.createDiv({ cls: "svg-studio-fields-grid" });
   const run = (name: string, input: string): { problem: Problem | null; changed: boolean } => {
     const c = o.center();
-    const r = fieldChange(el, o.text, name, input, c === null ? { lang } : { lang, center: c });
+    // Farbnamen prüft der Renderer, nicht eine eigene Liste.
+    const isColorWord = (w: string): boolean => CSS.supports("color", w);
+    const r = fieldChange(el, o.text, name, input, c === null ? { lang, isColorWord } : { lang, isColorWord, center: c });
     if (!r.ok) return { problem: r.problem, changed: false };
     if (r.changes.length === 0) return { problem: null, changed: false };
     return { problem: o.commit(r.changes, r.label), changed: true };
