@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-11-14
+
 ### Changed
 
 - The model dropdown in the panel lists every model of every endpoint, grouped by endpoint (obsidian-kit 0.87.0). Choosing a model also binds its endpoint for this plugin only; a choice whose endpoint was switched off or deleted no longer sends the old model name to the automatic endpoint. The row redraws itself when the endpoint manager changes.
