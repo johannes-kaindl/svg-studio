@@ -113,6 +113,7 @@ const PUNKTE = [
   "rest10a-behalten-waehrend-uebernehmen",
   "rest10b-angebotenes-ziel-waehrend-uebernehmen",
   "rest11-folgerunde-nach-namen-vergeben",
+  "grosse-datei-oeffnet",
   "mobil-emulation",
   "mobil-trefflaeche-44px",
   "mobil-pruefliste-trefflaeche-44px",
@@ -1671,6 +1672,39 @@ async function punktPruefliste(): Promise<void> {
   });
 }
 
+/**
+ * Ein SVG von rund 200 KB (Task „Plan-2-Reste …“ Punkt 3): öffnen im Panel, ein Element anklicken. Gemessen werden die Zeit bis zur Vorschau, die Zeit bis zu den
+ * Feldern und die größte Timer-Lücke des Hauptthreads (20-ms-Intervall) über beides. Die Grenzen (4 s, 2 s, 1 s) sind eine Annahme für „flüssig“, keine Messung;
+ * die Zahlen stehen in der Ausgabe, damit eine Grenzverschiebung sichtbar bleibt.
+ */
+async function punktGrosseDatei(): Promise<void> {
+  await lauf("grosse-datei-oeffnet", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    const teile: string[] = [];
+    for (let i = 0; teile.join("\n").length < 200_000; i++) teile.push(`  <circle id="c${String(i)}" cx="${String((i * 7) % 900)}" cy="${String((i * 13) % 600)}" r="${String(2 + (i % 5))}" fill="#${(0x336699 + i * 37).toString(16).slice(-6).padStart(6, "0")}" stroke="#112233" stroke-width="0.5"/>`);
+    const text = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" width="900" height="600">\n${teile.join("\n")}\n</svg>\n`;
+    if (teile.length > 4900) throw new Vorbedingung(`Fixture hat ${String(teile.length)} Elemente, der Bereiniger lehnt über 5000 ab`);
+    await schreibe("gross.svg", text);
+    await cdp.evaluate(`window.__luecke = { max: 0, letzte: performance.now() }; window.__lueckeIv = setInterval(() => { const t = performance.now(); window.__luecke.max = Math.max(window.__luecke.max, t - window.__luecke.letzte - 20); window.__luecke.letzte = t; }, 20); return true;`);
+    try {
+      const t0 = Date.now();
+      await oeffneDateiImPanel("gross.svg");
+      const s = await warteSnap((x) => !x.previewHidden && x.svgIds !== null, 20000);
+      const tVorschau = Date.now() - t0;
+      if (s === null) throw new Vorbedingung(`Keine Vorschau für die große Datei (Zustand ${q(await snap())})`);
+      const t1 = Date.now();
+      const f = await klickImBild("c1500");
+      const tFelder = Date.now() - t1;
+      const luecke = await cdp.evaluate<number>(`return Math.round(window.__luecke.max);`);
+      record("grosse-datei-oeffnet", tVorschau <= 4000 && tFelder <= 2000 && luecke <= 1000,
+        `${String(Math.round(text.length / 1000))} KB, ${String(teile.length)} Elemente: Vorschau nach ${String(tVorschau)} ms (Grenze 4000) · Felder nach Klick ${String(tFelder)} ms (Grenze 2000) · größte Timer-Lücke ${String(luecke)} ms (Grenze 1000) · ${String(s.svgIds?.length)} ids, Felder ${q(f.fields.length)}`);
+    } finally {
+      await cdp.evaluate(`clearInterval(window.__lueckeIv); const g = app.vault.getAbstractFileByPath("gross.svg"); if (g) await app.fileManager.trashFile(g); return true;`).catch(() => undefined);
+    }
+  });
+}
+
 async function punktFelder(): Promise<void> {
   await lauf("bestand-ohne-runde-vorschau", async () => {
     await raeume();
@@ -1966,6 +2000,7 @@ async function main(): Promise<void> {
     await punktRandfaelle();
     await punktPruefliste();
     await punktFelder();
+    await punktGrosseDatei();
 
     if (gewaehlt("rest11-folgerunde-nach-namen-vergeben")) skipped("rest11-folgerunde-nach-namen-vergeben", "nur von Hand prüfbar: eine Folgerunde nach „Namen vergeben“ braucht ein Modell, das auf den neu vergebenen ids aufbaut, und eine Handänderung dazwischen; der Stub belegt das nicht (C4-Rest 11, mit Johannes durchspielen)");
     if (gewaehlt("mobil-geraet-tastatur")) skipped("mobil-geraet-tastatur", "am Gerät zu messen (iPhone, Web-Inspektor, Tastatur offen): Auftrag des Masters, Plan „Mobil am Gerät“ M4 bis M6; die Emulation hat keine Bildschirmtastatur");
