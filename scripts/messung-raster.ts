@@ -33,6 +33,14 @@ const FAELLE: Fall[] = [
   { name: "KONTROLLE turbulence300 (255 Oktaven)", svg: () => cases.turbulence(300, 255) },
 ];
 
+/** Fälle, deren Name mit `nur` beginnt (ohne `nur`: alle). Ein Präfix, der nichts trifft, ist ein Fehler, kein stiller Leerlauf. */
+function waehleFaelle(faelle: readonly Fall[], nur: string | undefined): Fall[] {
+  if (nur === undefined) return [...faelle];
+  const treffer = faelle.filter((f) => f.name.startsWith(nur));
+  if (treffer.length === 0) throw new Error(`--nur ${JSON.stringify(nur)} trifft keinen Fall (Namen: ${faelle.map((f) => f.name).join(", ")})`);
+  return treffer;
+}
+
 /** Läufe je Fall und Arm; `--laeufe <n>` überschreibt (Task „Raster-Messung in Ruhe wiederholen“: fünf). */
 const LAUFE_STANDARD = 3;
 
@@ -72,6 +80,12 @@ interface Messung { dpr: number; geladen: number; tLoad: number; timerMax: numbe
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const nur = args.value("nur");
+  // `--liste`: nur die gewählten Fälle nennen und enden, ohne Obsidian (Beleg, dass `--nur` filtert; Task „--nur-Filter ließ alle Fälle durch“).
+  if (args.has("liste")) {
+    for (const fall of waehleFaelle(FAELLE, nur)) console.log(fall.name);
+    return;
+  }
   const port = Number(args.value("port"));
   if (!Number.isInteger(port)) throw new Error("--port <Port> ist Pflicht (Zweitinstanz)");
   const arm = args.value("arm") ?? "?";
@@ -87,9 +101,7 @@ async function main(): Promise<void> {
   console.log(`Arm ${arm}: ${info}`);
   const zeilen: Array<{ fall: string; laeufe: Messung[] }> = [];
   let nonce = 0;
-  const nur = args.value("nur");
-  for (const fall of FAELLE) {
-    if (nur !== undefined && !fall.name.startsWith(nur)) continue;
+  for (const fall of waehleFaelle(FAELLE, nur)) {
     const laeufe: Messung[] = [];
     for (let i = 0; i < LAUFE; i++) {
       // Frische URL je Lauf (Dekodier-Cache): ein Kommentar vor der Wurzel ändert Kosten nicht, aber den Text.
