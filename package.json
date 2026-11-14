@@ -1,6 +1,6 @@
 {
   "name": "svg-studio",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Describe an icon, logo, diagram or floor plan and get an exact, editable SVG — refined in rounds with a local or OpenAI-compatible model.",
   "type": "module",
   "scripts": {
