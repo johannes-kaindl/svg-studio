@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The stylesheet carried a stray template placeholder (`${COPY_BUTTON_CSS}`) copied from the kit's stream area block. It is not valid CSS: the store scan flagged it as "Unknown word" and dropped the review from Passed to Caution, and the rule after it (the small copy button in the thinking summary) could be ignored. The placeholder is gone, the copy button styles stand as their own block.
+
 ## [0.1.3] — 2026-11-14
 
 ### Changed

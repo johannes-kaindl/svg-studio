@@ -290,7 +290,7 @@
 }
 .okit-stream-reasoning > summary { cursor: var(--cursor); color: var(--text-faint); }
 /* Der Kopier-Knopf sitzt IN der Zusammenfassung, bleibt inline und nimmt der Zeile keine Höhe. Sein Aussehen steht in COPY_BUTTON_CSS (Baustein createCopyButton). */
-${COPY_BUTTON_CSS}.okit-stream-reasoning-copy { display: inline-flex; vertical-align: middle; margin-inline-start: var(--size-4-2); }
+.okit-stream-reasoning-copy { display: inline-flex; vertical-align: middle; margin-inline-start: var(--size-4-2); }
 .okit-stream-reasoning > pre {
   max-height: 12em; overflow-y: auto; white-space: pre-wrap;
   background: var(--background-secondary); padding: var(--size-4-2);
