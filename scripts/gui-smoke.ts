@@ -1101,20 +1101,25 @@ async function punktSchnappschuss(): Promise<void> {
     await nimmBilder("desktop").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
     const r = await uebernimm();
     const neu = await liesDatei("probe.svg");
+    // Neuer Bau (obsidian-kit 0.91.0): snapshots/by-file/<Vault-Pfad>/<Stempel><Endung>; der Altbestand (snapshots/<Stempel>/<Pfad>) wird beim ersten Aufruf übernommen.
     const liste = await cdp.evaluate<string[]>(`
+      const d = ${q(`${wurzel}/by-file/probe.svg`)};
+      if (!(await app.vault.adapter.exists(d))) return [];
+      return (await app.vault.adapter.list(d)).files.map((f) => f.split("/").pop());
+    `);
+    const altOrdner = await cdp.evaluate<string[]>(`
       const w = ${q(wurzel)};
-      if (!(await app.vault.adapter.exists(w))) return [];
-      return (await app.vault.adapter.list(w)).folders.map((f) => f.split("/").pop());
+      return (await app.vault.adapter.list(w)).folders.map((f) => f.split("/").pop()).filter((n) => n !== "by-file");
     `);
     const neuester = [...liste].sort().at(-1) ?? "";
-    const kopie = neuester === "" ? null : await liesDatei(`${wurzel}/${neuester}/probe.svg`).catch(() => null);
-    const kopieDirekt = neuester === "" ? null : await cdp.evaluate<string | null>(`const p = ${q(`${wurzel}/${neuester}/probe.svg`)}; return (await app.vault.adapter.exists(p)) ? await app.vault.adapter.read(p) : null;`);
+    const kopieDirekt = neuester === "" ? null : await cdp.evaluate<string | null>(`const p = ${q(`${wurzel}/by-file/probe.svg/`)} + ${q(neuester)}; return (await app.vault.adapter.exists(p)) ? await app.vault.adapter.read(p) : null;`);
     const geschrieben = neu !== null && neu.includes('x="145"') && !neu.includes('x="165"');
-    const gesichert = kopieDirekt !== null && kopieDirekt === alt && !saat.includes(neuester);
-    const rotiert = liste.length < 9 && saat.slice(0, 1).every((n) => liste.includes(n)) && liste.length >= 2;
-    void kopie;
-    record("c4d-schnappschuss", r.ok && geschrieben && gesichert && rotiert,
-      `Übernehmen ${r.ok ? "ok" : `Fehler: ${r.snap.status}`} · Datei geändert (Tür x=145): ${geschrieben} · Kopie des alten Standes im neuesten Ordner ${q(neuester)}: ${gesichert} · Rotation: ${liste.length} von 9 Ordnern übrig, ältester da: ${saat.slice(0, 1).every((n) => liste.includes(n))}`);
+    const saatDateien = saat.map((n) => `${n}.svg`);
+    const gesichert = kopieDirekt !== null && kopieDirekt === alt && !saatDateien.includes(neuester);
+    const uebernommen = altOrdner.length === 0 && saatDateien.some((n) => liste.includes(n));
+    const rotiert = liste.length < 9 && saatDateien.slice(0, 1).every((n) => liste.includes(n)) && liste.length >= 2;
+    record("c4d-schnappschuss", r.ok && geschrieben && gesichert && uebernommen && rotiert,
+      `Übernehmen ${r.ok ? "ok" : `Fehler: ${r.snap.status}`} · Datei geändert (Tür x=145): ${geschrieben} · Kopie des alten Standes im neuesten Stand ${q(neuester)}: ${gesichert} · Altbestand übernommen (keine alten Ordner mehr: ${altOrdner.length === 0}): ${uebernommen} · Rotation: ${liste.length} von 9 Ständen übrig, ältester da: ${saatDateien.slice(0, 1).every((n) => liste.includes(n))}`);
     await loescheSchnappschuesse();
     await schreibe("probe.svg", fixtur("probe.svg"));
   });

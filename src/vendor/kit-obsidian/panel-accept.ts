@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.89.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.91.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -173,7 +173,7 @@ export async function createAttachmentFile(
 
 /** Einfügen, ohne Nutzerinhalt zu zerstören: **die Frontmatter ist Sperrzone** (Cursor oder Auswahlende in ihr, auch `0:0` vor ihr: der Text steht hinter ihrer schließenden
  *  `---`-Zeile, `after-frontmatter`; eine Einfügung davor machte sie zur Nicht-Frontmatter, eine in einer YAML-Zeile zerrisse sie). Was Frontmatter ist, sagt Obsidian
- *  selbst (`getFrontMatterInfo`, gemessen 1.15.1: erste Zeile genau `---`, schließende Zeile genau `---`, ein leerer Block zählt, ohne schließende Zeile gibt es keine). Ein Zaun unter dem Cursor
+ *  selbst (`getFrontMatterInfo`, gemessen 1.15.1: erste Zeile genau `---`, schließende Zeile genau `---`, ein leerer Block zählt, ohne schließende Zeile gibt es keine); `locateFrontmatter` (frontmatter.ts) liest dieselbe Regel für `patchFrontmatter` und `parseFrontmatter` (Pilot `frontmatter-leser`, 2026-11-14). Ein Zaun unter dem Cursor
  *  bzw. am Ende der Auswahl bekommt den Text dahinter (sonst entstünde ein Block im Block); eine Auswahl außerhalb von Frontmatter und Zaun bleibt (Einfügung an ihrem Ende). Ein Zaun, der nie
  *  geschlossen wird, hat kein „dahinter“: `UnclosedFenceError`, nichts geschrieben. Ein Zaun in einem Zitat, Callout oder Listenpunkt (Einzug ab vier Leerzeichen), den der flache Scanner nicht sieht,
  *  wird abgelehnt: `NestedFenceError`, nichts geschrieben (seit 0.86.0). Die Zeilenenden der Notiz bleiben einheitlich. */

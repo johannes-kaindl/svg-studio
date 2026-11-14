@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Backup copies are kept per file; older backup copies move into the new folder layout (plugin folder `snapshots/by-file/`) on the first save. The thinning now applies to each file on its own (6 recent, 7 days, 4 weeks, 6 months; at most 50 per file, none older than 185 days, 50 MiB in total), so an older folder may hold fewer copies than before. (obsidian-kit 0.91.0)
+
 ### Fixed
 
 - The model dropdown and the model choice now name and bind the endpoint the manager really uses (before: the first enabled one, even when it was unreachable). A model choice made while its endpoint is switched off or deleted now applies to the automatically chosen endpoint. (obsidian-kit 0.89.0)

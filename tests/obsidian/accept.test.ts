@@ -241,7 +241,7 @@ describe("Übernehmen: bestehende Datei", () => {
     expect(snap).toBeGreaterThanOrEqual(0);
     expect(snap).toBeLessThan(write);
     expect([...t.snaps.values()]).toEqual([BASE]);
-    expect([...t.snaps.keys()][0]).toMatch(/^\.config-x\/plugins\/svg-studio\/snapshots\/.+\/Anhänge\/logo\.svg$/);
+    expect([...t.snaps.keys()][0]).toMatch(/^\.config-x\/plugins\/svg-studio\/snapshots\/by-file\/Anhänge\/logo\.svg\/[\w-]+\.svg$/);
   });
 
   it("scheitert der Schnappschuss, wird nichts geschrieben", async () => {
