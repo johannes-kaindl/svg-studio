@@ -56,6 +56,7 @@ import { startLlmStub, type LlmStub, type StubAnfrage } from "../../tools/obsidi
 import { gegenprobeErreichbarkeit, gegenprobeFokus, messeErreichbarkeit, messeFokusErhalt, mitHoehe, zeichnePflicht, type PflichtTeilurteil } from "../../tools/obsidian-cdp/pflichtpunkte.js";
 import { boxOf, capture, setWindowSize } from "../../tools/obsidian-cdp/shot.js";
 import { buildVault, stagingVaultDir } from "../../tools/obsidian-cdp/vault.js";
+import { baueZweitinstanzHome, zweitinstanzUmgebung } from "../../tools/obsidian-cdp/zweitinstanz.js";
 
 const REPO_NAME = "svg-studio";
 const PLUGIN_ID = "svg-studio";
@@ -90,6 +91,9 @@ const PUNKTE = [
   "c4a-bediente-notiz",
   "strg-z-nach-block-uebernehmen",
   "block-verschoben-uebernehmen-trifft-block",
+  "c4h-quellmodus-crlf-uebernehmen",
+  "c4h-quellmodus-crlf-strg-z",
+  "c4h-quellmodus-weitergetippt-verweigert",
   "uebernehmen-lesemodus",
   "c4c-sperre-ohne-notiz",
   "c4d-schnappschuss",
@@ -870,7 +874,10 @@ async function hartNeustart(ud: string, signal: "-9" | "-TERM" | "browser-close"
     await sleep(500);
   }
   if (lebt()) { beende("-9"); for (let i = 0; i < 30 && lebt(); i++) await sleep(500); }
-  const app = spawn("/Applications/Obsidian.app/Contents/MacOS/Obsidian", [`--user-data-dir=${ud}`, `--remote-debugging-port=${String(port)}`, "--lang=en-US"], { detached: true, stdio: "ignore" });
+  // Wie der erste Start (messlauf.sh baut `$UD.home`): fremdes HOME mit Link auf den Schlüsselbund, sonst ersetzt der Neustart den CLI-Socket der Haupt-App (Welle 35, TREIBER-HOME).
+  // `baueZweitinstanzHome` ist wiederholbar und baut das HOME auch dann, wenn der Lauf mit `FREMDES_HOME=0` begann; ein echtes HOME gibt es hier nicht.
+  const fremdesHome = baueZweitinstanzHome(`${ud}.home`);
+  const app = spawn("/Applications/Obsidian.app/Contents/MacOS/Obsidian", [`--user-data-dir=${ud}`, `--remote-debugging-port=${String(port)}`, "--lang=en-US"], { detached: true, stdio: "ignore", env: zweitinstanzUmgebung(fremdesHome) });
   app.unref();
   let neu: Cdp | null = null;
   for (let i = 0; i < 40 && neu === null; i++) {
@@ -1379,6 +1386,109 @@ async function punktBlockVerschoben(): Promise<void> {
     const ids = (text.match(/ id="[^"]*"/g) ?? []).length;
     const gut = runde !== null && r.ok && text.startsWith("Neue Zeile oben") && (text.match(/```svg-studio/g) ?? []).length === 1 && ids === 3 && text.includes("Ende");
     record("block-verschoben-uebernehmen-trifft-block", gut, `Runde ${q(runde?.labels)} · Zeile über dem Block eingefügt · Übernehmen ${r.ok ? "ok" : `Fehler ${q(r.snap.status)}`} · Notiz beginnt mit der neuen Zeile: ${text.startsWith("Neue Zeile oben")} · ein Block: ${(text.match(/```svg-studio/g) ?? []).length === 1} · ${ids} ids im Block`);
+  });
+}
+
+/** Kit 0.93.0 (`panel-accept` über `note-edit`), am echten Obsidian: eine Notiz mit CRLF auf der Platte ist im Quellmodus offen. Übernehmen schreibt dann im Editor (Strg+Z wirkt, der Editor
+ *  hält LF) und meldet die Notiz nicht fälschlich als geändert; hat der Nutzer nach dem Öffnen des Panels in den Block getippt (ungespeichert), verweigert es und lässt das Getippte stehen. */
+async function punktQuellmodusCrlf(): Promise<void> {
+  const NAMEN: Name[] = ["c4h-quellmodus-crlf-uebernehmen", "c4h-quellmodus-crlf-strg-z", "c4h-quellmodus-weitergetippt-verweigert"];
+  if (!gewaehlt(...NAMEN)) return;
+  const pfad = "_smoke-crlf.md";
+  /** Notiz mit CRLF auf der Platte, Panel über den Blockknopf (Vorschau-Blatt), danach dieselbe Notiz im Quellmodus in einem zweiten Blatt; Runde „Namen vergeben“ liegt offen. */
+  const vorbereiten = async (): Promise<{ vorEditor: string; vorPlatte: string }> => {
+    await raeume();
+    await stelleFixturenHer();
+    const svg = fixtur("unbenannt.svg").trimEnd();
+    const crlf = `Kopf\n\n\`\`\`svg-studio\n${svg}\n\`\`\`\n\nEnde\n`.replace(/\r?\n/g, "\r\n");
+    await oeffneNotiz(pfad, crlf, "preview", "tab");
+    const platte = (await liesDatei(pfad)) ?? "";
+    if (!platte.includes("\r\n")) throw new Vorbedingung("Die Fixtur hat auf der Platte kein CRLF (Obsidian hat beim Anlegen normalisiert)");
+    const knopf = `Array.from(document.querySelectorAll(".markdown-preview-view .svg-studio-block > .svg-studio-edit")).find((b) => b.getBoundingClientRect().width > 0)`;
+    await pollUntil(cdp, `return (${knopf}) ? true : null;`, 8000, 250);
+    if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Blockknopf nicht klickbar");
+    if ((await warteSnap((x) => (x.target ?? "").includes("_smoke-crlf"), 8000)) === null) throw new Vorbedingung("Das Panel öffnete nicht auf dem Block");
+    if ((await warteSnap((x) => x.notices.some((n) => /no name/i.test(n.text)), 8000)) === null) throw new Vorbedingung("Keine Karte „ohne Namen“ am Block");
+    if (!(await klickText(".svg-studio-notice", /Assign names/))) throw new Vorbedingung("Knopf „Assign names“ nicht klickbar");
+    if ((await warteSnap((x) => x.rounds === 1, 8000)) === null) throw new Vorbedingung("Keine Runde „Namen vergeben“");
+    await cdp.evaluate(`
+      const f = app.vault.getAbstractFileByPath(${q(pfad)});
+      const leaf = app.workspace.getLeaf("split", "vertical");
+      await leaf.openFile(f, { state: { mode: "source" } });
+      return true;
+    `);
+    const offen = await pollUntil(cdp, `const l = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === ${q(pfad)} && x.view.getMode() === "source" && x.view.editor); return l ? true : null;`, 6000, 200);
+    if (offen === null) throw new Vorbedingung("Die Notiz ist nicht im Quellmodus offen");
+    await sleep(500);
+    const vorEditor = (await notizText(pfad)) ?? "";
+    if (vorEditor.includes("\r")) throw new Vorbedingung("Der Editor hält ein \\r (erwartet LF, Kit-Messung P5 gilt hier nicht)");
+    return { vorEditor, vorPlatte: (await liesDatei(pfad)) ?? "" };
+  };
+  const ids = (t: string | null): number => ((t ?? "").match(/ id="[^"]*"/g) ?? []).length;
+  const bloecke = (t: string | null): number => ((t ?? "").match(/```svg-studio/g) ?? []).length;
+
+  // 1 und 2: Übernehmen im Editor, dann Strg+Z.
+  let st: { vorEditor: string; vorPlatte: string } | null = null;
+  let fehler: string | null = null;
+  let r: { ok: boolean; snap: Snap } | null = null;
+  try {
+    st = await vorbereiten();
+    r = await uebernimm();
+  } catch (e) {
+    fehler = fehlerText(e);
+  }
+  await sleep(400);
+  const nachEditor = await notizText(pfad);
+  // Obsidian speichert den Editor verzögert: bis zu 5 s auf die Platte warten, dann gilt der Stand (nur Auskunft, die Platte ist nicht der Gegenstand der Punkte).
+  const platteGespeichert = await pollUntil(cdp, `const f = app.vault.getAbstractFileByPath(${q(pfad)}); const t = f ? await app.vault.read(f) : ""; return (t.match(/ id="[^"]*"/g) || []).length === 3 ? t : null;`, 5000, 250).catch(() => null);
+  await lauf("c4h-quellmodus-crlf-uebernehmen", async () => {
+    if (fehler !== null || r === null || st === null) throw new Vorbedingung(`Vorbereitung fehlgeschlagen: ${fehler}`);
+    // Der Editorweg speichert LF (gemessen an Obsidian 1.15.1); der Vault-Weg (`vault.process`) ließ die CRLF der Platte stehen (Gegenprobe mit gesperrtem Editorweg, 2026-11-15).
+    const platteLf = platteGespeichert !== null && !String(platteGespeichert).includes("\r");
+    const gut = r.ok && ids(nachEditor) === 3 && bloecke(nachEditor) === 1 && (nachEditor ?? "").includes("Ende") && !(nachEditor ?? "").includes("\r") && !/changed/i.test(r.snap.status ?? "") && platteLf;
+    record("c4h-quellmodus-crlf-uebernehmen", gut,
+      `Übernehmen ${r.ok ? "ok" : `Fehler ${q(r.snap.status)}`} · Editor danach: ${ids(nachEditor)} ids, ${bloecke(nachEditor)} Block, ohne \\r: ${!(nachEditor ?? "").includes("\r")} · Platte vorher mit CRLF: ${st.vorPlatte.includes("\r\n")} · Platte nach dem Speichern ${platteGespeichert === null ? "bis 5 s nicht nachgezogen" : `trägt die ids, enthält \\r: ${String(platteGespeichert).includes("\r")}`}`);
+  });
+  await lauf("c4h-quellmodus-crlf-strg-z", async () => {
+    if (fehler !== null || r === null || st === null || !r.ok) throw new Vorbedingung(`Vorbereitung fehlgeschlagen: ${fehler ?? q(r?.snap.status)}`);
+    await cdp.evaluate(`const l = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === ${q(pfad)} && x.view.getMode() === "source"); app.workspace.setActiveLeaf(l, { focus: true }); l.view.editor.undo(); return true;`);
+    await sleep(400);
+    const nachUndo = await notizText(pfad);
+    record("c4h-quellmodus-crlf-strg-z", nachUndo === st.vorEditor && ids(nachEditor) === 3,
+      `Übernehmen schrieb im Editor (${ids(nachEditor)} ids vorher) · ein Rückgängig-Schritt (editor.undo) ${nachUndo === st.vorEditor ? "stellt den Stand vor dem Übernehmen wieder her" : `lässt die Notiz anders: ${q(nachUndo?.slice(0, 160))}`}`);
+  });
+
+  // 3: nach dem Öffnen des Panels in den Block getippt (ungespeichert), dann Übernehmen: verweigert, das Getippte bleibt.
+  let fehler3: string | null = null;
+  let r3: { ok: boolean; snap: Snap } | null = null;
+  let getippt = "";
+  try {
+    await vorbereiten();
+    // Tippen und Klick in EINEM Zug: Obsidian speichert den Editor verzögert, die Platte trägt das Getippte dann noch nicht (sonst läse auch der Vault-Weg die Änderung).
+    getippt = (await cdp.evaluate<string>(`
+      const l = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === ${q(pfad)} && x.view.getMode() === "source");
+      const ed = l.view.editor; const v = ed.getValue(); const i = v.indexOf("</svg>");
+      const knopf = document.querySelector(".svg-studio-accept");
+      if (i < 0 || !knopf) return "";
+      ed.replaceRange("<!-- getippt -->", ed.offsetToPos(i));
+      const text = ed.getValue();
+      knopf.click();
+      return text;
+    `)) ?? "";
+    if (getippt === "") throw new Vorbedingung("Im Editor ließ sich nichts tippen (kein </svg> oder kein Übernehmen-Knopf)");
+    const s3 = await warteSnap((x) => x.rounds === 0 || (x.statusClass.includes("is-error") && !x.running && x.acceptDisabled === false), 20000);
+    if (s3 === null) throw new Vorbedingung(`Übernehmen endete nicht (Status: ${(await snap())?.status ?? "kein Panel"})`);
+    r3 = { ok: s3.rounds === 0, snap: s3 };
+  } catch (e) {
+    fehler3 = fehlerText(e);
+  }
+  await sleep(400);
+  const nach3 = await notizText(pfad);
+  await lauf("c4h-quellmodus-weitergetippt-verweigert", async () => {
+    if (fehler3 !== null || r3 === null) throw new Vorbedingung(`Vorbereitung fehlgeschlagen: ${fehler3}`);
+    const verweigert = !r3.ok && /Block changed|target changed/.test(r3.snap.status ?? "");
+    record("c4h-quellmodus-weitergetippt-verweigert", verweigert && nach3 === getippt && ids(nach3) === 0,
+      `Übernehmen ${r3.ok ? "ok (soll verweigert werden)" : `verweigert: ${q(r3.snap.status)}`} · das Getippte steht unverändert im Editor: ${nach3 === getippt} · keine ids geschrieben: ${ids(nach3) === 0} · Gegenprobe ohne Tippen: Punkt c4h-quellmodus-crlf-uebernehmen (schreibt im selben Aufbau)`);
   });
 }
 
@@ -2071,6 +2181,7 @@ async function main(): Promise<void> {
     await punktUebernehmenDatei();
     await punktUebernehmenBlock();
     await punktBlockVerschoben();
+    await punktQuellmodusCrlf();
     await punktLesemodus();
     await punktSperre();
     await punktAuswahl();
