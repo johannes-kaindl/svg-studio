@@ -1,40 +1,184 @@
 {
   "sources": {
-    "obsidian-kit": { "ref": "0.91.0" },
-    "code-kit": { "ref": "0.59.0" }
+    "obsidian-kit": {
+      "ref": "0.92.0"
+    },
+    "code-kit": {
+      "ref": "0.73.0"
+    }
   },
   "targets": [
     {
-      "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "modules": ["svg-guard"],
-      "rewrite": [["../pure/", "./"]]
+      "dir": "src/vendor/kit",
+      "source": "code-kit",
+      "from": "src/ts/web",
+      "modules": [
+        "svg-guard"
+      ],
+      "rewrite": [
+        [
+          "../pure/",
+          "./"
+        ]
+      ]
     },
     {
-      "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure",
-      "modules": ["safe-markdown", "i18n", "answer-retry", "llm-answer", "think-splitter", "sha256", "data-url", "slug", { "name": "measured-quality", "ref": "0.55.0" },
-        { "name": "fences", "ref": "0.54.0" }, { "name": "panel-session", "ref": "0.54.0" }, { "name": "rounds", "ref": "0.54.0" }, { "name": "run-slot", "ref": "0.54.0" }, { "name": "rotation", "ref": "0.60.0" }, { "name": "css-color", "ref": "0.56.0" }, { "name": "error-message", "ref": "0.68.0" }, { "name": "word-diff", "ref": "0.55.0" }]
+      "dir": "src/vendor/kit",
+      "source": "code-kit",
+      "from": "src/ts/pure",
+      "modules": [
+        "safe-markdown",
+        "i18n",
+        "answer-retry",
+        "llm-answer",
+        "think-splitter",
+        "sha256",
+        "data-url",
+        "slug",
+        "measured-quality",
+        "fences",
+        "panel-session",
+        "rounds",
+        "run-slot",
+        "rotation",
+        "css-color",
+        "error-message",
+        "word-diff"
+      ]
     },
     {
-      "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/pure", "ref": "0.68.0",
-      "modules": ["anthropic-wire", "backend-probe", "capabilities", "embeddings-client", "endpoint", "endpoint_config", "endpoint_diagnostics", "error_body", "model-choice", "model-context",
-        "model-list-cache", "reasoning", "redact", "text-window", "sampling-profiles", "secrets", "sse", "timeout"]
+      "dir": "src/vendor/kit",
+      "source": "code-kit",
+      "from": "src/ts/pure",
+      "modules": [
+        "anthropic-wire",
+        "backend-probe",
+        "capabilities",
+        "embeddings-client",
+        "endpoint",
+        "endpoint_config",
+        "endpoint_diagnostics",
+        "error_body",
+        "model-choice",
+        "model-context",
+        "model-list-cache",
+        "reasoning",
+        "redact",
+        "text-window",
+        "sampling-profiles",
+        "secrets",
+        "sse",
+        "timeout"
+      ]
     },
-    { "dir": "src/vendor/kit", "source": "code-kit", "from": "src/ts/web", "ref": "0.68.0", "modules": ["clipboard"] },
     {
-      "dir": "src/vendor/kit", "source": "obsidian-kit", "from": "src/pure",
-      "modules": ["block-writer", "fence-scan", "plugin-id", "endpoint-source", "endpoint-secret-hook", "override-guard"],
-      "rewrite": [["../vendor/code-kit/pure/", "./"], ["../vendor/code-kit/web/", "./"], ["../pure/", "./"]]
+      "dir": "src/vendor/kit",
+      "source": "code-kit",
+      "from": "src/ts/web",
+      "modules": [
+        "clipboard"
+      ]
     },
     {
-      "dir": "src/vendor/kit-obsidian", "source": "obsidian-kit", "from": "src/obsidian",
-      "modules": ["status-indicator", "choice-modal", "write-ports", "help-setting", "settings_walker", "setting-body-host", "folder-suggest", "confirm", "prompt-text", "segmented-control", "panel-accept", "review-list", "redline", "file-snapshot",
-        "llm-connection", "llm-connection-strings", "endpoint-source", "request-section", "model-bar", "model-bar-strings", "thinking-control", "stream-area", "copy-button", "version-list", "chat-host",
-        "endpoint-list", "endpoint-secrets", "secrets", "shortcuts-bridge", "request-session", "model-picker", "collapsible", "clipboard", "clock", "backend-probe", "endpoint-plumbing",
-        "embedding-connection", "endpoint-status-text", "plugin-api", "anthropic-transport", "chat-client", "chat-transport"],
-      "rewrite": [["../pure/", "../kit/"], ["../vendor/code-kit/pure/", "../kit/"], ["../vendor/code-kit/web/", "../kit/"]]
+      "dir": "src/vendor/kit",
+      "source": "obsidian-kit",
+      "from": "src/pure",
+      "modules": [
+        "block-writer",
+        "fence-scan",
+        "plugin-id",
+        "endpoint-source",
+        "endpoint-secret-hook",
+        "override-guard"
+      ],
+      "rewrite": [
+        [
+          "../vendor/code-kit/pure/",
+          "./"
+        ],
+        [
+          "../vendor/code-kit/web/",
+          "./"
+        ],
+        [
+          "../pure/",
+          "./"
+        ]
+      ]
     },
     {
-      "dir": "tests/vendor/kit", "source": "obsidian-kit", "from": "src/testing",
-      "modules": ["kit-css", "linear-probe", "window-timers", "obsidian-mock"]
+      "dir": "src/vendor/kit-obsidian",
+      "source": "obsidian-kit",
+      "from": "src/obsidian",
+      "modules": [
+        "status-indicator",
+        "choice-modal",
+        "write-ports",
+        "help-setting",
+        "settings_walker",
+        "setting-body-host",
+        "folder-suggest",
+        "confirm",
+        "prompt-text",
+        "segmented-control",
+        "panel-accept",
+        "review-list",
+        "redline",
+        "file-snapshot",
+        "llm-connection",
+        "llm-connection-strings",
+        "endpoint-source",
+        "request-section",
+        "model-bar",
+        "model-bar-strings",
+        "thinking-control",
+        "stream-area",
+        "copy-button",
+        "version-list",
+        "chat-host",
+        "endpoint-list",
+        "endpoint-secrets",
+        "secrets",
+        "shortcuts-bridge",
+        "request-session",
+        "model-picker",
+        "collapsible",
+        "clipboard",
+        "clock",
+        "backend-probe",
+        "endpoint-plumbing",
+        "embedding-connection",
+        "endpoint-status-text",
+        "plugin-api",
+        "anthropic-transport",
+        "chat-client",
+        "chat-transport"
+      ],
+      "rewrite": [
+        [
+          "../pure/",
+          "../kit/"
+        ],
+        [
+          "../vendor/code-kit/pure/",
+          "../kit/"
+        ],
+        [
+          "../vendor/code-kit/web/",
+          "../kit/"
+        ]
+      ]
+    },
+    {
+      "dir": "tests/vendor/kit",
+      "source": "obsidian-kit",
+      "from": "src/testing",
+      "modules": [
+        "kit-css",
+        "linear-probe",
+        "window-timers",
+        "obsidian-mock"
+      ]
     }
   ]
 }

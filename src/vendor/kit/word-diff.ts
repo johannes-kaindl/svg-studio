@@ -1,4 +1,4 @@
-// vendored from code-kit@0.55.0, src/ts/pure/word-diff.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.73.0, src/ts/pure/word-diff.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /** Word-level diff with offsets — the question `diff.ts` cannot answer, because a paragraph is one line there.
  *
  *  Origin: born here for Diachronic (a Markdown review plugin), no ancestor in any repo. Measured 2026-10-18 and again
@@ -178,4 +178,37 @@ export function applyWordChanges(oldText: string, newText: string, changes: read
     pos = c.oldEnd;
   });
   return out + oldText.slice(pos);
+}
+
+/** Character-level comparison of two short texts that keeps the shared start and the shared end: `same`, then the replaced
+ *  middle as `del` before `ins`, then `same`. Empty pieces are left out; equal texts give one `same` piece, two empty texts none.
+ *
+ *  This is what a name review wants and {@link wordDiffSegments} does not give: `foo1.md` → `foo2.md` is `foo`, `1`→`2`, `.md`
+ *  here, but one replaced word (`foo1` → `foo2`) there. It is linear, has no cell cap, and always `exact` in the sense that
+ *  `same` + `del` read back the old text and `same` + `ins` the new one; the price is that a change in two places is one big
+ *  replaced middle. For prose use {@link diffWords}.
+ *
+ *  The cut never falls inside a surrogate pair: two emoji that share their first UTF-16 unit differ as a whole code point.
+ *
+ *  Origin: `nameDiff` of the `filename-sanitizer` plugin (core/review-view.ts, 2026-11-09), which cut at code units. */
+export function affixDiffSegments(oldText: string, newText: string): DiffSegment[] {
+  if (oldText === newText) return oldText === "" ? [] : [{ kind: "same", text: oldText }];
+  const isHigh = (c: number): boolean => c >= 0xd800 && c <= 0xdbff;
+  const isLow = (c: number): boolean => c >= 0xdc00 && c <= 0xdfff;
+  let head = 0;
+  while (head < oldText.length && head < newText.length && oldText.charCodeAt(head) === newText.charCodeAt(head)) head++;
+  // A shared high surrogate whose low half differs is not shared: step back so the pair stays whole.
+  if (head > 0 && isHigh(oldText.charCodeAt(head - 1))) head--;
+  let tail = 0;
+  while (tail < oldText.length - head && tail < newText.length - head
+    && oldText.charCodeAt(oldText.length - 1 - tail) === newText.charCodeAt(newText.length - 1 - tail)) tail++;
+  // Same at the other end: a shared low surrogate whose high half differs.
+  if (tail > 0 && isLow(oldText.charCodeAt(oldText.length - tail))) tail--;
+  const out: DiffSegment[] = [];
+  const push = (kind: DiffSegmentKind, text: string): void => { if (text !== "") out.push({ kind, text }); };
+  push("same", oldText.slice(0, head));
+  push("del", oldText.slice(head, oldText.length - tail));
+  push("ins", newText.slice(head, newText.length - tail));
+  push("same", oldText.slice(oldText.length - tail));
+  return out;
 }

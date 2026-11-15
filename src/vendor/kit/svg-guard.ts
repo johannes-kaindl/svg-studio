@@ -1,5 +1,6 @@
-// vendored from code-kit@0.59.0, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.73.0, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 import { CSS_RISKY, CSS_RISKY_PLAIN, isLocalRef, normalizeUrlRef, trimUrlLikeBrowser } from "./safe-markdown";
+import { errorMessage } from "./error-message";
 
 /** Checks SVG text written by a model (or any untrusted source) BEFORE it is shown or stored. The guard REJECTS: it
  *  returns every problem it finds and never repairs, strips or rewrites the input. A silently cleaned SVG shows
@@ -63,9 +64,10 @@ import { CSS_RISKY, CSS_RISKY_PLAIN, isLocalRef, normalizeUrlRef, trimUrlLikeBro
  *  document can make a browser load or run, and about its cost, not about what it shows), and the cost is an
  *  ESTIMATE, NOT A GUARANTEE. Three independent reviews with Chromium measurements found classes it does not see (the
  *  measured list is in the README of this module and in `docs/internal/svg-guard-cost.md`; what they found and the guard fixed is kept as a
- *  closed list of cases, `tests/fixtures/svg-guard-round4.mjs`): shapes, clips and masks that
- *  CSS sets (`d`, `clip-path: polygon()`, `mask-image: linear-gradient()`), text in a clip or mask, gradients with thousands
- *  of stops, animations (the cost is paid every frame), scales it does not follow, and selectors it cannot evaluate. It
+ *  closed list of cases, `tests/fixtures/svg-guard-round4.mjs`): text in a clip or mask, gradients with thousands
+ *  of stops, animations (the cost is paid every frame), scales it does not follow, and selectors it cannot evaluate. Shapes,
+ *  clips and masks that CSS sets and the model does not read are refused as `unsafe-css` (the property `d`, a motion path, `@property`,
+ *  `clip-path: polygon()`, `path()`, `shape()`, a mask layer that is not `url(#id)`). It
  *  assumes the picture is shown about 600 px wide and that a filtered element fills the viewport (the size of a shape
  *  is not known). A consumer that shows the picture much larger should lower `maxRenderCost`; one that shows it smaller can
  *  raise it. A consumer must not rely on this check alone: draw a block whose `cost` is near the limit only after a click. */
@@ -186,6 +188,13 @@ export const SVG_RENDER_COST = {
   vertex: 1,
   /** An extra per vertex inside a clipPath (300 ms per application at 20 000 points). */
   clipPerVertex: 15,
+  /** A `clip-path` basic shape with a fixed number of vertices (`circle()`, `ellipse()`, `inset()`, `rect()`, `xywh()`), per application:
+   *  `circle(40%)` on 4 990 full-surface rects 413 ms against 84 ms without (66 µs). `polygon()`, `path()` and `shape()` are refused, not counted. */
+  clipShape: 70,
+  /** Per vertex of the path a `<textPath>` names, per `textPath`: every use walks the whole path. 200 uses of a path of 3 300 cubic curves
+   *  (23 101 vertices as counted) took 0.5 s at a control-point offset of 9, 2.2 s at 900, 7.0 s at 90 000 and 7.6 s at 9 000 000 (Chromium
+   *  flattens a curve into more segments the larger it is, up to a ceiling: 1.65 µs per vertex and use); straight lines 0.03 µs. */
+  textPathVertex: 2,
   /** A dashed stroke: per shape, and per dash (outline length ÷ period; 0.3 to 0.9 µs measured). `maxDashes` caps what one shape adds. */
   dashBase: 50,
   dashPerDash: 1,
@@ -252,10 +261,13 @@ const ALLOWED_ELEMENTS: ReadonlySet<string> = new Set([
 const TEXTUAL_ELEMENTS: ReadonlySet<string> = new Set(["style", "title", "desc"]);
 
 const SAFE_DATA_URL = /^data:image\/(?:png|jpe?g|gif|webp|avif)[;,]/;
-/** Legacy CSS that `CSS_RISKY` does not name. */
+/** Legacy CSS that `CSS_RISKY` does not name, and `@property`: its `initial-value` is the value of a custom property wherever none is
+ *  declared, which the cost model does not read (`@property --c { initial-value: polygon(…) }` behind `clip-path: var(--c)` drew 4.9 s at
+ *  an estimate of 1 043). No real SVG of the workspace has one. */
 const LEGACY_CSS: ReadonlyArray<readonly [RegExp, string]> = [
   [/expression\(/i, "expression()"],
   [/-moz-binding/i, "-moz-binding"],
+  [/@property\b/i, "@property"],
 ];
 
 /** Classifies one URL value of an attribute that names a resource. `null` = allowed. */
@@ -316,8 +328,13 @@ function cssReasons(css: string): string[] {
  *  so none may be left out of the count: a decoy `xlink:href="#tiny"` must not hide `href="#bomb"`. For `<use>` and
  *  `<feImage>`, which draw what the fragment names, and `<pattern>`, which takes its content from it. */
 function hrefTargets(el: Element, byId: ReadonlyMap<string, Element>): Element[] {
+  if (el.localName !== "use" && el.localName !== "feImage" && el.localName !== "pattern") return [];
+  return referenceTargets(el, byId);
+}
+
+/** The elements every fragment reference attribute of `el` names, whatever the element (see `hrefTargets`). */
+function referenceTargets(el: Element, byId: ReadonlyMap<string, Element>): Element[] {
   const out: Element[] = [];
-  if (el.localName !== "use" && el.localName !== "feImage" && el.localName !== "pattern") return out;
   for (const attr of Array.from(el.attributes)) {
     if (!isReferenceName(attr)) continue;
     const t = trimUrlLikeBrowser(attr.value);
@@ -666,7 +683,8 @@ function cssFilterCost(value: string): number {
 }
 
 /** `var(--name, fallback)` replaced by the value of every declaration of `--name` in the document (the document is not
- *  walked for which one applies: all of them count), a fallback when there is none. `null` when it grows past the limit. */
+ *  walked for which one applies: all of them count) AND by the fallback: an element where no declaration applies takes the fallback
+ *  (`clip-path: var(--c, polygon(…))` with `--c: none` on one `<g>` elsewhere drew a polygon on 1 000 rects, 4.9 s at 1 044). `null` when it grows past the limit. */
 function expandVars(value: string, customs: ReadonlyMap<string, string[]>, budget: { left: number }, depth = 0): string | null {
   if (findCI(value, "var(") < 0) return value;
   if (depth > C.varDepth) return null;
@@ -685,7 +703,8 @@ function expandVars(value: string, customs: ReadonlyMap<string, string[]>, budge
     const known = customs.get(name);
     // the length check after the append catches the same overflow; this one is before the join, so a long list is not built first
     if (known !== undefined && (known[0] === OVERFLOW || known.reduce((n, v) => n + v.length, out.length) > C.varMaxLength)) return null;
-    const text = known !== undefined && known.length > 0 ? known.join(" ") : comma < 0 ? "" : inner.slice(comma + 1);
+    const fallback = comma < 0 ? "" : inner.slice(comma + 1);
+    const text = known !== undefined && known.length > 0 ? (fallback === "" ? known.join(" ") : `${known.join(" ")} ${fallback}`) : fallback;
     const expanded = expandVars(text, customs, budget, depth + 1);
     if (expanded === null) return null;
     out += " " + expanded + " ";
@@ -800,15 +819,26 @@ function vertexCount(el: Element): number {
   switch (el.localName) {
     case "line": return 2;
     case "polyline": case "polygon": return Math.floor(numbers(el.getAttribute("points")).length / 2);
-    case "path": {
-      // every number is at most one vertex, and so is every command letter (`z` closes a subpath and is a vertex of its own)
-      const d = el.getAttribute("d") ?? "";
-      let letters = 0;
-      for (let i = 0; i < d.length; i++) { const c = d.charCodeAt(i); if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122)) letters++; }
-      return numbers(d).length + letters;
-    }
+    case "path": return pathVertices(el.getAttribute("d") ?? "");
     default: return 0;
   }
+}
+
+/** What a `<textPath>` walks along path data, per use, in vertices: `pathVertices`, plus for every number of a curve command (`C`, `S`, `Q`, `T`) two
+ *  more and of an arc (`A`) three more. Chromium flattens a curve into many segments (measured per segment and use at a control offset of 90 000, 900
+ *  segments, 100 uses: C 10.9 µs, S 10.7, Q 9.6, T 8.8, A 25.9 at a radius of 9e4; a line 0.3), and a segment can hold few numbers (`T` two, an arc
+ *  with packed flags five): with `textPathVertex` 2 that is at least 12 per T and 40 per arc. Linear. */
+function pathWalk(d: string): number {
+  let extra = 0;
+  for (const m of d.matchAll(/[CcSsQqTtAa][^MmLlHhVvCcSsQqTtAaZz]*/g)) extra += numbers(m[0]).length * (m[0][0] === "A" || m[0][0] === "a" ? 3 : 2);
+  return pathVertices(d) + extra;
+}
+
+/** Vertices of path data as an upper bound: every number is at most one vertex, and so is every command letter (`z` closes a subpath and is a vertex of its own). */
+function pathVertices(d: string): number {
+  let letters = 0;
+  for (let i = 0; i < d.length; i++) { const c = d.charCodeAt(i); if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122)) letters++; }
+  return numbers(d).length + letters;
 }
 
 /** Length of the outline of a path, in user units, as an upper bound: curves by their control polygon, arcs by a full ellipse and the chord. */
@@ -932,7 +962,12 @@ function filterCost(filter: Element, scale: number, memo: Map<Element, Map<numbe
 
 /** What a declaration block (an attribute list, `style=` or a rule's body) asks for, read once. */
 interface Effect {
+  /** The ids a `filter`, `mask` or `clip-path` names, every occurrence: a filter list or a mask with several layers applies each entry. */
   filters: string[]; fnCost: number; masks: string[]; clips: string[];
+  /** Basic shapes of a `clip-path` that are charged as a clip application (`circle()`, …; see `clipFunctions`). */
+  clipShapes: number;
+  /** `filter`, `mask` or `clip-path: inherit`: the element takes the parent's value. */
+  inherit: { filter?: true; mask?: true; clip?: true };
   fill?: string[]; stroke?: string[];
   markers: Partial<Record<"marker-start" | "marker-mid" | "marker-end", string[]>>;
   /** Dash period in user units; 0 switches a dash off. Of several declarations the smallest period counts. */
@@ -943,10 +978,10 @@ interface Effect {
   scaleBound: number;
   animated: boolean;
 }
-const newEffect = (): Effect => ({ filters: [], fnCost: 0, masks: [], clips: [], markers: {}, blend: 0, bound: 0, scaleBound: 0, animated: false });
+const newEffect = (): Effect => ({ filters: [], fnCost: 0, masks: [], clips: [], clipShapes: 0, inherit: {}, markers: {}, blend: 0, bound: 0, scaleBound: 0, animated: false });
 
 /** What a value reads as, once: `var()` expanded, lower-cased, and what is derived from it. One value is read once, however many elements carry it. */
-interface Read { value: string; lc: string; ids?: string[]; fn?: number; bound?: number; dash?: number }
+interface Read { value: string; lc: string; ids?: string[]; fn?: number; bound?: number; dash?: number; shapes?: { refused: string | null; shapes: number }; reported?: true }
 interface Reader { customs: ReadonlyMap<string, string[]>; read: (raw: string) => Read | null }
 function makeReader(customs: ReadonlyMap<string, string[]>): Reader {
   const cache = new Map<string, Read | null>();
@@ -990,12 +1025,34 @@ function dashOf(rd: Read, raw: string, customs: ReadonlyMap<string, string[]>): 
   else {
     // (a custom property with too many values never gets here: `read` refused the value)
     const known = customs.get(one.name);
-    const candidates = known !== undefined && known.length > 0 ? known : one.fallback !== null ? [one.fallback] : [];
+    // the fallback counts too: it applies wherever no declaration does
+    const candidates = [...(known ?? []), ...(one.fallback !== null ? [one.fallback] : [])];
     p = 0;
     for (const c of candidates) { const q = dashPeriod(c); if (q > 0 && (p === 0 || q < p)) p = q; }
   }
   rd.dash = p;
   return p;
+}
+
+/** The mask properties that name an image; the other longhands (`mask-repeat`, `mask-mode`, `mask-position`, …) leave the masks of a block as they are. */
+const MASK_IMAGE_PROPERTIES: ReadonlySet<string> = new Set(["mask", "mask-image", "mask-border", "mask-border-source", "mask-box-image", "mask-box-image-source"]);
+
+/** Basic shapes a `clip-path` charges as one clip application: their number of vertices is fixed. */
+const FIXED_CLIP_SHAPES: ReadonlySet<string> = new Set(["circle", "ellipse", "inset", "rect", "xywh"]);
+
+/** What a `clip-path` or `mask` value holds besides `url(#id)`. A clip shape with a fixed number of vertices is counted (`shapes`); a
+ *  `polygon()`, `path()` or `shape()` in a clip-path, any other function there, and every function in a mask that is not `url()` (a
+ *  gradient, `image()`, `element()`, `paint()`, and with them `calc()` in a mask position) are `refused`: what they cost grows with
+ *  what they hold (`polygon()` of 5 000 points on 1 000 rects 4.8 s, `linear-gradient()` on 1 500 rects 3.2 s), and the model does
+ *  not read it. The same picture with a `<clipPath>` or `<mask>` element is counted. The real SVGs of the workspace hold none of them. */
+function clipFunctions(value: string, kind: "clip" | "mask"): { refused: string | null; shapes: number } {
+  let shapes = 0;
+  for (const [name] of cssCalls(value)) {
+    if (name === "url") continue;
+    if (kind === "clip" && FIXED_CLIP_SHAPES.has(name)) shapes++;
+    else return { refused: `${name}()`, shapes };
+  }
+  return { refused: null, shapes };
 }
 
 /** Reads the declarations of one block into an effect: a value is read once however many elements the block reaches, and a value or a list past the
@@ -1033,9 +1090,24 @@ function effectOf(decls: ReadonlyArray<readonly [string, string]>, reader: Reade
       case "dash": { const p = dashOf(rd, raw, reader.customs); f.dash = f.dash === undefined || f.dash === 0 ? p : p === 0 ? f.dash : Math.min(f.dash, p); break; }
       case "animation": f.animated = lc !== "none"; break;
       case "paint": if (lc !== "inherit" && lc !== "unset" && lc !== "revert") f[name.toLowerCase().endsWith("stroke") ? "stroke" : "fill"] = idsOf(); break;
-      case "filter": f.filters = idsOf(); f.fnCost = rd.fn ??= cssFilterCost(rd.value); break;
-      case "mask": f.masks = idsOf(); break;
-      case "clip": f.clips = idsOf(); break;
+      case "filter":
+        // `inherit` takes the parent's filter (100 rects with filter="inherit" in a blurred <g> drew 5.4 s, counted as nothing); `unset` and `revert` are `none`
+        if (lc === "inherit") { f.inherit.filter = true; f.filters = []; f.fnCost = 0; break; }
+        f.filters = idsOf(); f.fnCost = rd.fn ??= cssFilterCost(rd.value); break;
+      case "mask": case "clip": {
+        const shape = (rd.shapes ??= clipFunctions(rd.value, kind));
+        if (shape.refused !== null) {
+          // one problem per value, however many elements carry it
+          if (!rd.reported) problems.push({ code: "unsafe-css", element, detail: `${name}: ${shape.refused} is not allowed, its drawing cost cannot be estimated (a <${kind === "clip" ? "clipPath" : "mask"}> element holding the shape is counted)` });
+          rd.reported = true;
+          break;
+        }
+        if (lc === "inherit") { f.inherit[kind] = true; if (kind === "mask") f.masks = []; else { f.clips = []; f.clipShapes = 0; } break; }
+        // only the properties that name a mask image set the masks: a longhand such as `mask-repeat` after `mask: url(#m)` must not clear them
+        if (kind === "mask") { if (MASK_IMAGE_PROPERTIES.has(name.replace(/^-(?:webkit|moz)-/, ""))) f.masks = idsOf(); }
+        else { f.clips = idsOf(); f.clipShapes = shape.shapes; }
+        break;
+      }
       default: {
         // marker, marker-start, marker-mid, marker-end
         if (lc !== "none" && lc !== "initial" && !lc.includes("url(")) break; // inherit, unset, revert: keep what the parent has
@@ -1062,6 +1134,68 @@ function isStyledFor(kind: "filter" | "mask" | "clip", el: Element): boolean {
 
 const SHAPES: ReadonlySet<string> = new Set(["path", "polyline", "polygon", "line", "rect", "circle", "ellipse", "text"]);
 const STATE_PSEUDO = /:(?:hover|active|focus(?:-visible|-within)?|target(?:-within)?|visited|link|any-link|checked|disabled|enabled)\b/gi;
+const STATE_AT = new RegExp(STATE_PSEUDO.source, "iy");
+
+/** Where the states (`:hover`, …) of a selector list stand. `"subject"`: every selector of the list has one, and all of them are on the element it
+ *  selects (the last compound, outside any parenthesis), so the rule reaches one hovered chain at a time and is charged for `stateElements`.
+ *  `"nested"`: a state inside `:not()`, `:is()`, `:where()`, `:has()` (`rect:is(:not(:hover))` holds for every rect but one: 100 rects with a
+ *  blur of 30 2.0 s at an estimate of 108), read as matching every element. `"wider"`: a state on an ancestor (`svg:is(:hover) rect` or
+ *  `svg:hover rect` reach every rect when the picture is hovered, 3.1 s per hover), or a selector of the list without one (`rect:hover, rect`,
+ *  2.0 s at 177 708 with 8 charged): matched without the state and charged in full. `"none"` when there is no state. Linear. */
+function stateReach(selector: string): "none" | "subject" | "wider" | "nested" {
+  let depth = 0;
+  let any = false;
+  let itemState = false; // the current selector of the list has a state
+  let pendingCombinator = false; // a combinator came after the last state of the current selector
+  let wider = false;
+  const endItem = (): void => { if (!itemState || pendingCombinator) wider = true; itemState = false; pendingCombinator = false; };
+  for (let i = 0; i < selector.length; i++) {
+    const ch = selector[i] ?? "";
+    if (ch === '"' || ch === "'") {
+      // a string (in an attribute selector) is skipped whole: a parenthesis in it is no nesting (`[data-a=")"]:hover` must not end the `:not(`);
+      // the guard refuses every backslash, so there is no escaped quote, and an unterminated string runs to the end
+      const close = selector.indexOf(ch, i + 1);
+      i = close < 0 ? selector.length : close;
+      continue;
+    }
+    if (ch === "(" || ch === "[") { depth++; continue; }
+    if ((ch === ")" || ch === "]") && depth > 0) { depth--; continue; }
+    if (ch === ":") {
+      STATE_AT.lastIndex = i;
+      if (STATE_AT.test(selector)) {
+        if (depth > 0) return "nested";
+        any = true; itemState = true; pendingCombinator = false;
+      }
+      continue;
+    }
+    if (depth > 0) continue;
+    if (ch === ",") { endItem(); continue; }
+    if (/\s/.test(ch)) {
+      // a run of blanks is read once (a scan to its end from every blank was quadratic: 1.8 s for 120 rules of 2 000 characters);
+      // blanks before a comma or at the end are no combinator
+      let j = i + 1;
+      while (j < selector.length && /\s/.test(selector[j] ?? "")) j++;
+      if (itemState && j < selector.length && selector[j] !== ",") pendingCombinator = true;
+      i = j - 1;
+      continue;
+    }
+    if (itemState && (ch === ">" || ch === "+" || ch === "~")) pendingCombinator = true;
+  }
+  endItem();
+  return !any ? "none" : wider ? "wider" : "subject";
+}
+
+/** Adds to `into` how often each id occurs in `ids`, where that is more than `into` has. */
+function mostOften(into: Map<string, number>, ids: readonly string[]): void {
+  const n = new Map<string, number>();
+  for (const id of ids) n.set(id, (n.get(id) ?? 0) + 1);
+  for (const [id, k] of n) if (k > (into.get(id) ?? 0)) into.set(id, k);
+}
+function occurrences(counts: ReadonlyMap<string, number>): string[] {
+  const out: string[] = [];
+  for (const [id, k] of counts) for (let i = 0; i < k; i++) out.push(id);
+  return out;
+}
 
 /** Estimated drawing cost of the whole document, or `"cycle"`; pushes the problems the collection finds on the way. */
 function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Element>, problems: SvgProblem[]): number | "cycle" {
@@ -1116,6 +1250,19 @@ function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Ele
     }
   }
 
+  // Geometry set by CSS is not counted, so it is refused: the property `d` (`.p { d: path("…") }`, in `style=` or a keyframe; 10 dashed paths of
+  // 4 000 points drew in 5.0 s at an estimate of 543) and a motion path (`offset-path`, `offset`, any value but `none`: `path()` of 3 300 curves on
+  // 1 000 rects 23 s at 1 043, `url(#p)` the same). The `d` attribute of a `<path>` is counted as before.
+  const geometry = (decls: ReadonlyArray<readonly [string, string]>): string | undefined => decls.find(([n, v]) => {
+    const base = n.replace(/^-(?:webkit|moz)-/, "");
+    return base === "d" || ((base === "offset-path" || base === "offset") && v.trim().toLowerCase() !== "none");
+  })?.[0];
+  const geometryDetail = (name: string): string => name === "d" ? "the CSS property d is not allowed, its geometry is not counted (set the d attribute of the <path>)" : `the CSS property ${name} is not allowed, the motion path it sets is not counted`;
+  const inlineGeometry = Array.from(inline).map(([el, decls]) => [el, geometry(decls)] as const).find(([, n]) => n !== undefined);
+  if (inlineGeometry !== undefined) problems.push({ code: "unsafe-css", element: inlineGeometry[0].localName, attribute: "style", detail: geometryDetail(inlineGeometry[1] ?? "d") });
+  const sheetGeometry = rules.map((r) => geometry(r.decls)).find((n) => n !== undefined);
+  if (sheetGeometry !== undefined) problems.push({ code: "unsafe-css", element: "style", detail: geometryDetail(sheetGeometry) });
+
   const reader = makeReader(customs);
   let styleCost = 0;
   let relevantRules = 0;
@@ -1124,16 +1271,37 @@ function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Ele
   const sheet = new Map<Element, Effect[]>();
   const animated = new Set<Element>();
   const stop = (detail: string): number => { problems.push({ code: "too-costly", kind: "limit", element: "style", detail }); return Infinity; };
+  const chainLength = (hit: readonly Element[]): number => {
+    const matched = new Set(hit);
+    const chain = new Map<Element, number>();
+    let best = 0;
+    for (const el of all) {
+      const parent = el.parentElement;
+      const n = (parent === null ? 0 : chain.get(parent) ?? 0) + (matched.has(el) ? 1 : 0);
+      chain.set(el, n);
+      if (n > best) best = n;
+    }
+    return best;
+  };
   const hitsOf = (r: Rule): Element[] | null => {
     if (/&|:scope|:host/i.test(r.selector)) return all;
     if (r.selector.length > C.maxSelectorChars) return null;
-    const selector = r.selector.replace(STATE_PSEUDO, "");
+    const reach = stateReach(r.selector);
+    // `:not(:hover)` holds for every element but one; read without the state, `:not()` would match nothing. A state selector with a string is read
+    // the same way: taking the states out would change the string too (`rect[a=':hover']:hover` would become `rect[a='']`)
+    if (reach === "nested" || (reach !== "none" && /["']/.test(r.selector))) return all;
+    const selector = reach === "none" ? r.selector : r.selector.replace(STATE_PSEUDO, "");
     // a combinator or a functional pseudo-class walks up the tree for every element: the deeper the tree, the more work
     selectorWork += selector.length * (/:has\(/i.test(selector) ? 10 : 1) * (/[\s>+~]|:is\(|:not\(|:where\(|:has\(/i.test(selector) ? Math.max(1, Math.floor(maxTreeDepth / 4)) : 1) * all.length;
     if (selectorWork > C.selectorBudget) return null;
     let hit: Element[];
     try { hit = Array.from(doc.querySelectorAll(selector)); } catch { return all; }
-    if (selector !== r.selector && hit.length > C.stateElements) hit = hit.slice(0, C.stateElements); // a filter costs the same whatever it sits on
+    if (reach === "subject") {
+      // a state holds on the element and on every ancestor (`:hover`, `:active`, `:focus-within`): the hovered chain is the longest run of matched
+      // elements on one way from the root to a leaf (100 nested `g:hover { filter }` drew 6.2–7.8 s per hover with 8 counted), at least `stateElements`
+      const cap = Math.max(C.stateElements, chainLength(hit));
+      if (hit.length > cap) hit = hit.slice(0, cap); // a filter costs the same whatever it sits on
+    }
     return hit;
   };
   for (const phase of ["rules", "keyframes"] as const) {
@@ -1175,14 +1343,18 @@ function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Ele
     const i = inline.has(el) ? effectOf(inline.get(el) ?? [], reader, problems, el.localName) : null;
     if (i !== null) list.push(i);
 
+    const parent = el.parentElement;
+    const pm = parent === null ? undefined : merged.get(parent);
     const fx = newEffect();
-    const filters = new Set<string>(), masks = new Set<string>(), clips = new Set<string>();
+    // of several declarations the one that names an id most often counts (the cascade picks one of them); inside one, every entry counts
+    const filters = new Map<string, number>(), masks = new Map<string, number>(), clips = new Set<string>();
     const m: Merged = { fx, markers: {} };
     const slotSets: Record<"marker-start" | "marker-mid" | "marker-end", Set<string>> = { "marker-start": new Set(), "marker-mid": new Set(), "marker-end": new Set() };
     for (const e of list) {
-      for (const id of e.filters) filters.add(id);
-      for (const id of e.masks) masks.add(id);
+      mostOften(filters, e.filters);
+      mostOften(masks, e.masks);
       for (const id of e.clips) clips.add(id);
+      fx.clipShapes = Math.max(fx.clipShapes, e.clipShapes);
       fx.fnCost = Math.max(fx.fnCost, e.fnCost);
       fx.blend = Math.max(fx.blend, e.blend);
       fx.bound = Math.max(fx.bound, e.bound);
@@ -1193,14 +1365,18 @@ function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Ele
       // the cascade is not evaluated (specificity, !important, order): of several periods the smallest counts, a dash is off only if every declaration says so
       if (e.dash !== undefined) m.dash = m.dash === undefined || m.dash === 0 ? e.dash : e.dash === 0 ? m.dash : Math.min(m.dash, e.dash);
       for (const s of ["marker-start", "marker-mid", "marker-end"] as const) { const v = e.markers[s]; if (v !== undefined) { m.markers[s] ??= []; for (const id of v) slotSets[s].add(id); } }
+      // `inherit`: what the parent asks for is asked for here too (the parent's own value, already merged with what it inherited)
+      if (pm !== undefined) {
+        if (e.inherit.filter === true) { mostOften(filters, pm.fx.filters); fx.fnCost = Math.max(fx.fnCost, pm.fx.fnCost); }
+        if (e.inherit.mask === true) mostOften(masks, pm.fx.masks);
+        if (e.inherit.clip === true) { for (const id of pm.fx.clips) clips.add(id); fx.clipShapes = Math.max(fx.clipShapes, pm.fx.clipShapes); }
+      }
     }
-    fx.filters = Array.from(filters); fx.masks = Array.from(masks); fx.clips = Array.from(clips);
+    fx.filters = occurrences(filters); fx.masks = occurrences(masks); fx.clips = Array.from(clips);
     for (const s of ["marker-start", "marker-mid", "marker-end"] as const) if (m.markers[s] !== undefined) m.markers[s] = Array.from(slotSets[s]);
     idTotal += fx.filters.length + fx.masks.length + fx.clips.length + (m.fill?.length ?? 0) + (m.stroke?.length ?? 0) + (m.markers["marker-start"]?.length ?? 0) + (m.markers["marker-mid"]?.length ?? 0) + (m.markers["marker-end"]?.length ?? 0);
     if (idTotal > C.maxEdges) return stop(`the document names more than ${String(C.maxEdges)} references`);
 
-    const parent = el.parentElement;
-    const pm = parent === null ? undefined : merged.get(parent);
     if (m.fill === undefined) m.fill = pm?.fill;
     if (m.stroke === undefined) m.stroke = pm?.stroke;
     if (m.dash === undefined) m.dash = pm?.dash;
@@ -1272,7 +1448,16 @@ function renderCost(root: Element, all: Element[], byId: ReadonlyMap<string, Ele
       addExtra(el, m.fx.fnCost + m.fx.blend);
     }
     if (isStyledFor("mask", el)) for (const id of m.fx.masks) { const to = byId.get(id); if (to !== undefined) list.push({ to, times: 1, add: C.mask }); }
-    if (isStyledFor("clip", el)) for (const id of m.fx.clips) { const to = byId.get(id); if (to !== undefined) list.push({ to, times: 1, add: C.clip + C.clipPerVertex * (vertTotal.get(to) ?? 0) }); }
+    if (isStyledFor("clip", el)) {
+      for (const id of m.fx.clips) { const to = byId.get(id); if (to !== undefined) list.push({ to, times: 1, add: C.clip + C.clipPerVertex * (vertTotal.get(to) ?? 0) }); }
+      addExtra(el, C.clipShape * m.fx.clipShapes);
+    }
+    if (el.localName === "textPath" && el.namespaceURI === SVG_NS) {
+      // every textPath walks the whole path it names (and the `path` attribute of SVG 2), once per use
+      let walked = pathWalk(el.getAttribute("path") ?? "");
+      for (const to of referenceTargets(el, byId)) walked += to.localName === "path" && to.namespaceURI === SVG_NS ? pathWalk(to.getAttribute("d") ?? "") : vertTotal.get(to) ?? 0;
+      addExtra(el, C.textPathVertex * walked);
+    }
     const v = ctx.vertices.get(el) ?? 0;
     if (v > 0) {
       for (const [slot, times] of [["marker-start", 1], ["marker-mid", Math.max(v - 2, 0)], ["marker-end", 1]] as const) {
@@ -1334,6 +1519,9 @@ function walkNodes(doc: Document, maxDepth: number): SvgProblem[] | "too-deep" {
 export function checkSvg(input: string, options: SvgGuardOptions = {}): SvgGuardResult {
   const bom = input.charCodeAt(0) === 0xfeff;
   const text = bom ? input.slice(1) : input;
+  // A second leading mark is refused here, not left to the parser: Chrome 153 refuses it, Chrome 142 (Obsidian 1.12.4 shell) accepts it
+  // (measured 2026-11-05), and the verdict must be the same in both engines.
+  if (text.charCodeAt(0) === 0xfeff) return { ok: false, problems: [{ code: "parse-error", detail: "a second byte order mark in front of the root element" }] };
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxElements = options.maxElements ?? DEFAULT_MAX_ELEMENTS;
   const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH;
@@ -1432,7 +1620,7 @@ export function checkSvg(input: string, options: SvgGuardOptions = {}): SvgGuard
     let c: number | "cycle";
     try { c = renderCost(root, all, byId, problems); } catch (e) {
       // one verdict, never an exception: whatever the estimate trips over is a document the guard does not let through
-      problems.push({ code: "too-costly", kind: "limit", detail: `the render cost could not be estimated: ${e instanceof Error ? e.message : String(e)}` });
+      problems.push({ code: "too-costly", kind: "limit", detail: `the render cost could not be estimated: ${errorMessage(e)}` });
       c = 0;
     }
     if (c === "cycle") problems.push({ code: "unsafe-markup", detail: "a reference (mask, clip-path, filter, marker or feImage) refers back to an element that contains it" });
