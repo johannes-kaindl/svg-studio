@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.92.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.93.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -41,6 +41,8 @@
 
 import { MarkdownView, TFile, getFrontMatterInfo, type App } from "obsidian";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "../kit/block-writer";
+import { editAtomic, readNoteText, swapNote } from "../kit/note-edit";
+import { obsidianWritePorts } from "./write-ports";
 import { findFenceAt, findNestedFenceAt, listFences, type Fence } from "../kit/fence-scan";
 import { closesFence } from "../kit/fences";
 import { errorMessage } from "../kit/error-message";
@@ -230,22 +232,18 @@ export function sourceViewOf(last: MarkdownView | null): { view: MarkdownView } 
 
 /* ── Schreiben mit Wächter ──────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 
-/** `vault.process` mit zwei Ausgängen: `fn` liefert den neuen Text, oder `null` (und derselbe Text) für „nichts schreiben“; ein Wurf in `fn` schreibt
- *  nichts und kommt als `ok: false` zurück. */
+/** Dünne Hülle über `editAtomic` (`pure/note-edit`) für Aufrufer mit `App` und `TFile`: `fn` liefert den neuen Text, oder `null` (und denselben Text) für „nichts schreiben“; ein Wurf in `fn` schreibt
+ *  nichts und kommt als `ok: false` zurück (die Hülle sagt „wirft nie“ zu, und Aufrufer melden eine Ablehnung per Wurf; `editAtomic` selbst lässt ihn durch).
+ *  Ist die Notiz im Quellmodus offen, sieht `fn` den Editorstand (LF, auch ungespeichert) und geschrieben wird dort (Strg+Z wirkt, 0.93.0); die Hülle wartet dann bis zu drei Sekunden, bis die Platte den Text
+ *  trägt, `ok` heißt weiter „steht auf der Platte“ und `persisted` sagt, ob das gelang. */
 export async function processGuarded(
   app: App,
   file: TFile,
   fn: (current: string) => string | null,
-): Promise<{ ok: true; changed: boolean } | { ok: false; message: string }> {
-  let changed = false;
+): Promise<{ ok: true; changed: boolean; persisted: boolean } | { ok: false; message: string }> {
   try {
-    await app.vault.process(file, (current) => {
-      const next = fn(current);
-      if (next === null || next === current) return current;
-      changed = true;
-      return next;
-    });
-    return { ok: true, changed };
+    const r = await editAtomic<null>(obsidianWritePorts(app), file.path, (current) => ({ outcome: null, next: fn(current) }));
+    return r.kind === "error" ? { ok: false, message: errorMessage(r.error) } : { ok: true, changed: r.changed, persisted: r.persisted };
   } catch (error) {
     return { ok: false, message: errorMessage(error) };
   }
@@ -255,11 +253,6 @@ export async function processGuarded(
 
 /** `relocated`: der Block stand nicht mehr auf den gemerkten Zeilen und wurde an `fence.openLine`/`closeLine` wiedergefunden (0.80.1). */
 export type Located = { fence: Fence; text: string; relocated: boolean } | { problem: "moved" | "changed" };
-
-/** Notiztext aus derselben Quelle wie der Schreiber: offener Quell-Editor, sonst Vault. */
-async function readNoteText(ports: WritePorts, path: string): Promise<string> {
-  return ports.editorFor(path)?.getValue() ?? (await ports.vault.read(path));
-}
 
 /** Zaun des Blocks finden UND prüfen, dass es noch der Block ist, den der Nutzer angeklickt hat: gleiche Öffnungs- und Schlusszeile, gleiche Sprache,
  *  gleicher Rumpf (Fingerabdruck `t.body`). Zeilennummern allein tragen nicht: nach dem Löschen eines Blocks darüber trifft eine veraltete Position
@@ -346,22 +339,21 @@ async function acceptIntoFile(env: AcceptEnv, spec: AcceptSpec, t: Extract<Targe
   const { strings, app } = env;
   const file = app.vault.getAbstractFileByPath(t.path);
   if (!(file instanceof TFile)) return { ok: false, message: strings.fileGone(t.path) };
-  const current = await app.vault.read(file);
-  const result = spec.compute(current);
+  // `readNoteText`, nicht `vault.read`: ist die Notiz im Quellmodus offen, gilt der Editorstand (auch ungespeichert), derselbe, über den `swapNote` schreibt.
+  const seen = await readNoteText(env.ports, t.path);
+  const result = spec.compute(seen);
   if (!result.ok) return { ok: false, message: strings.notApplied(result.problem) };
-  if (result.text === current) return { ok: true, message: strings.unchanged };
+  if (result.text === seen) return { ok: true, message: strings.unchanged };
   const refused = refuse(env, spec, result.text);
   if (refused) return refused;
-  // Der Rückweg zuerst: wirft der Haken, wird nichts geschrieben.
-  await spec.beforeWrite?.(t.path, current);
-  // Geschrieben wird nur, wenn die Datei noch der Text ist, von dem der Schnappschuss und `compute` ausgingen.
-  let stale = false;
-  const written = await processGuarded(app, file, (now) => {
-    if (now !== current) { stale = true; return null; }
-    return result.text;
-  });
-  if (stale) return { ok: false, message: strings.noteChanged };
-  if (!written.ok) return { ok: false, message: strings.couldNotApply(written.message) };
+  // Der Rückweg zuerst: wirft der Haken, wird nichts geschrieben. Der Schnappschuss trägt damit genau den Text, der überschrieben wird.
+  await spec.beforeWrite?.(t.path, seen);
+  // Geschrieben wird nur, wenn die Notiz noch der Text ist, von dem der Schnappschuss und `compute` ausgingen (Vergleich ohne BOM, `\r\n` als `\n`); sonst entsteht höchstens ein Schnappschuss zu viel.
+  // Kein Warten auf die Platte (`persistWaitMs: 0`): wer danach weiterarbeitet, liest mit `readNoteText` aus derselben Quelle.
+  const written = await swapNote(env.ports, t.path, seen, result.text, { persistWaitMs: 0 });
+  if (written.kind === "stale") return { ok: false, message: strings.noteChanged };
+  if (written.kind === "error") return { ok: false, message: strings.couldNotApply(errorMessage(written.error)) };
+  if (written.kind === "same") return { ok: true, message: strings.unchanged };
   return { ok: true, message: strings.appliedTo(t.label) };
 }
 

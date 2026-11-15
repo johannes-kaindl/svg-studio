@@ -231,13 +231,13 @@ describe("Übernehmen: Zeichen, die erst der Parser im Schreibweg fängt (B2-Res
 });
 
 describe("Übernehmen: bestehende Datei", () => {
-  it("der Schnappschuss entsteht VOR vault.process und trägt den alten Text", async () => {
+  it("der Schnappschuss entsteht VOR dem Schreiben (ports.process, seit obsidian-kit 0.93.0 über swapNote) und trägt den alten Text", async () => {
     const t = acceptSetup({ "Anhänge/logo.svg": BASE });
     const r = await run(t.env, refineSession(FILE));
     expect(r).toEqual({ ok: true, message: "Applied to logo.svg." });
     expect(t.store["Anhänge/logo.svg"]).toContain(`r="60"`);
     const snap = t.order.indexOf("snapshot.write");
-    const write = t.order.indexOf("vault.process:Anhänge/logo.svg");
+    const write = t.order.indexOf("ports.process:Anhänge/logo.svg");
     expect(snap).toBeGreaterThanOrEqual(0);
     expect(snap).toBeLessThan(write);
     expect([...t.snaps.values()]).toEqual([BASE]);
@@ -250,7 +250,7 @@ describe("Übernehmen: bestehende Datei", () => {
     expect(r.ok).toBe(false);
     expect(r.message).toContain("Could not back up Anhänge/logo.svg first");
     expect(t.store["Anhänge/logo.svg"]).toBe(BASE);
-    expect(t.order.some((o) => o.startsWith("vault.process"))).toBe(false);
+    expect(t.order.some((o) => o.startsWith("ports.process"))).toBe(false);
   });
 
   it("eine Handänderung seit der Runde bleibt (Review-Fokus 2): beide Änderungen stehen im Ergebnis", async () => {

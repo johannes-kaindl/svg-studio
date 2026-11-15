@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Accepting into an open note writes in the editor (Ctrl/Cmd+Z takes it back) and refuses when you kept typing after the snapshot. A note open in source mode is read and written as the editor shows it (obsidian-kit 0.93.0); Obsidian saves such a Windows-line-ending note with Unix line endings.
 - Backup copies are kept per file; older backup copies move into the new folder layout (plugin folder `snapshots/by-file/`) on the first save. The thinning now applies to each file on its own (6 recent, 7 days, 4 weeks, 6 months; at most 50 per file, none older than 185 days, 50 MiB in total), so an older folder may hold fewer copies than before. (obsidian-kit 0.91.0)
 
 ### Fixed

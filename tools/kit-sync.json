@@ -1,7 +1,7 @@
 {
   "sources": {
     "obsidian-kit": {
-      "ref": "0.92.0"
+      "ref": "0.93.0"
     },
     "code-kit": {
       "ref": "0.73.0"
@@ -89,7 +89,8 @@
         "plugin-id",
         "endpoint-source",
         "endpoint-secret-hook",
-        "override-guard"
+        "override-guard",
+        "note-edit"
       ],
       "rewrite": [
         [
