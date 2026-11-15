@@ -3,8 +3,8 @@
   "version": "0.73.0",
   "sha": "09b7dcb",
   "vendored": "svg-guard.ts, safe-markdown.ts, i18n.ts, answer-retry.ts, llm-answer.ts, think-splitter.ts, sha256.ts, data-url.ts, slug.ts, measured-quality.ts, fences.ts, panel-session.ts, rounds.ts, run-slot.ts, rotation.ts, css-color.ts, error-message.ts, word-diff.ts, anthropic-wire.ts, backend-probe.ts, capabilities.ts, embeddings-client.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, model-choice.ts, model-context.ts, model-list-cache.ts, reasoning.ts, redact.ts, text-window.ts, sampling-profiles.ts, secrets.ts, sse.ts, timeout.ts, clipboard.ts",
-  "obsidian_kit_version": "0.93.0",
-  "obsidian_kit_sha": "7997447",
+  "obsidian_kit_version": "0.94.0",
+  "obsidian_kit_sha": "bf78d8b",
   "obsidian_kit_vendored": "block-writer.ts, fence-scan.ts, plugin-id.ts, endpoint-source.ts, endpoint-secret-hook.ts, override-guard.ts, note-edit.ts",
   "license": "AGPL-3.0-or-later"
 }
