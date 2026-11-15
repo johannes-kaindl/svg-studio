@@ -51,6 +51,7 @@ import {
   setPluginSetting,
 } from "../../tools/obsidian-cdp/cdp.js";
 import { BREITE, HOEHE, mobilAus, mobilEin } from "../../tools/obsidian-cdp/chat-layout.js";
+import type { FakeEndpunkt } from "../../tools/obsidian-cdp/fake-manager.js";
 import { startLlmStub, type LlmStub, type StubAnfrage } from "../../tools/obsidian-cdp/llm-stub.js";
 import { gegenprobeErreichbarkeit, gegenprobeFokus, messeErreichbarkeit, messeFokusErhalt, mitHoehe, zeichnePflicht, type PflichtTeilurteil } from "../../tools/obsidian-cdp/pflichtpunkte.js";
 import { boxOf, capture, setWindowSize } from "../../tools/obsidian-cdp/shot.js";
@@ -82,6 +83,8 @@ const PUNKTE = [
   "fokus-erhalt-gegenprobe",
   "erreichbarkeit",
   "erreichbarkeit-gegenprobe",
+  "modellzeile-gruppen-je-endpunkt",
+  "modellzeile-gruppen-gegenprobe",
   "uebernehmen-als-datei",
   "uebernehmen-als-block",
   "c4a-bediente-notiz",
@@ -548,6 +551,9 @@ function setup(): void {
 
 interface Vorbereitet { hinweis: string; version: string | null; versionPasst: boolean | undefined; neu: string }
 
+/** Der Endpunkt, den alle Punkte außer der Modellzeile sehen. */
+const endpunktStub = (): FakeEndpunkt => ({ id: "smoke-stub", label: "Stub", url: stub.url, models: ["stub-modell"], defaultModel: "stub-modell", capabilities: ["chat"] });
+
 async function bereiteVor(c: Cdp): Promise<Vorbereitet> {
   await requireVisible(c);
   const klar = await bereiteInstanzVor(c, { pluginIds: [PLUGIN_ID], nurVault: REPO_NAME, sprache: "en", erwarteteVersion: "1.15" });
@@ -557,7 +563,7 @@ async function bereiteVor(c: Cdp): Promise<Vorbereitet> {
   const fm = await installFakeManager(c, {
     pluginId: MANAGER_ID,
     invalidiere: [PLUGIN_ID],
-    endpunkte: [{ id: "smoke-stub", label: "Stub", url: stub.url, models: ["stub-modell"], defaultModel: "stub-modell", capabilities: ["chat"] }],
+    endpunkte: [endpunktStub()],
   });
   if (!fm.installiert) throw new Error(`Fake-Manager nicht eingebaut: ${fm.grund ?? "?"}`);
   return { hinweis: klar.hinweis, version: klar.version, versionPasst: klar.versionPasst, neu: neu.hinweis };
@@ -1229,6 +1235,54 @@ async function punktFokusUndErreichbarkeit(): Promise<void> {
     const g = await mitHoehe(cdp, KURZ, () => gegenprobeErreichbarkeit(cdp, ERREICHBAR));
     urteil("erreichbarkeit-gegenprobe", g as PflichtTeilurteil);
   });
+}
+
+/** Die Modellzeile des Panels mit Gruppen je Endpunkt (Kit 0.88.0, `okit-model-bar`): zwei Endpunkte hinter dem Fake-Manager → zwei `optgroup`, jede mit den Modellen ihres Endpunkts; ein Modell der zweiten Gruppe zu wählen
+ *  schreibt Endpunkt UND Modell in die Wahl. Das aufgeklappte Popup ist ein natives Fenster und steht nicht im DOM; gelesen wird die Liste, die es zeigt (`<select>` mit `<optgroup>`), wie im Pilot `model-bar-gruppen` des Kits.
+ *  Gegenprobe: derselbe Aufbau ohne Manager, keine Gruppe (die Messung kann also rot werden); die Zeile gruppiert schon bei einem einzigen Manager-Endpunkt. */
+async function punktModellzeileGruppen(): Promise<void> {
+  if (!gewaehlt("modellzeile-gruppen-je-endpunkt", "modellzeile-gruppen-gegenprobe")) return;
+  type Zeile = { gruppen: { label: string; optionen: string[] }[]; alle: string[]; wert: string; text: string; gesperrt: boolean };
+  const ZEILE = `
+    const s = document.querySelector(".svg-studio-panel .okit-model-bar-select");
+    if (!s) return null;
+    const z = { gruppen: [...s.querySelectorAll("optgroup")].map((g) => ({ label: g.label, optionen: [...g.querySelectorAll("option")].map((o) => o.textContent ?? "") })),
+      alle: [...s.options].map((o) => o.textContent ?? ""), wert: s.value, text: s.selectedOptions[0]?.textContent ?? "", gesperrt: s.disabled };`;
+  const baueUm = async (endpunkte: FakeEndpunkt[]): Promise<void> => {
+    await raeume();
+    const r = await installFakeManager(cdp, { pluginId: MANAGER_ID, invalidiere: [PLUGIN_ID], endpunkte });
+    if (!r.installiert) throw new Vorbedingung(`Fake-Manager nicht eingebaut: ${r.grund ?? "?"}`);
+    await oeffneNeuesPanel();
+  };
+  try {
+    await lauf("modellzeile-gruppen-je-endpunkt", async () => {
+      await baueUm([endpunktStub(), { id: "zwei", label: "Zwei", url: stub.url, models: ["zwei-a", "zwei-b"], defaultModel: "zwei-a", capabilities: ["chat"] }]);
+      const z = await pollUntil<Zeile>(cdp, `${ZEILE} return z.gruppen.length >= 2 && !z.alle.some((t) => t.includes("loading")) ? z : null;`, 15000, 250);
+      if (z === null) throw new Vorbedingung("Die Modellzeile zeigte nach 15 s keine zwei Gruppen (Manager-Weg nicht erreicht)");
+      const stubG = z.gruppen.find((g) => g.label === "Stub"), zweiG = z.gruppen.find((g) => g.label === "Zwei");
+      const gruppenOk = z.gruppen.length === 2 && stubG !== undefined && zweiG !== undefined && stubG.optionen.includes("stub-modell") && zweiG.optionen.includes("zwei-a") && zweiG.optionen.includes("zwei-b") && !stubG.optionen.includes("zwei-b");
+      await cdp.evaluate(`
+        const s = document.querySelector(".svg-studio-panel .okit-model-bar-select");
+        const o = [...s.querySelectorAll("optgroup[label='Zwei'] option")].find((x) => x.textContent === "zwei-b");
+        s.value = o.value; s.dispatchEvent(new Event("change", { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 1200)); return true;`);
+      const nach = await cdp.evaluate<Zeile>(`${ZEILE} return z;`);
+      record("modellzeile-gruppen-je-endpunkt", gruppenOk && nach.text === "zwei-b",
+        `Gruppen ${z.gruppen.map((g) => `${g.label}[${g.optionen.join(", ")}]`).join(" · ")} · nach der Wahl unter „Zwei“ zeigt die Zeile „${nach.text}“ (Wert ${q(nach.wert)})`);
+    });
+    await lauf("modellzeile-gruppen-gegenprobe", async () => {
+      // Die Zeile gruppiert, sobald der Manager Endpunkte meldet (auch bei einem einzigen, gemessen 2026-11-15); ohne Manager ist sie eine flache Liste. Die Gegenprobe nimmt deshalb den Manager weg.
+      await raeume();
+      await entferneFakeManager(cdp, { pluginId: MANAGER_ID, invalidiere: [PLUGIN_ID] });
+      await oeffneNeuesPanel();
+      const z = await pollUntil<Zeile>(cdp, `${ZEILE} return z.alle.length > 0 && !z.alle.some((t) => t.includes("loading")) ? z : null;`, 15000, 250);
+      if (z === null) throw new Vorbedingung("Die Modellzeile ohne Manager zeigte nach 15 s keine fertige Liste");
+      record("modellzeile-gruppen-gegenprobe", z.gruppen.length === 0, `ohne Manager: ${z.gruppen.length} Gruppen · Optionen ${q(z.alle)} (soll: keine Gruppe, eine flache Liste)`);
+    });
+  } finally {
+    await raeume().catch(() => undefined);
+    await installFakeManager(cdp, { pluginId: MANAGER_ID, invalidiere: [PLUGIN_ID], endpunkte: [endpunktStub()] }).catch(() => undefined);
+  }
 }
 
 async function punktUebernehmenDatei(): Promise<void> {
@@ -2013,6 +2067,7 @@ async function main(): Promise<void> {
     await punktRueckfrage();
     await punktSchattenwurzel();
     await punktFokusUndErreichbarkeit();
+    await punktModellzeileGruppen();
     await punktUebernehmenDatei();
     await punktUebernehmenBlock();
     await punktBlockVerschoben();
