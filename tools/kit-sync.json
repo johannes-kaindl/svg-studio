@@ -1,10 +1,10 @@
 {
   "sources": {
     "obsidian-kit": {
-      "ref": "0.94.0"
+      "ref": "0.95.0"
     },
     "code-kit": {
-      "ref": "0.73.0"
+      "ref": "0.75.0"
     }
   },
   "targets": [
@@ -85,7 +85,6 @@
       "from": "src/pure",
       "modules": [
         "block-writer",
-        "fence-scan",
         "plugin-id",
         "endpoint-source",
         "endpoint-secret-hook",

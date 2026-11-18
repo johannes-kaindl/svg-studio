@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.94.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.95.0, src/obsidian/panel-accept.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: 3d-codeblocks `src/obsidian/panel-accept.ts:20-287` (Übernehmen im Prompt-Panel, Spec Modell per Prompt § 6.3/§ 5), dazu
 // `json-editor/src/obsidian/repair-flow.ts:70-76` (Anhangpfad nie überschreiben, Text und binär) — Kit-Kandidat aus der Extraktionsprüfung SVG Studio
 // (2026-11-02, Gegenleser K6). Das Format steckt in `AcceptSpec` (Zaun-Sprache, Berechnung, Prüfung, Haken vor dem Schreiben), die Texte in
@@ -43,8 +43,7 @@ import { MarkdownView, TFile, getFrontMatterInfo, type App } from "obsidian";
 import { BlockChangedError, writeBlockBody, type WritePorts } from "../kit/block-writer";
 import { editAtomic, readNoteText, swapNote } from "../kit/note-edit";
 import { obsidianWritePorts } from "./write-ports";
-import { findFenceAt, findNestedFenceAt, listFences, type Fence } from "../kit/fence-scan";
-import { closesFence } from "../kit/fences";
+import { closesFence, findFenceAt, findNestedFenceAt, listFences, type Fence } from "../kit/fences";
 import { errorMessage } from "../kit/error-message";
 import { detectEol } from "../kit/text-window";
 import type { Target } from "../kit/panel-session";
@@ -194,7 +193,7 @@ export function insertAtCursor(view: MarkdownView, text: string): InsertWhere {
   const fence = findFenceAt(value, anchor.line);
   if (!fence && findNestedFenceAt(value, anchor.line)) throw new NestedFenceError(selected);
   if (fence) {
-    if (isUnclosed(fence, lines)) throw new UnclosedFenceError(selected);
+    if (!fence.closed) throw new UnclosedFenceError(selected);
     editor.replaceRange(`${eol}${text.replace(/\r?\n/g, eol)}`, { line: fence.closeLine, ch: (lines[fence.closeLine] ?? "").length });
     return selected ? "after-block-at-selection" : "after-block-at-cursor";
   }
@@ -213,15 +212,6 @@ function frontmatterCloseLine(value: string): number | null {
   const info = getFrontMatterInfo(value);
   if (!info.exists) return null;
   return value.slice(0, info.contentStart).replace(/\r?\n$/, "").split("\n").length - 1;
-}
-
-/** Ist der Zaun nie geschlossen? Dann ist seine letzte Zeile Inhalt. */
-function isUnclosed(fence: Fence, lines: string[]): boolean {
-  const open = /^ {0,3}(`{3,}|~{3,})/.exec((lines[fence.openLine] ?? "").replace(/^\uFEFF/, ""));
-  const marker = open?.[1];
-  if (!marker || fence.closeLine <= fence.openLine) return true;
-  const close = new RegExp(`^ {0,3}${marker.startsWith("`") ? "`" : "~"}{${String(marker.length)},}[ \\t]*$`);
-  return !close.test(lines[fence.closeLine] ?? "");
 }
 
 /** Die zuletzt bediente Notiz im Quellmodus (`{ view }`), im Lesemodus (`{ reading }`) oder keine (`{ none }`: keine Ansicht oder ohne Datei). */
@@ -271,9 +261,8 @@ export async function locateBlock(ports: WritePorts, t: BlockTarget, lang: strin
   const fences = listFences(text);
   const here = fences.find((f) => f.openLine === t.lineStart && f.lang === want && f.closeLine === t.lineEnd);
   if (here) return normBody(here.body) === normBody(t.body) ? { fence: here, text, relocated: false } : { problem: "changed" };
-  const lines = text.split(/\r?\n/);
   const span = t.lineEnd - t.lineStart;
-  const same = fences.filter((f) => f.lang === want && f.closeLine - f.openLine === span && !isUnclosed(f, lines) && normBody(f.body) === normBody(t.body));
+  const same = fences.filter((f) => f.lang === want && f.closeLine - f.openLine === span && f.closed && normBody(f.body) === normBody(t.body));
   const only = same.length === 1 ? same[0] : undefined;
   return only ? { fence: only, text, relocated: true } : { problem: "moved" };
 }
@@ -377,7 +366,7 @@ async function acceptAsNew(env: AcceptEnv, spec: AcceptSpec): Promise<AcceptOutc
 async function appendToNote(env: AcceptEnv, path: string, text: string): Promise<void> {
   await env.ports.vault.process(path, (cur) => {
     const last = listFences(cur).at(-1);
-    if (last && isUnclosed(last, cur.split(/\r?\n/))) throw new UnclosedFenceError(false);
+    if (last && !last.closed) throw new UnclosedFenceError(false);
     const eol = detectEol(cur);
     const gap = cur === "" ? "" : cur.endsWith("\n") ? eol : eol + eol;
     return `${cur}${gap}${text.replace(/\r?\n/g, eol)}${eol}`;

@@ -8,7 +8,7 @@ import { distinctGuardProblems } from "../core/protocol";
 import type { AcceptAs } from "../core/settings";
 import { acceptText, type SvgSession } from "../core/session";
 import { acceptStrings, guardProblemText, problemText, t } from "../i18n/strings";
-import { listFences } from "../vendor/kit/fence-scan";
+import { listFences } from "../vendor/kit/fences";
 import { wrapInFence } from "../vendor/kit/fences";
 import { slugify } from "../vendor/kit/slug";
 import type { WritePorts } from "../vendor/kit/block-writer";

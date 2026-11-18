@@ -1,4 +1,4 @@
-// vendored from code-kit@0.73.0, src/ts/pure/measured-quality.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.75.0, src/ts/pure/measured-quality.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Origin: obsidian-plugins `3d-codeblocks/src/core/shapes/quality.ts` (`findMeasurement`, `qualityLine`, `failureHint`, `smallReference`, `best`;
 // the table `MEASUREMENTS` and the English sentences stay with the carrier), 2026-10; widened for svg-studio's table (model aliases, an extra
 // field, any task and mode string).

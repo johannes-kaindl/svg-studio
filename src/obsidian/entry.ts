@@ -3,7 +3,7 @@
 // dort ist die Antwort `null`, der Weg läuft über den Knopf am Block bzw. an der Einbettung.
 import { MarkdownView, TFile, type App, type Plugin } from "obsidian";
 import type { Target } from "../vendor/kit/panel-session";
-import { findFenceAt } from "../vendor/kit/fence-scan";
+import { findFenceAt } from "../vendor/kit/fences";
 import { t } from "../i18n/strings";
 
 export const BLOCK_LANG = "svg-studio";
