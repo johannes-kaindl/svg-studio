@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows
 
 - Accepting into an open note writes in the editor (Ctrl/Cmd+Z takes it back) and refuses when you kept typing after the snapshot. A note open in source mode is read and written as the editor shows it (obsidian-kit 0.93.0); Obsidian saves such a Windows-line-ending note with Unix line endings.
 - Backup copies are kept per file; older backup copies move into the new folder layout (plugin folder `snapshots/by-file/`) on the first save. The thinning now applies to each file on its own (6 recent, 7 days, 4 weeks, 6 months; at most 50 per file, none older than 185 days, 50 MiB in total), so an older folder may hold fewer copies than before. (obsidian-kit 0.91.0)
+- Updated the vendored kit to obsidian-kit 0.95.0 and code-kit 0.75.0. The fence reader now comes from the code-kit fence module: a code fence with a tab between the fence and the language, or with tab indentation, is read the way Obsidian reads it (the block button and Accept find such a block).
 
 ### Fixed
 
