@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-11-18
+
 ### Changed
 
 - Accepting into an open note writes in the editor (Ctrl/Cmd+Z takes it back) and refuses when you kept typing after the snapshot. A note open in source mode is read and written as the editor shows it (obsidian-kit 0.93.0); Obsidian saves such a Windows-line-ending note with Unix line endings.
