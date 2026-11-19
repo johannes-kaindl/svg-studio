@@ -1,7 +1,7 @@
 {
   "sources": {
     "obsidian-kit": {
-      "ref": "0.99.2"
+      "ref": "0.105.0"
     },
     "code-kit": {
       "ref": "0.78.0"
@@ -125,6 +125,7 @@
         "panel-accept",
         "review-list",
         "redline",
+        "redline-strings",
         "file-snapshot",
         "llm-connection",
         "llm-connection-strings",

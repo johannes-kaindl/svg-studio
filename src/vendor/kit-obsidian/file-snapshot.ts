@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.99.2, src/obsidian/file-snapshot.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.105.0, src/obsidian/file-snapshot.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: obsidian-transmute `src/obsidian/snapshot-io.ts` (`snapshotRoot`, `ensureDir`, `writeSnapshot`, `rotateSnapshots`) und `src/core/vault/snapshot.ts`
 // (`snapshotDirName`), auf eine Einzeldatei zugeschnitten; REGISTRY „Rückholbarkeit für Schreibvorgänge“ führte transmute als Kit-Kandidaten, svg-studio ist
 // der zweite Träger (K15, bedingt durch die Messung A4 vom 2026-11-04: Obsidians Dateiwiederherstellung erfasst nur Markdown, `.svg` und andere Dateien nicht).
@@ -115,7 +115,8 @@ function extOf(path: string): string {
   return dot > 0 ? name.slice(dot) : "";
 }
 
-async function ensureDir(adapter: DataAdapter, path: string): Promise<void> {
+/** Legt `path` samt aller fehlenden Elternordner an (wiederverwendet von `device-files`). */
+export async function ensureDir(adapter: Pick<DataAdapter, "exists" | "mkdir">, path: string): Promise<void> {
   if (await adapter.exists(path)) return;
   const slash = path.lastIndexOf("/");
   if (slash > 0) await ensureDir(adapter, path.slice(0, slash));

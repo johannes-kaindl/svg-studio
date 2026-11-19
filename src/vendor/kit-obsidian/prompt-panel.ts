@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.99.2, src/obsidian/prompt-panel.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.105.0, src/obsidian/prompt-panel.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Rahmen der Auftrags-Fenster (K9, Welle 36): zeichnet die acht Stationen eines Fensters, das einen Auftrag an ein Modell gibt, das Ergebnis zeigt und es auf Knopfdruck schreibt.
 // Herkunft: svg-studio@0.1.4 `src/obsidian/panel/shell.ts` (`buildPanelShell`, 628 Zeilen), verschoben und auf den Halter umgebaut; die Tests stammen aus `tests/obsidian/panel-shell.test.ts`
 // (17 Tests, von happy-dom auf das Fake-DOM des Kits umgeschrieben). Spec: Cockpit `_SDD/2026-11-15-auftrags-fenster-rahmen-design`, Plan `…-plan-etappe-1-3`.
@@ -43,9 +43,11 @@
 //   Knopf bekommt das `mouseup` ohne `mousedown` (kein `click`): Übernehmen verpuffte ohne Meldung (gemessen von svg-studio im echten Obsidian, Rahmen 0.98.0). Gleiche Falle an anderen Stellen, mit Urteil: **Hinweise (`notices`)** sind Knöpfe des Plugins, und `host.offer` meldet `target` (ohne Runde und Lauf auch `session`, mit neuem Sitzungsobjekt) bei jedem Angebot, auch bei einem
 //   Blattwechsel ohne Zieländerung; `renderNotices` zeichnet sie deshalb nur neu, wenn sich ihr Schlüssel ändert (Ziel nach `sameTarget` mit Zeilen und Blockinhalt, `kept`, `offered`, die übrigen Sitzungsfelder per Referenz), in
 //   jedem Weg, der sie zeichnet (`target`, `session`, `renderAll`); der Kopf ersetzt keine Elemente (`setText`) und braucht den Schlüssel nicht, er folgt Modell und Güte. shell.ts baute die Hinweise bei jedem Ereignis neu (svg-studio: Reparatur-Knopf
-//   verpuffte). Ein Slot, der von etwas außerhalb der Sitzung abhängt, zeichnet sich selbst neu (`setSession` mit neuem Feld oder eigener Aufruf). Die **Rundenliste**
-//   zeichnet nur bei `session` (Runde gewählt, Ergebnis, Verwerfen: kein Blattwechsel), die **Beispiele** sind feste Knöpfe (nur Sichtbarkeit), **Neu**, **Verwerfen**, **Senden** und **Abbrechen** feste Knöpfe, die **Prüfliste** zeichnet bei `session`
-//   und am Ende eines Laufs (kein Blattwechsel). Unverändert, weil nicht dieselbe Folge.
+//   verpuffte). Ein Slot, der von etwas außerhalb der Sitzung abhängt, zeichnet sich selbst neu (`setSession` mit neuem Feld oder eigener Aufruf).
+//   Urteil je Slot (Teil 0e; die frühere Annahme „kein Blattwechsel“ stimmte nicht: ohne Runde ersetzt `offer` die Sitzung bei jedem Angebot und meldet `session`): **Bedienteile** (`renderControls`), **Prüfliste** (`renderChanges`) und **Felder**
+//   (`renderFields`) tragen Knöpfe und Eingabefelder des Plugins und gelten für denselben Schlüssel samt `busy` (sie werden beim Zeichnen gesperrt), die Felder zusätzlich mit dem Text, den sie bekamen; erzwungen zeichnen sie am Ende eines
+//   Laufs und Schreibens (`run`, `apply`, `releaseAfterBusy`). Die **Rundenliste** hängt nur an `session.rounds` und zeichnet bei einer anderen Referenz darauf. Die **Vorschau** zeichnet weiter bei jedem Angebot: sie ist der Weg, auf dem eine
+//   auf der Platte geänderte Datei sichtbar wird (der Schlüssel kennt die Platte nicht), und sie trägt keine Bedienung des Rahmens. Die **Beispiele** sind feste Knöpfe (nur Sichtbarkeit), **Neu**, **Verwerfen**, **Senden** und **Abbrechen** feste Knöpfe.
 // - **Keine Abweichung mehr beim Entsperren:** `shell.ts` zeichnete nach jedem Laufende alles neu (`runInner` `finally`, `stop()`: `settle(); renderAll()`); der erste Stand dieses Rahmens zeichnete nur die Bedienteile
 //   (ein Fehler, keine gewollte Abweichung). Seit dem Fix zeichnet er Prüfliste und Felder neu und die Vorschau nicht; das ist der einzige Unterschied zum Neuzeichnen von allem, und er hat den Grund oben (die Vorschau ist teuer).
 // - **Die Rundenliste erscheint ab zwei Runden** (`minItems` des Bausteins `buildVersionList`, Standard 2) wie in svg-studio, dem besten Exemplar; bei einer Runde zeigt die Vorschau sie ohnehin.
@@ -72,8 +74,16 @@
 //   Tab-Fokus: gelesen wird der Grund über den Zugänglichkeitsbaum, nicht über die Tab-Reihe.
 // - **Q9 grün** Ansicht schließen mit einer Runde: der Dialog „1 unapplied round(s) …“ mit „Keep“ und „Discard“ erscheint nach dem Schließen; Escape behält (Runde bleibt, beim Wiederöffnen steht sie da); „Discard“ verwirft.
 //
-// Ungemessen: iOS und iPadOS, Windows, Linux, der Kompaktmodus der Seitenleiste, das Layout am Bild (die klebende Knopfzeile und die Mindesthöhe 6em sind per `toContain` verriegelt, aber in keinem Bild gesehen),
-// ein echter Endpunkt (der Lauf ist ein Zeitgeber).
+// Layout und Bedienung am echten Fenster (Welle 36, k9u; Treiber `pilot/prompt-panel-layout.ts`, Obsidian 1.15.1, macOS, Zweitinstanz, Bilder hell und dunkel):
+// - **L1 grün** 300 × 420 px, Deutsch, Sperrgrund mit vier Zeilen: der Hinweis der Fußzeile steht auf einer Zeile (voller Text im DOM, `aria-describedby` und `title`), Verwerfen steht mit den Wegen in einem Umbruch-Behälter
+//   (zwei statt drei Zeilen); Fußzeile 106 von 382 px (28 %), Eingabe und Senden bei scrollTop 0 an allen vier Ecken sichtbar, jedes Bedienelement nach PP24-Probe erreichbar. Am Stand 0.104.0 rot (Fußzeile 195 px, 51 %, Senden 0 von 3).
+// - **L2 grün** 320 px Breite: alle Knöpfe erreichbar, nichts ragt nach rechts; Verwerfen bricht gewollt um, solange es nicht neben „Als Datei speichern“ passt.
+// - **L3 grün** leeres Fenster: der Antwortbereich trägt `is-idle` (1 px, unsichtbar, ohne Platz, im Baum für `aria-live`), kein leerer Kreis; im Lauf 143 px, mit Ergebnis 90 px (Mindesthöhe 6em). Am Stand 0.104.0 rot (90 px, Kreis).
+// - **L4 grün** der gekürzte Sperrgrund ist ein Umschalter (`button`, `aria-expanded`): Tab erreicht ihn in drei Schritten ab Senden, Enter zeigt den vollen Text (60 px, im Bild), Leertaste klappt zu. Rot am Stand vor Teil 1c (kein Knopf).
+// - **K1 grün** Klick mit echter Maus auf einen Schreibweg, nachdem der Editor aktiv war, mit Angebot und `active-leaf-change` im `mousedown`: der Knopf bleibt im Dokument, der Block wird ersetzt. Rot an 0.99.0 und 0.97.0 (Knopf ersetzt, Notiz unverändert).
+// - **K2 grün** Prüfliste mit zwei Karten: im Lauf 8 von 8 Knöpfen gesperrt (Gegenprobe), nach dem Lauf 0 von 8, ein Klick auf „Annehmen“ kommt an. Rot an 0.97.0 (nach dem Lauf 8 von 8 gesperrt).
+//
+// Ungemessen: iOS und iPadOS, Windows, Linux, der Kompaktmodus der Seitenleiste, Layout mit mehr als zwei Wegen und anderen Sprachen als Deutsch und Englisch, ein echter Endpunkt (der Lauf ist ein Zeitgeber).
 
 import type { App } from "obsidian";
 import { sameTarget, taskKind, type PanelSession, type Target } from "../kit/panel-session";
@@ -289,8 +299,10 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
   const end = panelEl.createDiv({ cls: "okit-prompt-panel-end" });
   const hintsEl = end.createDiv({ cls: "okit-prompt-panel-accept-hints" });
   const endActions = end.createDiv({ cls: "okit-prompt-panel-actions" });
+  // Wege und Verwerfen stehen in EINEM Umbruch-Behälter: im schmalen Blatt teilen sie sich die Zeilen (300 px: zwei statt drei, Welle 36, k9u). Verwerfen bleibt der letzte Knopf und wird nie umgehängt;
+  // die Wege werden davor eingefügt (`renderWays`).
   const waysEl = endActions.createDiv({ cls: "okit-prompt-panel-ways" });
-  const discardBtn = endActions.createEl("button", { cls: "okit-prompt-panel-discard", text: st.discard, attr: { type: "button" } });
+  const discardBtn = waysEl.createEl("button", { cls: "okit-prompt-panel-discard", text: st.discard, attr: { type: "button" } });
   discardBtn.addEventListener("click", () => { void discard(); });
   newBtn.addEventListener("click", () => { void startNew(); });
 
@@ -356,6 +368,8 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
   function paintLive(): void {
     const l = host.live();
     paintStatus(status, l.status.phase, l.status.text);
+    // Ohne Lauf und ohne Puffer hat der Antwortbereich nichts zu zeigen: er steht dann nur als Lesebereich (aria-live bleibt im Baum), ohne Mindesthöhe und ohne leeren Statuskreis.
+    area.rootEl.toggleClass("is-idle", l.status.phase === "idle" && l.answer === "" && l.reasoning === "");
     noEndpointEl.toggleClass("is-hidden", l.noEndpoint === null);
     if (l.noEndpoint !== null) noEndpointDetail.setText(l.noEndpoint);
     // Zwei getrennte Elemente; trifft beides zu, gewinnt „kein Endpunkt“.
@@ -419,7 +433,9 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
   };
 
   /** Station 3: die Bedienteile des Plugins. Sie werden bei jedem Wechsel von Lauf und Schreiben neu gezeichnet und dann gesperrt (nie von Hand aufgesperrt, das wäre Sache des Slots). */
-  function renderControlsSlot(): void {
+  function renderControlsSlot(force = true): void {
+    if (!force && sameKey(drawnControls, keyNow(), { busy: true })) return;
+    drawnControls = keyNow();
     controlsHost.empty();
     slots.renderControls?.(controlsHost, changesCtx());
     if (host.busy()) lock(controlsHost, "input, button, select, textarea");
@@ -436,7 +452,15 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
     for (const v of wayViews) {
       const blocked = v.way.blockedReason?.(session()) ?? null;
       v.btn.disabled = n === 0 || busy || blocked !== null;
-      v.hint.setText(blocked === null ? "" : wayViews.length === 1 ? blocked : `${v.way.label}: ${blocked}`);
+      const hintText = blocked === null ? "" : wayViews.length === 1 ? blocked : `${v.way.label}: ${blocked}`;
+      v.hint.setText(hintText);
+      // Der Text steht voll im DOM (aria-describedby liest ihn ganz); die Fußzeile zeigt eine Zeile, der Hinweis klappt auf (Umschalter); der title ist nur Zugabe, nie der einzige Weg.
+      if (hintText === "") {
+        v.hint.removeAttribute("title");
+        // Ein Grund, der entfällt, nimmt seinen Aufklappzustand mit: der nächste Grund beginnt eingeklappt.
+        v.hint.removeClass("is-open");
+        v.hint.setAttribute("aria-expanded", "false");
+      } else v.hint.setAttribute("title", hintText);
       if (blocked === null) v.btn.removeAttribute("aria-describedby");
       else v.btn.setAttribute("aria-describedby", v.hintId);
     }
@@ -461,21 +485,30 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
       ways.forEach((w, i) => { const v = wayViews[i]; if (v !== undefined) v.way = w; });
       return;
     }
-    waysEl.empty();
+    for (const v of wayViews) waysEl.removeChild(v.btn);
     hintsEl.empty();
     wayViews = ways.map((way, i) => {
       const hintId = `okit-prompt-panel-${String(uid)}-hint-${String(i)}`;
       const btn = waysEl.createEl("button", { cls: i === 0 ? "mod-cta okit-prompt-panel-accept" : "okit-prompt-panel-accept", text: way.label, attr: { type: "button" } });
+      waysEl.insertBefore(btn, discardBtn);
       btn.addEventListener("click", () => {
         const v = wayViews[i];
         if (v !== undefined && v.btn === btn) void acceptVia(v.way);
       });
-      const hint = hintsEl.createDiv({ cls: "okit-prompt-panel-accept-hint", attr: { id: hintId } });
+      // Der Hinweis ist ein Umschalter: eingeklappt eine Zeile mit Auslassung, aufgeklappt der volle Text. Ohne Hover (Handy) und ohne Screenreader ist das der Weg zum Rest; Tippen, Enter und Leertaste kommen vom Knopf.
+      const hint = hintsEl.createEl("button", { cls: "okit-prompt-panel-accept-hint", attr: { id: hintId, type: "button", "aria-expanded": "false" } });
+      hint.addEventListener("click", () => {
+        const open = !hint.hasClass("is-open");
+        hint.toggleClass("is-open", open);
+        hint.setAttribute("aria-expanded", open ? "true" : "false");
+      });
       return { way, btn, hint, hintId };
     });
   }
 
   function renderRounds(): void {
+    if (drawnRounds === session().rounds) return;
+    drawnRounds = session().rounds;
     roundsEl.empty();
     const { rounds, active } = session().rounds;
     buildVersionList(roundsEl, {
@@ -514,8 +547,7 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
     previewHost.empty();
     const text = slots.roundText(round);
     drawPreview(round, text, ticket);
-    fieldsHost.empty();
-    slots.renderFields?.(fieldsHost, text, session(), changesCtx());
+    drawFields(text, false);
   }
 
   /** Ohne Runde zeigt die Vorschau den Stand des Ziels (lesen ist asynchron): ein Bestand, den `canPreviewBase` verneint, bleibt ohne Vorschau und zeigt die Hinweise. */
@@ -536,8 +568,7 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
         previewCaption.setText(st.previewBase);
         previewHost.empty();
         drawPreview(null, text, ticket);
-        fieldsHost.empty();
-        slots.renderFields?.(fieldsHost, text, session(), changesCtx());
+        drawFields(text, false);
         renderControls();
       },
       () => { if (!destroyed && ticket === previewTicket) clearBase(ticket); },
@@ -549,7 +580,7 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
     baseShown = null;
     previewCaption.setText(st.previewNone);
     previewHost.empty();
-    fieldsHost.empty();
+    drawFields(null, true);
     drawPreview(null, null, ticket);
     renderControls();
   }
@@ -563,17 +594,27 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
     };
   }
 
-  function renderChanges(): void {
+  function renderChanges(force = true): void {
+    if (!force && sameKey(drawnChanges, keyNow(), { busy: true })) return;
+    drawnChanges = keyNow();
     changesHost.empty();
     slots.renderChanges(changesHost, activeRound(), session(), changesCtx());
   }
 
   /** Die Felder allein, mit dem Text, den die Vorschau gerade zeigt (Runde, sonst der Stand des Ziels); ohne beides bleiben sie leer wie nach `clearBase`. Die Vorschau selbst bleibt unberührt. */
-  function renderFieldsOnly(): void {
+  function renderFieldsOnly(force = true): void {
     const round = activeRound();
-    const text = round !== null ? slots.roundText(round) : baseShown;
+    drawFields(round !== null ? slots.roundText(round) : baseShown, force);
+  }
+
+  /** Die Felder zeichnen; `null` leert sie wie nach `clearBase`. Wie die Hinweise nur bei geändertem Schlüssel (Sitzung, `busy`, Text), außer `force`: ein Zahlenfeld mit dem Fokus darf ein Blattwechsel nicht ersetzen. */
+  function drawFields(text: string | null, force: boolean): void {
+    if (!force && text !== null && sameKey(drawnFields, keyNow(text), { busy: true, text: true })) return;
     fieldsHost.empty();
-    if (text !== null) slots.renderFields?.(fieldsHost, text, session(), changesCtx());
+    drawnFields = null;
+    if (text === null) return;
+    drawnFields = keyNow(text);
+    slots.renderFields?.(fieldsHost, text, session(), changesCtx());
   }
 
   /** Beim Übergang von `busy()` wahr nach falsch zeichnen Prüfliste und Felder neu, damit ihre Slots den Zustand selbst bestimmen: gesperrt wird sonst nur zu (`renderControls`), und das Ereignis
@@ -588,29 +629,36 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
   }
 
   let noticeTicket = 0;
-  /** Was die Hinweise gezeigt haben, als sie zuletzt gezeichnet wurden: Sitzung, `kept` und das gehaltene Angebot. */
-  let drawnNotices: { session: S; kept: boolean; offered: Target | null } | null = null;
+  /** Was ein Slot gezeigt hat, als er zuletzt gezeichnet wurde: Sitzung, `kept`, gehaltenes Angebot, `busy` (Sperre beim Zeichnen) und der Text, den er bekam (Felder). */
+  interface DrawnKey { session: S; kept: boolean; offered: Target | null; busy: boolean; text: string | null }
+  const keyNow = (text: string | null = null): DrawnKey => ({ session: host.session(), kept: host.kept(), offered: host.offered(), busy: host.busy(), text });
   const sameOffered = (a: Target | null, b: Target | null): boolean => (a === null || b === null ? a === b : sameTarget(a, b));
-  /** Gleicher Schlüssel: Ziel nach `sameTarget` (Art, Pfad, Zeilen, Blockinhalt), `kept`, `offered` nach `sameTarget`, alle übrigen Felder der Sitzung (Runden, Auswahl, Felder des Plugins) per Referenz. */
-  function noticeKeyUnchanged(): boolean {
-    const d = drawnNotices;
+  /** Gleicher Schlüssel: Ziel nach `sameTarget` (Art, Pfad, Zeilen, Blockinhalt), `kept`, `offered` nach `sameTarget`, alle übrigen Felder der Sitzung (Runden, Auswahl, Felder des Plugins) per Referenz;
+   *  `busy` und `text` nur, wenn der Slot sie beim Zeichnen liest (`opts`). */
+  function sameKey(d: DrawnKey | null, n: DrawnKey, opts: { busy?: boolean; text?: boolean }): boolean {
     if (d === null) return false;
-    const now = host.session();
-    if (d.kept !== host.kept() || !sameOffered(d.offered, host.offered()) || !sameTarget(d.session.target, now.target)) return false;
+    if (d.kept !== n.kept || !sameOffered(d.offered, n.offered) || !sameTarget(d.session.target, n.session.target)) return false;
+    if (opts.busy === true && d.busy !== n.busy) return false;
+    if (opts.text === true && d.text !== n.text) return false;
     const a = d.session as unknown as Record<string, unknown>;
-    const b = now as unknown as Record<string, unknown>;
+    const b = n.session as unknown as Record<string, unknown>;
     for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
       if (k !== "target" && !Object.is(a[k], b[k])) return false;
     }
     return true;
   }
+  let drawnNotices: DrawnKey | null = null;
+  let drawnControls: DrawnKey | null = null;
+  let drawnChanges: DrawnKey | null = null;
+  let drawnFields: DrawnKey | null = null;
+  let drawnRounds: unknown = null;
   function renderNotices(): void {
     if (destroyed) return;
     // Ein Blattwechsel meldet `target` und, ohne Runde, `session` mit einem neuen Sitzungsobjekt gleichen Inhalts. Zeichnet der Rahmen die Hinweise dann neu, wird ein Knopf des Plugins beim `mousedown` ersetzt und der Klick kommt nie an.
-    if (slots.notices !== undefined && noticeKeyUnchanged()) return;
+    if (slots.notices !== undefined && sameKey(drawnNotices, keyNow(), {})) return;
     noticesHost.empty();
     if (slots.notices === undefined) return;
-    drawnNotices = { session: host.session(), kept: host.kept(), offered: host.offered() };
+    drawnNotices = keyNow();
     const ticket = ++noticeTicket;
     slots.notices(noticesHost, {
       current: () => !destroyed && ticket === noticeTicket,
@@ -625,11 +673,11 @@ export function buildPromptPanel<R, S extends PanelSession<R>>(root: HTMLElement
   function renderAll(): void {
     if (destroyed) return;
     renderWays();
-    renderControlsSlot();
+    renderControlsSlot(false);
     renderHeader();
     renderNotices();
     renderRounds();
-    renderChanges();
+    renderChanges(false);
     renderPreview();
     renderControls();
   }
@@ -779,6 +827,37 @@ export const PROMPT_PANEL_CSS = `
 .okit-prompt-panel-accept-hint {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Der Hinweis ist ein Knopf, sieht aber aus wie eine Zeile Text: Obsidians Knopfregeln (button not clickable-icon, Hover) setzen Höhe, Rand, Grund und Schatten, deshalb drei Selektorteile. Der Fokusring bleibt (Tastatur). */
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint:hover {
+  background: transparent;
+  color: var(--text-normal);
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint:focus-visible {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint.is-open {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .okit-prompt-panel-accept-hint:empty {
@@ -832,13 +911,27 @@ export const PROMPT_PANEL_CSS = `
   max-height: 16em;
 }
 
+/* Im Leerlauf (kein Lauf, kein Puffer) steht der Antwortbereich nur noch als Lesebereich im Baum: ein Pixel, unsichtbar, ohne Platz im Fluss (clip-path ist eine Store-Warnung, deshalb Deckkraft 0). Display none liesse die Ansage beim ersten Lauf unzuverlässig aus (aria-live). */
+.okit-prompt-panel-stream.is-idle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  max-height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  white-space: nowrap;
+}
+
 .okit-prompt-panel-preview-caption {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
   margin-bottom: var(--size-4-1);
 }
 
-/* Die Knopfzeile klebt unten: Übernehmen und Verwerfen bleiben bei langem Inhalt erreichbar, die Sperrgründe stehen mit darin. */
+/* Die Knopfzeile klebt unten: Übernehmen und Verwerfen bleiben bei langem Inhalt erreichbar, die Sperrgründe stehen mit darin, je eine Zeile (der volle Text steht im DOM und am Knopf über aria-describedby). */
 .okit-prompt-panel-end {
   position: sticky;
   bottom: 0;

@@ -184,6 +184,72 @@
   font-size: var(--font-ui-small);
 }
 
+.okit-review-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-3);
+}
+
+.okit-review-found {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+
+.okit-review-context {
+  padding-inline-start: var(--size-4-2);
+  border-inline-start: 2px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  overflow-wrap: anywhere;
+}
+
+.okit-review-hit {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  border-bottom: 1px solid currentcolor;
+}
+
+.okit-review-more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-3);
+}
+
+.okit-review-toggle {
+  align-self: flex-start;
+  min-height: calc(var(--size-4-10) + var(--size-4-1));
+}
+
+.okit-review-ways .okit-segmented {
+  display: flex;
+  width: 100%;
+}
+
+.okit-review-ways .okit-segmented-btn {
+  flex: 1 1 auto;
+  min-height: calc(var(--size-4-10) + var(--size-4-1));
+}
+
+.okit-review-owner-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.okit-review-owner-select {
+  flex: 1 1 auto;
+  min-height: calc(var(--size-4-10) + var(--size-4-1));
+  min-width: 0;
+}
+
+.okit-review-also {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 .okit-review-card[data-author="0"] { border-inline-start: 3px solid var(--color-blue); }
 .okit-review-card[data-author="1"] { border-inline-start: 3px solid var(--color-orange); }
 .okit-review-card[data-author="2"] { border-inline-start: 3px solid var(--color-purple); }
@@ -608,6 +674,37 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
 .okit-prompt-panel-accept-hint {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Der Hinweis ist ein Knopf, sieht aber aus wie eine Zeile Text: Obsidians Knopfregeln (button not clickable-icon, Hover) setzen Höhe, Rand, Grund und Schatten, deshalb drei Selektorteile. Der Fokusring bleibt (Tastatur). */
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint:hover {
+  background: transparent;
+  color: var(--text-normal);
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint:focus-visible {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.okit-prompt-panel-end button.okit-prompt-panel-accept-hint.is-open {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .okit-prompt-panel-accept-hint:empty {
@@ -661,13 +758,27 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
   max-height: 16em;
 }
 
+/* Im Leerlauf (kein Lauf, kein Puffer) steht der Antwortbereich nur noch als Lesebereich im Baum: ein Pixel, unsichtbar, ohne Platz im Fluss (clip-path ist eine Store-Warnung, deshalb Deckkraft 0). Display none liesse die Ansage beim ersten Lauf unzuverlässig aus (aria-live). */
+.okit-prompt-panel-stream.is-idle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  max-height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  white-space: nowrap;
+}
+
 .okit-prompt-panel-preview-caption {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
   margin-bottom: var(--size-4-1);
 }
 
-/* Die Knopfzeile klebt unten: Übernehmen und Verwerfen bleiben bei langem Inhalt erreichbar, die Sperrgründe stehen mit darin. */
+/* Die Knopfzeile klebt unten: Übernehmen und Verwerfen bleiben bei langem Inhalt erreichbar, die Sperrgründe stehen mit darin, je eine Zeile (der volle Text steht im DOM und am Knopf über aria-describedby). */
 .okit-prompt-panel-end {
   position: sticky;
   bottom: 0;
