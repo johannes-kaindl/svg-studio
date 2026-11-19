@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-11-19
+
 ### Fixed
 
 - **In a short window the footer of the order panel no longer covers the order field and the send button.** In a window of about 300 × 420 pixels, in German, the sticky footer with the write buttons took most of the height; the buttons now sit in two rows below a one-line hint, and the field stays visible (shared prompt panel frame, obsidian-kit 0.105.0).
