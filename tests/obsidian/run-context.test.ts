@@ -37,6 +37,20 @@ describe("Eingabe gegen den Kontext des Modells", () => {
     expect(requests).toHaveLength(1);
   });
 
+  it("Verfeinern: Grenze exakt bei vier Zeichen je Token — genau am Limit geht es hinaus, ein Token darunter wird gesperrt (max_tokens zählt nicht)", async () => {
+    const probe = fakeLlm([answer(bigChanged)]);
+    await runSvgPrompt(call(), { llm: probe.llm, readTargetText: async () => big, contextLimit: async () => 1_000_000 });
+    const chars = (probe.requests[0]?.messages ?? []).reduce((n, m) => n + m.content.length, 0);
+    const exact = Math.ceil(chars / 4);
+    const at = fakeLlm([answer(bigChanged)]);
+    expect((await runSvgPrompt(call(), { llm: at.llm, readTargetText: async () => big, contextLimit: async () => exact })).ok).toBe(true);
+    const below = fakeLlm([answer(bigChanged)]);
+    const res = await runSvgPrompt(call(), { llm: below.llm, readTargetText: async () => big, contextLimit: async () => exact - 1 });
+    expect(res.ok).toBe(false);
+    expect(below.requests).toHaveLength(0);
+    expect((res as { message: string }).message).toContain(String(exact));
+  });
+
   it("Verfeinern: nennt der Endpunkt keine Grenze (null) oder wirft die Abfrage, wird trotzdem gefragt", async () => {
     for (const contextLimit of [async () => null, async () => { throw new Error("offline"); }]) {
       const { llm, requests } = fakeLlm([answer(bigChanged)]);

@@ -1,7 +1,7 @@
 // Der Lauf des Panels (Spec § 8 „In der Runde“): Erzeugen und Verfeinern mit Rückfrage bei ungültiger Antwort, dann eine Runde im Rundenmodell.
 // Formatgebunden (SVG); der Halter (Kit `panel-host`, in `main.ts` mit `run` verdrahtet) ruft ihn. Sampling (Modus `transform`, Temperatur 0,2, Denken aus, `max_tokens` 16384) setzt
 // die Verbindung in `main.ts`; hier steht nur, was zum Protokoll gehört.
-import { inputOverflow, OPTIMISTIC_CHARS_PER_TOKEN } from "../../core/context-fit";
+import { CHARS_PER_TOKEN, contextOverflow, estimateTokens } from "../../vendor/kit/model-context";
 import { describeEntry } from "../../core/diff-labels";
 import { buildCreateMessages, buildRefineMessages, buildRepairMessages, RETRY_INSTRUCTION, validateCreate, validateRefine, validateRepair, type AnswerVerdict, type GuardFn } from "../../core/protocol";
 import { svgFailureHint } from "../../core/quality";
@@ -40,14 +40,15 @@ const CONTEXT_CHECK_FROM_TOKENS = 1000;
 async function overflowMessage(messages: ReadonlyArray<{ content: string }>, d: SvgRunDeps): Promise<string | null> {
   if (d.contextLimit === undefined) return null;
   const chars = messages.reduce((n, m) => n + m.content.length, 0);
-  if (chars < CONTEXT_CHECK_FROM_TOKENS * OPTIMISTIC_CHARS_PER_TOKEN) return null;
+  if (chars < CONTEXT_CHECK_FROM_TOKENS * CHARS_PER_TOKEN.optimistic) return null;
   let limit: number | null;
   try {
     limit = await d.contextLimit();
   } catch {
     return null;
   }
-  const over = inputOverflow(messages, limit);
+  // Gesperrt wird, was selbst die optimistische Schätzung nicht passt; `max_tokens` zählt nicht mit (Kit-Standard, `contextOverflow`).
+  const over = contextOverflow(estimateTokens(chars, "optimistic"), limit);
   return over === null ? null : t("run.inputTooBig", over.tokens, over.limit);
 }
 
