@@ -434,7 +434,8 @@
 .okit-ep-thirdparty { display: inline-flex; align-items: center; margin-right: 8px; vertical-align: middle; color: var(--text-muted); }
 .okit-ep-thirdparty svg { width: 14px; height: 14px; }
 .okit-ep-secret { color: var(--text-muted); font-size: var(--font-ui-small); margin-right: 8px; }
-.okit-ep-extra { flex: 0 0 100%; order: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+/* Der Zusatzcontainer sitzt im Control der Zeile und erbte dessen text-align: end; die Namen der Zusatzzeilen standen im schmalen Fenster rechtsbündig, versetzt zum Schalter (gemessen in llm-endpoint-manager f0d4a69, Fenster 610 px). */
+.okit-ep-extra { flex: 0 0 100%; order: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; text-align: start; }
 /* Rolle der Zeile als Text unter den Feldern: „aktiv" / „erreichbar, aber Platz N" / … .
    Erreichbarkeit trägt das Icon (Form), die Rolle dieser Text — keins von beiden über Farbe
    allein (WCAG 1.4.1). Die frühere Auszeichnung saß auf dem Icon-Container und war wirkungslos:
@@ -544,6 +545,141 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
 .okit-prompt-error { margin: var(--size-4-1) 0 0; color: var(--text-error); font-size: var(--font-ui-small); }
 .okit-prompt-error:empty { display: none; }
 
+/* Kit: PROMPT_PANEL_CSS (prompt-panel.ts) */
+/* Auftrags-Fenster (buildPromptPanel): nur Theme-Variablen und Obsidians Größenvariablen. Die Kit-Bausteine darin (Modellzeile, Antwortbereich, Rundenliste, Status) bringen ihr Aussehen aus ihren eigenen Konstanten mit. */
+/* Obsidian blendet is-hidden nicht global aus: jeder Baustein setzt die Regel selbst. */
+.okit-prompt-panel .is-hidden {
+  display: none;
+}
+
+/* Zahlenfeld am Handy (iPhone, gemessen 2026-11-05): Die Dezimaltastatur hat keine Fertig-Taste und Obsidian verkleinert das Blatt der Seitenleiste nicht, Übernehmen lag unter der Tastatur. Der Abstand
+   unten in Höhe der Tastatur macht den Rest erreichbar (keyboard-height ist 0px, solange keine Tastatur offen ist). Vier Klassen schlagen Obsidians workspace-leaf-content view-content. */
+.is-mobile .workspace-leaf-content .view-content.okit-prompt-panel-host {
+  padding-bottom: max(var(--size-4-8), var(--keyboard-height, 0px));
+}
+
+.okit-prompt-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-target {
+  font-weight: var(--font-semibold);
+  overflow-wrap: anywhere;
+}
+
+.okit-prompt-panel-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okit-prompt-panel-hint:empty {
+  display: none;
+}
+
+.okit-prompt-panel-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-notices:empty {
+  display: none;
+}
+
+.okit-prompt-panel-controls:empty {
+  display: none;
+}
+
+.okit-prompt-panel-accept-hints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+}
+
+.okit-prompt-panel-accept-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okit-prompt-panel-accept-hint:empty {
+  display: none;
+}
+
+.okit-prompt-panel-input {
+  width: 100%;
+  resize: vertical;
+}
+
+.okit-prompt-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-ways {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}
+
+.okit-prompt-panel-empty,
+.okit-prompt-panel-empty-endpoint {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okit-prompt-panel-empty-detail {
+  color: var(--text-faint);
+}
+
+.okit-prompt-panel-example {
+  height: auto;
+  white-space: normal;
+  text-align: start;
+}
+
+/* Der Antwortbereich schrumpft nicht unter sechs Zeilen: in einer Spalte mit viel Inhalt (Vorschau, Änderungen, zwei Runden) fiele er sonst auf den Streifen der Statuszeile zusammen, und deren Inhalt
+   ragte über die Box (gemessen in 3d-codeblocks, Welle 23). Die Obergrenze hält ihn klein, der Rumpf des Antwortbereichs rollt selbst. */
+.okit-prompt-panel-stream {
+  min-height: 6em;
+  max-height: 16em;
+}
+
+.okit-prompt-panel-preview-caption {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-bottom: var(--size-4-1);
+}
+
+/* Die Knopfzeile klebt unten: Übernehmen und Verwerfen bleiben bei langem Inhalt erreichbar, die Sperrgründe stehen mit darin. */
+.okit-prompt-panel-end {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-1);
+  padding: var(--size-4-2) 0;
+  background: var(--background-primary);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
 /* ── SVG Studio ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 /* Nur Theme-Variablen, keine festen Farben. */
 
@@ -644,54 +780,7 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
   gap: var(--size-4-2);
 }
 
-/* Panel (Spec § 7.2). Die Kit-Bausteine (Modellzeile, Antwortbereich, Versionsliste, Status) bringen ihr Aussehen aus den Kopien oben mit. */
-.svg-studio-panel .is-hidden {
-  display: none;
-}
-
-/* Zahlenfeld am Handy (iPhone, gemessen 2026-11-05): Die Dezimaltastatur hat keine Fertig-Taste und Obsidian verkleinert das Blatt der Seitenleiste nicht, „Übernehmen“ lag unter der Tastatur und das Blatt
-   ließ sich nur 21 px weiter scrollen. Der Abstand unten in Höhe der Tastatur macht den Rest erreichbar (--keyboard-height ist 0px, solange keine Tastatur offen ist). Vier Klassen schlagen Obsidians
-   .workspace-leaf-content .view-content, ohne dass die Reihenfolge der Stylesheets zählt. Kit-Regel CHAT_HOST_CSS gilt nur im Hauptbereich. Am Gerät nachzumessen (die Zweitinstanz simuliert nur die Geometrie). */
-.is-mobile .workspace-leaf-content .view-content.svg-studio-panel { padding-bottom: max(var(--size-4-8), var(--keyboard-height, 0px)); }
-
-.svg-studio-shell {
-  display: flex;
-  flex-direction: column;
-  gap: var(--size-4-2);
-}
-
-.svg-studio-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--size-4-2);
-}
-
-.svg-studio-target {
-  font-weight: var(--font-semibold);
-  overflow-wrap: anywhere;
-}
-
-.svg-studio-hint {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-}
-
-.svg-studio-hint:empty {
-  display: none;
-}
-
-/* Bestand beim Öffnen: je Befund eine Karte mit Text und Knopf (nicht allein Farbe: der Text nennt den Befund, der Rand ist neutral). */
-.svg-studio-notices {
-  display: flex;
-  flex-direction: column;
-  gap: var(--size-4-2);
-}
-
-.svg-studio-notices:empty {
-  display: none;
-}
-
+/* Bestand beim Öffnen: je Befund eine Karte mit Text und Knopf (nicht allein Farbe: der Text nennt den Befund, der Rand ist neutral). Der Platz dafür (`okit-prompt-panel-notices`) kommt vom Rahmen. */
 .svg-studio-notice {
   display: flex;
   flex-direction: column;
@@ -713,59 +802,6 @@ textarea.okit-prompt-field { resize: vertical; min-height: calc(var(--size-4-12)
   margin: var(--size-4-1) 0 0;
   padding-inline-start: var(--size-4-4);
   color: var(--text-muted);
-}
-
-.svg-studio-accept-hint {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-}
-
-.svg-studio-accept-hint:empty {
-  display: none;
-}
-
-.svg-studio-input {
-  width: 100%;
-  resize: vertical;
-}
-
-.svg-studio-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--size-4-2);
-}
-
-.svg-studio-empty,
-.svg-studio-empty-endpoint {
-  display: flex;
-  flex-direction: column;
-  gap: var(--size-4-2);
-  padding: var(--size-4-2) var(--size-4-3);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  background: var(--background-secondary);
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-}
-
-.svg-studio-empty-detail {
-  color: var(--text-faint);
-}
-
-.svg-studio-example {
-  height: auto;
-  white-space: normal;
-  text-align: start;
-}
-
-.svg-studio-stream {
-  max-height: 16em;
-}
-
-.svg-studio-preview-caption {
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-  margin-bottom: var(--size-4-1);
 }
 
 /* Vorschau im Shadow Root: der Kasten ist der Host; seine Hintergrundfarbe setzt das Plugin als Inline-Stil (Wahl des Nutzers, nur Vorschau). */

@@ -18,7 +18,7 @@ import { renderRedline } from "../../vendor/kit-obsidian/redline";
 import { buildReviewList, type ReviewChange, type ReviewListStrings } from "../../vendor/kit-obsidian/review-list";
 import { buildPreview } from "./preview";
 import type { PreviewViewDeps } from "./preview-view";
-import type { ChangesCtx } from "./shell";
+import type { ChangesCtx } from "../../vendor/kit-obsidian/prompt-panel";
 
 /** Gestrichener und eingefügter Wert stehen im Redline sonst ohne Trennung nebeneinander („x 165145“): ein Pfeil dazwischen (GUI-Smoke D3). Nur Darstellung, die Segmente des Diffs bleiben, wie sie sind. */
 function withArrows<S extends { kind: string; text: string }>(segs: readonly S[]): S[] {

@@ -1,5 +1,5 @@
 // Die Vorschau des Panels als Ganzes: Regler im Kopf, Vorschau im Shadow Root, Maßzeile darunter (Spec § 7.2 bis § 7.4). Die Teile sind formatgebunden und
-// gehören deshalb nicht in `shell.ts`; `slots.ts` ruft diese Funktion aus dem Slot `renderPreview`.
+// gehören deshalb nicht in den Rahmen (Kit `prompt-panel`); `slots.ts` ruft diese Funktion aus dem Slot `renderPreview`.
 import { backgroundColor, type BackgroundState } from "../../core/background";
 import { scanElements } from "../../core/elements";
 import { measureCanvas } from "../../core/measure";

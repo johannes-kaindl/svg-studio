@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.95.0, src/obsidian/file-snapshot.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.99.2, src/obsidian/file-snapshot.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: obsidian-transmute `src/obsidian/snapshot-io.ts` (`snapshotRoot`, `ensureDir`, `writeSnapshot`, `rotateSnapshots`) und `src/core/vault/snapshot.ts`
 // (`snapshotDirName`), auf eine Einzeldatei zugeschnitten; REGISTRY „Rückholbarkeit für Schreibvorgänge“ führte transmute als Kit-Kandidaten, svg-studio ist
 // der zweite Träger (K15, bedingt durch die Messung A4 vom 2026-11-04: Obsidians Dateiwiederherstellung erfasst nur Markdown, `.svg` und andere Dateien nicht).
@@ -192,7 +192,12 @@ async function migrateLegacy(adapter: DataAdapter, root: string, tree: string): 
   return report;
 }
 
-interface Stand { name: string; path: string; time: number; group: string; size: number }
+/** Die Normalform, in der Pfade verglichen werden. `adapter.list` liefert Namen und Präfix auf dem iPhone immer in NFC, auch bei einem NFD-Ordner (gemessen 2026-11-15); ein Pfad, den der Aufrufer in NFD übergibt, wäre mit `===` nie gleich.
+ *  Geschrieben und gelöscht wird weiter unter dem Pfad, wie er vorliegt (keine Umbenennung bestehender Stände); NFC ist nur der Schlüssel zum Vergleichen und Gruppieren. */
+const nfc = (p: string): string => p.normalize("NFC");
+
+/** `dir` ist der Ordner, wie die Platte ihn führt (so, wie `list` ihn nannte): für `exists` und `remove`. `group` ist derselbe Ordner in NFC: der Schlüssel der Datei. */
+interface Stand { name: string; path: string; time: number; group: string; dir: string; size: number }
 
 /** Alle Stände unter `tree`, nach Datei-Ordner gruppiert (Schlüssel: der Ordnerpfad, dessen Rest hinter `tree/` der Vault-Pfad ist). */
 async function readGroups(adapter: DataAdapter, tree: string): Promise<Map<string, Stand[]>> {
@@ -203,9 +208,10 @@ async function readGroups(adapter: DataAdapter, tree: string): Promise<Map<strin
     if (!LEAF_STAMP_RE.test(name)) continue;
     const time = timeFromStampedName(name);
     if (time === null) continue;
-    const group = path.slice(0, slash);
+    const dir = path.slice(0, slash);
+    const group = nfc(dir);   // NFC und NFD desselben Ordners sind dieselbe Datei
     const list = groups.get(group) ?? [];
-    list.push({ name, path, time, group, size: 0 });
+    list.push({ name, path, time, group, dir, size: 0 });
     groups.set(group, list);
   }
   return groups;
@@ -237,6 +243,7 @@ export async function snapshotFile(
   let ownTime = 0;
   const ext = extOf(o.path);
   const fileDir = `${tree}/${o.path}`;
+  const ownGroup = nfc(fileDir);   // der Schlüssel der eigenen Datei in `readGroups`
   try {
     let time = (o.now ?? new Date()).getTime();
     ownName = stampedName(time, { suffix: ext });
@@ -254,6 +261,8 @@ export async function snapshotFile(
     return { ok: false, message: `could not write the snapshot${snapshotPath ? ` ${snapshotPath}` : ""}: ${errorMessage(error)}` };
   }
 
+  const isOwnStand = (path: string): boolean => nfc(path) === nfc(snapshotPath);
+
   // 3. Aufbewahrung je Datei und Gesamtdeckel. Ein Fehler hier macht den Schnappschuss nicht ungültig (er liegt da); überzählige räumt der nächste Aufruf.
   let dropped = 0;
   let unmeasured = 0;
@@ -264,7 +273,7 @@ export async function snapshotFile(
     const kept = new Map<string, Stand[]>();   // je Gruppe, was nach den drei Stufen bleibt (ohne die Zukunft)
     const future = new Map<string, Stand[]>();
     for (const [group, stands] of groups) {
-      const isOwn = group === fileDir;
+      const isOwn = group === ownGroup;
       const sel = selectGfsRetention(stands.map((s) => ({ name: s.name, time: s.time })), ownTime, {
         policy: o.policy, calendar: o.calendar, protect: isOwn ? [ownName] : [],
       });
@@ -289,7 +298,7 @@ export async function snapshotFile(
       let over = young.length - maxPerFile;
       const rest: Stand[] = [];
       for (const s of young) {
-        if (over > 0 && s.path !== snapshotPath) { doomed.add(s.path); over--; } else rest.push(s);
+        if (over > 0 && !isOwnStand(s.path)) { doomed.add(s.path); over--; } else rest.push(s);
       }
       kept.set(group, rest);
       future.set(group, later);
@@ -300,7 +309,7 @@ export async function snapshotFile(
       const all: Stand[] = [];
       for (const [group, rest] of kept) all.push(...rest, ...(future.get(group) ?? []));
       const ownBytes = new TextEncoder().encode(o.content).length;
-      const toMeasure = all.filter((s) => !(s.path === snapshotPath));
+      const toMeasure = all.filter((s) => !isOwnStand(s.path));
       for (let i = 0; i < toMeasure.length; i += STAT_BATCH) {
         await Promise.all(toMeasure.slice(i, i + STAT_BATCH).map(async (s) => {
           try {
@@ -309,22 +318,24 @@ export async function snapshotFile(
           } catch { unmeasured++; }
         }));
       }
-      for (const s of all) if (s.path === snapshotPath) s.size = ownBytes;
+      for (const s of all) if (isOwnStand(s.path)) s.size = ownBytes;
       let total = all.reduce((sum, s) => sum + s.size, 0);
       if (total > maxTotalBytes) {
         // Rang 1: verwaiste Dateien; Rang 2: nicht der neueste einer lebenden Datei; Rang 3: der neueste einer lebenden Datei. Der eigene Stand nie, die Zukunft nicht.
         const orphan = new Map<string, boolean>();
         for (const group of kept.keys()) {
-          if (group === fileDir) { orphan.set(group, false); continue; }
+          if (group === ownGroup) { orphan.set(group, false); continue; }
           let exists = true;
-          try { exists = await adapter.exists(group.slice(tree.length + 1)); } catch { exists = true; }
+          // Unter dem Namen fragen, wie die Platte den Ordner führt (`dir`), nicht unter dem NFC-Schlüssel: eine Platte, die die Normalformen unterscheidet, kennt die Datei nur unter ihrer eigenen.
+          const dir = kept.get(group)?.[0]?.dir ?? future.get(group)?.[0]?.dir ?? group;
+          try { exists = await adapter.exists(dir.slice(tree.length + 1)); } catch { exists = true; }
           orphan.set(group, !exists);
         }
         const ranked: { s: Stand; rank: number }[] = [];
         for (const [group, rest] of kept) {
           const newest = rest.reduce((m, s) => Math.max(m, s.time), -Infinity);
           for (const s of rest) {
-            if (s.path === snapshotPath) continue;
+            if (isOwnStand(s.path)) continue;
             const rank = orphan.get(group) ? 1 : s.time < newest ? 2 : 3;
             ranked.push({ s, rank });
           }

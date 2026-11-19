@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SvgSession } from "../../src/core/session";
-import { initStrings, panelStrings } from "../../src/i18n/strings";
-import { buildPanelShell, type PanelDeps, type PanelShell } from "../../src/obsidian/panel/shell";
+import { initStrings } from "../../src/i18n/strings";
+import { buildPanelFixture, type PanelFixture } from "../helpers/panel-fixture";
 import { freshSession, svgSlots } from "../../src/obsidian/panel/slots";
 import type { Target } from "../../src/vendor/kit/panel-session";
 import { answer, fakeLlm, type Responder } from "../helpers/fake-llm";
@@ -19,7 +19,7 @@ const BG = { get: () => ({ on: true, tone: "light" as const, hex: "#ffffff" }), 
 
 beforeEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); initStrings("de"); });
 
-interface Setup { root: HTMLElement; shell: PanelShell<SvgSession>; accept: ReturnType<typeof vi.fn>; releaseAccept: () => void; read: ReturnType<typeof vi.fn> }
+interface Setup { root: HTMLElement; shell: PanelFixture; accept: ReturnType<typeof vi.fn>; releaseAccept: () => void; read: ReturnType<typeof vi.fn> }
 
 function setup(responders: Responder[] = [answer(ANSWER)], o: { hangAccept?: boolean; text?: string | null; target?: Target } = {}): Setup {
   const { llm } = fakeLlm(responders);
@@ -28,21 +28,17 @@ function setup(responders: Responder[] = [answer(ANSWER)], o: { hangAccept?: boo
   const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG });
   let release: () => void = () => undefined;
   const accept = vi.fn(() => (o.hangAccept === true ? new Promise<never>((res) => { release = () => { res({ ok: false, message: "x" } as never); }; }) : Promise.resolve({ ok: false as const, message: "x" })));
-  const deps: PanelDeps<SvgSession> = {
-    app: {} as never, llm,
-    thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
-    readTargetText: read, accept, openSettings: () => undefined,
-    confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
-  };
-  return { root, shell: buildPanelShell(root, deps, slots, freshSession(o.target ?? FILE)), accept, releaseAccept: () => { release(); }, read };
+  const deps = { llm, readTargetText: read, ...(o.hangAccept === true ? { hangWrite: true } : {}) };
+  const s0 = buildPanelFixture(root, deps, slots, freshSession(o.target ?? FILE));
+  return { root, shell: s0, accept, releaseAccept: () => { release(); s0.releaseWrite(); }, read };
 }
 
 async function send(s: Setup, text: string): Promise<void> {
-  s.root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!.value = text;
-  s.root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
+  s.root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!.value = text;
+  s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
   await s.shell.settled();
 }
-const shadow = (s: Setup): ShadowRoot => s.root.querySelector<HTMLElement>(".svg-studio-preview-host .svg-studio-stage")!.shadowRoot!;
+const shadow = (s: Setup): ShadowRoot => s.root.querySelector<HTMLElement>(".okit-prompt-panel-preview-host .svg-studio-stage")!.shadowRoot!;
 const clickEl = (s: Setup, id: string): void => { shadow(s).querySelector(`#${id}`)!.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true })); };
 const field = (s: Setup, name: string): HTMLInputElement => s.root.querySelector<HTMLInputElement>(`.svg-studio-fields input[data-field="${name}"]`)!;
 const fieldNames = (s: Setup): string[] => [...s.root.querySelectorAll<HTMLInputElement>(".svg-studio-fields input")].map((i) => i.dataset.field!);
@@ -79,8 +75,8 @@ describe("Zahlenfelder im Panel: Auswahl zeigt die Felder", () => {
     const s = await ready();
     clickEl(s, "mond");
     expect(s.root.querySelector(".svg-studio-fields-head")!.textContent).toBe("Werte von Kreis mond");
-    const wrap = s.root.querySelector(".svg-studio-preview")!;
-    expect([...wrap.children].map((c) => c.className.split(" ")[0])).toEqual(["svg-studio-preview-caption", "svg-studio-preview-host", "svg-studio-fields-host"]);
+    const wrap = s.root.querySelector(".okit-prompt-panel-preview")!;
+    expect([...wrap.children].map((c) => c.className.split(" ")[0])).toEqual(["okit-prompt-panel-preview-caption", "okit-prompt-panel-preview-host", "okit-prompt-panel-fields-host"]);
   });
 
   it("Zahlenfelder tragen inputmode=\"decimal\", Text und Farbe nicht; jedes Feld hat ein Label mit for", async () => {
@@ -99,7 +95,7 @@ describe("Zahlenfelder im Panel: Auswahl zeigt die Felder", () => {
 
   it("Auswahl über die Prüfliste (Sprung) zeigt die Felder ebenfalls", async () => {
     const s = await ready();
-    s.root.querySelector<HTMLElement>(".svg-studio-changes .okit-review-main")!.click();
+    s.root.querySelector<HTMLElement>(".okit-prompt-panel-changes .okit-review-main")!.click();
     expect(fieldNames(s)).toContain("r");
   });
 });
@@ -124,7 +120,7 @@ describe("Zahlenfelder im Panel: Handrunden", () => {
     expect(field(s, "r").value).toBe("60"); // Felder nach der Auswahl neu gezeichnet, Auswahl bleibt
     expect(s.root.querySelector(".svg-studio-fields-head")!.textContent).toBe("Werte von Kreis mond");
     expect(s.root.querySelector(".svg-studio-measure")!.textContent).toContain("mond: 120 × 120");
-    expect(s.root.querySelector(".svg-studio-rounds")!.textContent).toContain("Von Hand: mond r 60");
+    expect(s.root.querySelector(".okit-prompt-panel-rounds")!.textContent).toContain("Von Hand: mond r 60");
   });
 
   it("englisch: „By hand: mond r 60“", async () => {
@@ -189,7 +185,7 @@ describe("Zahlenfelder im Panel: Handrunden", () => {
     const s = await ready();
     clickEl(s, "mond");
     enter(s, "r", "60");
-    s.root.querySelectorAll<HTMLElement>(".svg-studio-rounds .okit-vlist-row")[0]!.click();
+    s.root.querySelectorAll<HTMLElement>(".okit-prompt-panel-rounds .okit-vlist-row")[0]!.click();
     expect(s.shell.session().rounds.active).toBe(0);
     clickEl(s, "tuer");
     enter(s, "x", "5");
@@ -331,8 +327,8 @@ describe("Zahlenfelder im Panel: Gleichzeitigkeit (Review-Fokus 4)", () => {
     const s = setup([answer(ANSWER), hang]);
     await send(s, "größer");
     clickEl(s, "mond");
-    s.root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!.value = "mehr";
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
+    s.root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!.value = "mehr";
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
     await vi.waitFor(() => { expect(s.shell.running()).toBe(true); });
     const inputs = [...s.root.querySelectorAll<HTMLInputElement>(".svg-studio-fields input")];
     expect(inputs.length).toBeGreaterThan(0);
@@ -341,7 +337,7 @@ describe("Zahlenfelder im Panel: Gleichzeitigkeit (Review-Fokus 4)", () => {
     key(field(s, "r"), "Enter");
     field(s, "r").dispatchEvent(new Event("change", { bubbles: true }));
     expect(rounds(s)).toHaveLength(1);
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-stop")!.click();
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-stop")!.click();
     release({ ok: false, kind: "aborted", detail: "aborted", partial: "", reasoning: "", timing: { startedAt: 0, endedAt: 0 }, facts: null, deviations: [], source: { kind: "local" } });
     await s.shell.settled();
     expect(field(s, "r").disabled).toBe(false);
@@ -353,9 +349,9 @@ describe("Zahlenfelder im Panel: Gleichzeitigkeit (Review-Fokus 4)", () => {
     const s = setup([answer(ANSWER)], { hangAccept: true });
     await send(s, "größer");
     clickEl(s, "mond");
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-accept")!.click();
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-accept")!.click();
-    expect(s.accept).toHaveBeenCalledTimes(1);
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-accept")!.click();
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-accept")!.click();
+    await vi.waitFor(() => { expect(s.shell.writes()).toBe(1); });
     expect(field(s, "r").disabled).toBe(true);
     type(field(s, "r"), "99");
     key(field(s, "r"), "Enter");
@@ -363,15 +359,15 @@ describe("Zahlenfelder im Panel: Gleichzeitigkeit (Review-Fokus 4)", () => {
     expect(rounds(s)).toHaveLength(1);
     s.releaseAccept();
     await s.shell.settled();
-    expect(s.accept).toHaveBeenCalledTimes(1);
+    expect(s.shell.writes()).toBe(1);
     expect(rounds(s)).toHaveLength(1);
     expect(field(s, "r").disabled).toBe(false);
   });
 });
 
 describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
-  const stage = (s: Setup): HTMLElement | null => s.root.querySelector<HTMLElement>(".svg-studio-preview-host .svg-studio-stage");
-  const wrapHidden = (s: Setup): boolean => s.root.querySelector(".svg-studio-preview")!.classList.contains("is-hidden");
+  const stage = (s: Setup): HTMLElement | null => s.root.querySelector<HTMLElement>(".okit-prompt-panel-preview-host .svg-studio-stage");
+  const wrapHidden = (s: Setup): boolean => s.root.querySelector(".okit-prompt-panel-preview")!.classList.contains("is-hidden");
   const shown = async (s: Setup): Promise<void> => { await vi.waitFor(() => { expect(stage(s)).not.toBeNull(); }); };
   const BROKEN = `<svg ${NS}><g id="a"><circle id="c" r="4"/></svg>`;
 
@@ -380,14 +376,14 @@ describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
     await shown(s);
     expect(rounds(s)).toHaveLength(0);
     expect(wrapHidden(s)).toBe(false);
-    expect(s.root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Aktueller Stand");
+    expect(s.root.querySelector(".okit-prompt-panel-preview-caption")!.textContent).toBe("Aktueller Stand");
     expect(s.root.querySelector(".svg-studio-bg-bar")).not.toBeNull();
     expect(s.root.querySelector(".svg-studio-measure")!.textContent).toBe("Fläche 100 × 100 Einheiten");
     expect(s.root.querySelector(".svg-studio-fields-hint")).not.toBeNull();
     clickEl(s, "mond");
     expect(fieldNames(s)).toEqual(["cx", "cy", "r", "fill", "stroke", "stroke-width", "rotate"]);
     expect(field(s, "r").value).toBe("40");
-    expect(s.root.querySelector<HTMLButtonElement>("button.svg-studio-accept")!.disabled).toBe(true); // nichts zu übernehmen
+    expect(s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-accept")!.disabled).toBe(true); // nichts zu übernehmen
     expect(s.root.querySelector(".svg-studio-notice")).toBeNull(); // sauberer Bestand: keine Karte
   });
 
@@ -402,8 +398,8 @@ describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
     expect(s.shell.session().startText).toBe(BASE);
     expect(previewSvg(s).querySelector("#mond")!.getAttribute("r")).toBe("60");
     expect(field(s, "r").value).toBe("60");
-    expect(s.root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
-    expect(s.root.querySelector<HTMLButtonElement>("button.svg-studio-accept")!.disabled).toBe(false);
+    expect(s.root.querySelector(".okit-prompt-panel-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
+    expect(s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-accept")!.disabled).toBe(false);
     enter(s, "cx", "5");
     expect(rounds(s)).toHaveLength(1); // die zweite Änderung in derselben Runde
     expect(rounds(s)[0]!.instruction).toBe("Von Hand: mond r 60, mond cx 5");
@@ -439,7 +435,7 @@ describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
   it("neues Ziel: der Empty-State bleibt, keine Vorschau", async () => {
     const s = setup([answer(ANSWER)], { target: { kind: "new" } });
     await new Promise((r) => setTimeout(r, 5));
-    expect(s.root.querySelector(".svg-studio-empty:not(.is-hidden)")).not.toBeNull();
+    expect(s.root.querySelector(".okit-prompt-panel-empty:not(.is-hidden)")).not.toBeNull();
     expect(wrapHidden(s)).toBe(true);
     expect(stage(s)).toBeNull();
   });
@@ -460,9 +456,9 @@ describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
     await shown(s);
     clickEl(s, "mond");
     enter(s, "r", "60");
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-discard")!.click();
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-discard")!.click();
     await vi.waitFor(() => { expect(rounds(s)).toHaveLength(0); expect(previewSvg(s).querySelector("#mond")!.getAttribute("r")).toBe("40"); });
-    expect(s.root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Aktueller Stand");
+    expect(s.root.querySelector(".okit-prompt-panel-preview-caption")!.textContent).toBe("Aktueller Stand");
   });
 
   it("ein Verfeinern am Bestand mit Vorschau läuft wie bisher (die erste Runde baut auf dem Text des Ziels)", async () => {
@@ -471,7 +467,7 @@ describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
     await send(s, "größer");
     expect(rounds(s)).toHaveLength(1);
     expect(rounds(s)[0]).toMatchObject({ art: "prompt", basedOn: null });
-    expect(s.root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
+    expect(s.root.querySelector(".okit-prompt-panel-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
   });
 
   it("ein langsames Lesen des Bestands malt nicht über eine Runde, die inzwischen da ist", async () => {
@@ -482,20 +478,16 @@ describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
     let calls = 0;
     const read = vi.fn(() => (++calls <= 2 ? slow : Promise.resolve(BASE)));
     const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG });
-    const deps: PanelDeps<SvgSession> = {
-      app: {} as never, llm,
-      thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
-      readTargetText: read, accept: () => Promise.resolve({ ok: false, message: "x" }), openSettings: () => undefined,
-      confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
-    };
-    const shell = buildPanelShell(root, deps, slots, freshSession(FILE));
-    root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!.value = "größer";
-    root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
-    await shell.settled();
-    expect(root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
+    const deps = { llm, readTargetText: read };
+    const shell = buildPanelFixture(root, deps, slots, freshSession(FILE));
+    root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!.value = "größer";
+    root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
+    // `shell.settled()` des Rahmens wartet auch auf die Vorschau-Arbeit (das langsame Lesen hinge bis zum `release`): hier nur auf den Lauf warten.
+    await shell.host.settled();
+    await vi.waitFor(() => { expect(root.querySelector(".okit-prompt-panel-preview-caption")!.textContent).toBe("Vorschau von Runde 1"); });
     release(BASE.replace("40", "99"));
     await new Promise((r) => setTimeout(r, 10));
-    expect(root.querySelector(".svg-studio-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
+    expect(root.querySelector(".okit-prompt-panel-preview-caption")!.textContent).toBe("Vorschau von Runde 1");
     expect(root.querySelector<HTMLElement>(".svg-studio-stage")!.shadowRoot!.querySelector("#mond")!.getAttribute("r")).toBe("45");
   });
 
@@ -506,15 +498,10 @@ describe("Bestand ohne Runde: Vorschau, Auswahl und Felder sofort", () => {
     const root = document.body.createDiv({ cls: "view-content" }).createDiv();
     const read = vi.fn((t: Target) => (t.kind === "file" && t.path === "a.svg" ? slow : Promise.resolve(BASE.replace("40", "11"))));
     const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG });
-    const deps: PanelDeps<SvgSession> = {
-      app: {} as never, llm,
-      thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
-      readTargetText: read, accept: () => Promise.resolve({ ok: false, message: "x" }), openSettings: () => undefined,
-      confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
-    };
+    const deps = { llm, readTargetText: read };
     const A: Target = { kind: "file", path: "a.svg", label: "a.svg" };
     const B: Target = { kind: "file", path: "b.svg", label: "b.svg" };
-    const shell = buildPanelShell(root, deps, slots, freshSession(A));
+    const shell = buildPanelFixture(root, deps, slots, freshSession(A));
     shell.setTarget(B);
     await vi.waitFor(() => { expect(root.querySelector<HTMLElement>(".svg-studio-stage")?.shadowRoot?.querySelector("#mond")?.getAttribute("r")).toBe("11"); });
     release(BASE.replace("40", "22"));

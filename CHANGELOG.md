@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The panel now runs on the kit's shared prompt panel frame. A running request, the rounds and the half-typed text survive closing the view; reopening it shows where you left off.
+- A new SVG has two buttons, "As file" and "As block", instead of a question dialog. The setting "Apply as" only decides which one is the main button; an earlier saved "Ask every time" counts as "File".
+- Without an open note "As block" is disabled and the reason stands next to it. A block behind a list marker is not written (own message).
+- Replacing a block in a note now takes a backup copy of the note first (before: only when overwriting a file).
+- After "As block" in reading mode, and after applying in general, the panel keeps working on the block or file it just created.
+- The hint buttons (for example "Assign names") keep working when you click them straight out of the editor: a change of the active tab no longer redraws them under the mouse.
+- The wording "This can take minutes with local models." is now "With local models this can take minutes."; the request field is empty after a success.
+- Updated the vendored kit to obsidian-kit 0.99.2 and code-kit 0.78.0.
+
+### Added
+
+- Status bar entry ("SVG Studio: running" / "Result waiting") while the view is closed; can be switched off in the settings ("Status bar", on by default).
+
+### Fixed
+
+- The review list and the number fields unlock again after a run.
+
 ## [0.1.5] — 2026-11-18
 
 ### Changed

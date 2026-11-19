@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assignMissingIds } from "../../src/core/format";
 import type { SvgSession } from "../../src/core/session";
 import { bestandProblems, repairProblem } from "../../src/obsidian/panel/bestand";
-import { buildPanelShell, type PanelDeps, type PanelShell } from "../../src/obsidian/panel/shell";
+import { buildPanelFixture, type PanelFixture } from "../helpers/panel-fixture";
 import { freshSession, roundMeta, svgSlots } from "../../src/obsidian/panel/slots";
-import { initStrings, panelStrings } from "../../src/i18n/strings";
+import { initStrings } from "../../src/i18n/strings";
 import { checkSvg } from "../../src/vendor/kit/svg-guard";
 import type { Target } from "../../src/vendor/kit/panel-session";
 import { answer, fakeLlm, type Responder } from "../helpers/fake-llm";
@@ -66,19 +66,14 @@ describe("bestandProblems", () => {
   });
 });
 
-interface Setup { root: HTMLElement; shell: PanelShell<SvgSession>; requests: ReturnType<typeof fakeLlm>["requests"]; complete: ReturnType<typeof fakeLlm>["complete"] }
+interface Setup { root: HTMLElement; shell: PanelFixture; requests: ReturnType<typeof fakeLlm>["requests"]; complete: ReturnType<typeof fakeLlm>["complete"] }
 function setup(text: string | null, responders: Responder[] = [answer(FIXED)], target: Target = FILE): Setup {
   const { llm, complete, requests } = fakeLlm(responders);
   const root = document.body.createDiv({ cls: "view-content" }).createDiv();
   const read = vi.fn(async () => text);
   const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: { get: () => ({ on: true, tone: "light", hex: "#ffffff" }), set: () => {} } });
-  const deps: PanelDeps<SvgSession> = {
-    app: {} as never, llm,
-    thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
-    readTargetText: read, accept: () => Promise.resolve({ ok: false, message: "x" }), openSettings: () => {},
-    confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
-  };
-  const shell = buildPanelShell(root, deps, slots, freshSession(target));
+  const deps = { llm, readTargetText: read };
+  const shell = buildPanelFixture(root, deps, slots, freshSession(target));
   shell.setTarget(target);
   return { root, shell, requests, complete };
 }
@@ -88,7 +83,7 @@ const shown = async (root: HTMLElement): Promise<HTMLElement> => {
   await vi.waitFor(() => { expect(notice(root)).not.toBeNull(); });
   return notice(root)!;
 };
-const status = (root: HTMLElement): string => root.querySelector(".svg-studio-status .okit-status-label")?.textContent ?? "";
+const status = (root: HTMLElement): string => root.querySelector(".okit-prompt-panel-status .okit-status-label")?.textContent ?? "";
 
 describe("Bestand beim Öffnen: Editor-Angaben (Inkscape)", () => {
   it("zeigt den Hinweis mit „Remove editor data“ (und „Repair“); das Ergebnis der Regelrunde besteht checkSvg", async () => {
@@ -117,7 +112,7 @@ describe("Bestand beim Öffnen: Editor-Angaben (Inkscape)", () => {
     const items = [...s.root.querySelectorAll(".svg-studio-rule-line")].map((li) => li.textContent);
     expect(items.length).toBeGreaterThan(0);
     expect(items.join("|")).toMatch(/namedview1: removed/);
-    expect(s.root.querySelector(".svg-studio-changes .okit-review-card")).toBeNull();
+    expect(s.root.querySelector(".okit-prompt-panel-changes .okit-review-card")).toBeNull();
   });
 
   it("nach der Regelrunde ist der Hinweis weg (der Text der aktiven Runde ist sauber)", async () => {
@@ -147,9 +142,9 @@ describe("Bestand beim Öffnen: Elemente ohne id (Entscheidung 13)", () => {
   it("der Hinweis erscheint ohne Senden; verfeinern geht erst danach (run.unnamed bleibt als Sicherung)", async () => {
     const s = setup(UNNAMED);
     await shown(s.root);
-    const input = s.root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!;
+    const input = s.root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!;
     input.value = "mach es größer";
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
     await s.shell.settled();
     expect(s.complete).not.toHaveBeenCalled();
     expect(status(s.root)).toBe("3 element(s) have no name (id). Changing needs a name on every element.");
@@ -272,13 +267,8 @@ describe("Bestand: Reihenfolge und Zwei-Schritt-Ablauf (Review C4)", () => {
     const B: Target = { kind: "file", path: "b.svg", label: "b.svg" };
     const read = vi.fn(async (t: Target) => (t.kind === "file" && t.path === "a.svg" ? slow : CLEAN));
     const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: { get: () => ({ on: true, tone: "light", hex: "#ffffff" }), set: () => {} } });
-    const deps: PanelDeps<SvgSession> = {
-      app: {} as never, llm,
-      thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
-      readTargetText: read, accept: () => Promise.resolve({ ok: false, message: "x" }), openSettings: () => {},
-      confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
-    };
-    const shell = buildPanelShell(root, deps, slots, freshSession(A));
+    const deps = { llm, readTargetText: read };
+    const shell = buildPanelFixture(root, deps, slots, freshSession(A));
     shell.setTarget(A);
     shell.setTarget(B); // ohne Runden gilt B sofort; B ist sauber
     await vi.waitFor(() => { expect(read.mock.calls.length).toBeGreaterThanOrEqual(3); }); // Aufbau, A angeboten, B angeboten (die Vorschau ohne Runde liest ebenfalls)
@@ -295,7 +285,7 @@ describe("Reparatur: Anzeige (Review C4, S3)", () => {
     button(s.root, "Repair")!.click();
     await s.shell.settled();
     expect(roundMeta(s.shell.session().rounds.rounds[0]!)).toBe("repair · whole image");
-    const card = s.root.querySelector(".svg-studio-changes .okit-review-card")!;
+    const card = s.root.querySelector(".okit-prompt-panel-changes .okit-review-card")!;
     expect(card.querySelector(".okit-redline")!.textContent).toBe("Repair: whole image");
   });
 
@@ -306,7 +296,7 @@ describe("Reparatur: Anzeige (Review C4, S3)", () => {
     button(s.root, "Reparieren")!.click();
     await s.shell.settled();
     expect(roundMeta(s.shell.session().rounds.rounds[0]!)).toBe("Reparatur · ganzes Bild");
-    expect(s.root.querySelector(".svg-studio-changes .okit-redline")!.textContent).toBe("Reparatur: ganzes Bild");
+    expect(s.root.querySelector(".okit-prompt-panel-changes .okit-redline")!.textContent).toBe("Reparatur: ganzes Bild");
   });
 
   it("scheitert die Reparatur, passt der Hinweis zur Reparatur und nicht zum Ändern („simpler wording“)", async () => {

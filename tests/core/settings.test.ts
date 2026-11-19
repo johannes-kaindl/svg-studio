@@ -26,11 +26,20 @@ describe("loadSettings", () => {
   });
 
   it("gültige Werte bleiben, auch der eigene Hex-Wert", () => {
-    const { settings } = loadSettings({ acceptAs: "ask", background: { on: false, tone: "custom", hex: "#abc" } });
-    expect(settings.acceptAs).toBe("ask");
+    const { settings } = loadSettings({ acceptAs: "block", showStatusBar: false, background: { on: false, tone: "custom", hex: "#abc" } });
+    expect(settings.acceptAs).toBe("block");
+    expect(settings.showStatusBar).toBe(false);
     expect(settings.background).toEqual({ on: false, tone: "custom", hex: "#abc" });
     expect(loadSettings({ background: { hex: "#A1B2C3" } }).settings.background.hex).toBe("#A1B2C3");
     expect(loadSettings({ background: { hex: "#12345" } }).settings.background.hex).toBe("#ffffff");
+  });
+
+  it("gespeichertes \"ask\" (Dialog vor dem Schreiben, bis 0.1.5) gilt als \"file\", ohne Meldung; die Statusleiste ist standardmäßig an", () => {
+    const { settings, dropped } = loadSettings({ acceptAs: "ask" });
+    expect(settings.acceptAs).toBe("file");
+    expect(dropped).toEqual([]);
+    expect(loadSettings({}).settings.showStatusBar).toBe(true);
+    expect(loadSettings({ showStatusBar: "ja" }).dropped).toEqual(["showStatusBar"]);
   });
 
   it("llm: Zeilen, Wahl und Anfrage werden gelesen", () => {

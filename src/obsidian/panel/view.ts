@@ -1,15 +1,26 @@
-// Das Panel als Seitenleisten-Ansicht (Spec § 7.2). Die Ansicht trägt nur, was Obsidian verlangt (Typ, Titel, Symbol, Auf- und Abbau);
-// der Inhalt kommt vom formatneutralen Kern `shell.ts` mit den SVG-Slots aus `slots.ts`.
-import { ItemView, type WorkspaceLeaf } from "obsidian";
+// Das Panel als Seitenleisten-Ansicht (Spec § 7.2). Die Ansicht trägt nur, was Obsidian verlangt (Typ, Titel, Symbol, Auf- und Abbau); den Inhalt zeichnet der Rahmen
+// des Kits (`buildPromptPanel`) mit den SVG-Slots aus `slots.ts`. Lauf, Sitzung und der halb getippte Auftrag liegen im Halter (`main.ts`, `createPromptPanelHost`) und
+// überstehen das Schließen der Ansicht; jeder Zielwechsel geht an `host.offer`, auch bei geschlossener Ansicht.
+import { ItemView, type App, type WorkspaceLeaf } from "obsidian";
 import type { SvgSession } from "../../core/session";
-import { panelStrings, t } from "../../i18n/strings";
-import type { Target } from "../../vendor/kit/panel-session";
+import { getLang, panelStrings, t } from "../../i18n/strings";
+import type { PanelHost } from "../../vendor/kit/panel-host";
+import type { AcceptEnv } from "../../vendor/kit-obsidian/panel-accept";
+import { buildPromptPanel, type PromptPanel, type PromptPanelDeps } from "../../vendor/kit-obsidian/prompt-panel";
 import { VIEW_TYPE_SVG_STUDIO } from "../render-block";
 import { commentDialog } from "./comment-dialog";
-import { buildPanelShell, type PanelDeps, type PanelShell } from "./shell";
 import { svgSlots, type SvgSlotDeps } from "./slots";
 
-export type SvgPanelDeps = Omit<PanelDeps<SvgSession>, "strings"> & {
+export interface SvgPanelDeps {
+  app: App;
+  host: PanelHost<SvgSession>;
+  llm: PromptPanelDeps["llm"];
+  thinking: PromptPanelDeps["thinking"];
+  pluginId: string;
+  /** Der Kit-`AcceptEnv` ohne `settings` und `choose`. */
+  accept: Omit<AcceptEnv, "settings" | "choose">;
+  readTargetText: PromptPanelDeps["readTargetText"];
+  openSettings: PromptPanelDeps["openSettings"];
   thinkingOn: () => boolean;
   /** Hintergrund der Vorschau (Einstellung): lesen und speichern. */
   background: SvgSlotDeps["background"];
@@ -17,14 +28,11 @@ export type SvgPanelDeps = Omit<PanelDeps<SvgSession>, "strings"> & {
   renderGuard?: SvgSlotDeps["renderGuard"];
   /** Der Kontext des Modells am Endpunkt (Token), `null` wenn er ihn nicht nennt: Verfeinern und Reparieren sperren eine Eingabe, die nicht passt. Ohne sie wird nicht geprüft. */
   contextLimit?: SvgSlotDeps["contextLimit"];
-  /** Hält die Sitzung eines geschlossenen Panels, wenn der Nutzer die Runden behalten wollte; das nächste Panel nimmt sie wieder auf. */
-  stash: { take: () => SvgSession | null; put: (s: SvgSession | null) => void };
-};
+  acceptWays: NonNullable<SvgSlotDeps["acceptWays"]>;
+}
 
 export class SvgStudioView extends ItemView {
-  private shell: PanelShell<SvgSession> | null = null;
-  /** Ein Ziel, das vor dem Aufbau kam (`openPanel` setzt es, sobald das Blatt da ist). */
-  private target: Target | null = null;
+  private panel: PromptPanel | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly deps: SvgPanelDeps) {
     super(leaf);
@@ -42,58 +50,67 @@ export class SvgStudioView extends ItemView {
     return "image";
   }
 
-  /** Das Ziel anbieten (siehe `PanelShell.setTarget`). */
-  setTarget(target: Target): void {
-    if (this.shell === null) this.target = target;
-    else this.shell.setTarget(target);
+  /** Testnaht und GUI-Smoke: die Sitzung, die der Halter hält (auch bei geschlossener Ansicht dieselbe). */
+  state(): SvgSession {
+    return this.deps.host.session();
   }
 
-  getTarget(): Target {
-    return this.shell?.session().target ?? this.target ?? { kind: "new" };
-  }
-
-  state(): SvgSession | null {
-    return this.shell?.session() ?? null;
-  }
-
-  /** Testnaht: wartet auf den laufenden Lauf. */
+  /** Testnaht: wartet auf den laufenden Lauf, das Schreiben und eine laufende Vorschau. */
   settled(): Promise<void> {
-    return this.shell?.settled() ?? Promise.resolve();
+    return this.panel?.settled() ?? Promise.resolve();
   }
 
   onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("svg-studio-panel");
-    const { thinkingOn, background, stash, renderGuard, contextLimit, ...rest } = this.deps;
-    const slots = svgSlots({ llm: this.deps.llm, readTargetText: this.deps.readTargetText, thinkingOn, background, ...(renderGuard === undefined ? {} : { renderGuard }), ...(contextLimit === undefined ? {} : { contextLimit }), comment: commentDialog(this.app) });
-    this.shell = buildPanelShell(this.contentEl, { ...rest, strings: panelStrings() }, slots, stash.take() ?? undefined);
-    if (this.target !== null) this.shell.setTarget(this.target);
+    const d = this.deps;
+    const slots = svgSlots({
+      llm: d.llm,
+      readTargetText: d.readTargetText,
+      thinkingOn: d.thinkingOn,
+      background: d.background,
+      acceptWays: d.acceptWays,
+      ...(d.renderGuard === undefined ? {} : { renderGuard: d.renderGuard }),
+      ...(d.contextLimit === undefined ? {} : { contextLimit: d.contextLimit }),
+      comment: commentDialog(this.app),
+    });
+    this.panel = buildPromptPanel(this.contentEl, d.host, {
+      app: d.app,
+      lang: getLang(),
+      llm: d.llm,
+      thinking: d.thinking,
+      readTargetText: d.readTargetText,
+      openSettings: d.openSettings,
+      pluginId: d.pluginId,
+      accept: d.accept,
+      strings: panelStrings(),
+    }, slots);
     return Promise.resolve();
   }
 
-  async onClose(): Promise<void> {
-    const shell = this.shell;
-    this.shell = null;
-    if (shell === null) return;
-    // Obsidian wartet in `onClose` nicht auf eine Antwort und lässt sich das Schließen nicht verbieten: „Behalten“ merkt die Sitzung im Plugin,
-    // das nächste Panel nimmt sie wieder auf (Spec § 7.2: Schließen mit offenen Runden fragt per Bestätigung).
-    const drop = await shell.requestClose();
-    this.deps.stash.put(drop ? null : shell.session());
-    shell.destroy();
+  onClose(): Promise<void> {
+    const panel = this.panel;
+    this.panel = null;
+    if (panel === null) return Promise.resolve();
+    // Obsidian wartet in `onClose` nicht auf eine Antwort und lässt sich das Schließen nicht verbieten. Läuft ein Lauf, bleibt alles beim Halter; sonst fragt der Rahmen bei
+    // offenen Runden (Verwerfen oder Behalten), und der Dialog erreicht den Halter, nicht den schon abgebauten Rahmen. `destroy()` bricht keinen Lauf ab.
+    void panel.requestClose();
+    panel.destroy();
+    return Promise.resolve();
   }
 
   /** Zeichnet die Modellzeile samt Denk-Steuerung aus dem Zustand neu (Modell, Endpunkt oder Stufe haben sich außerhalb geändert). */
   refreshModelBar(): void {
-    this.shell?.refreshModelBar();
+    this.panel?.refreshModelBar();
   }
 
   /** Wertet die Sperre von Übernehmen neu aus (die zuletzt aktive Notiz hat gewechselt). */
   refreshAccept(): void {
-    this.shell?.refreshAccept();
+    this.panel?.refreshAccept();
   }
 
   /** Lädt die Modell-Liste der Zeile neu (der Endpunkt oder der Manager haben gewechselt). */
   reloadModels(): void {
-    this.shell?.reloadModels();
+    this.panel?.reloadModels();
   }
 }

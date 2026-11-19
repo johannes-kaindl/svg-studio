@@ -9,6 +9,7 @@ import type { AcceptEnv } from "../../src/vendor/kit-obsidian/panel-accept";
 export const mkFile = (path: string): TFile => new (TFile as unknown as new (p: string) => TFile)(path);
 
 export interface AcceptOpts {
+  /** Welcher Schreibweg eines neuen SVG gilt (der Hauptknopf; im Test der Weg, den `run` nimmt). Seit dem Umzug auf den Rahmen ist das keine Einstellung des Env mehr. */
   acceptAs?: AcceptAs;
   /** Die Notiz `n.md` ist als Editor offen (Strg+Z-Weg) statt nur im Vault. */
   editorOpen?: boolean;
@@ -117,11 +118,11 @@ export function acceptSetup(files: Record<string, string>, opts: AcceptOpts = {}
       },
     },
   };
-  const env: AcceptEnv = buildAcceptEnv({
+  const env: Omit<AcceptEnv, "settings" | "choose"> = buildAcceptEnv({
     app: app as never,
     ports,
-    settings: () => ({ acceptAs: opts.acceptAs ?? "file" }),
     lastEditor: () => (opts.noView === true ? null : last),
   });
-  return { env, store, snaps, order, app, view, editor };
+  const acceptAs: AcceptAs = opts.acceptAs === "block" ? "block" : "file";
+  return { env, acceptAs, hasNote: opts.noView !== true, store, snaps, order, app, view, editor };
 }

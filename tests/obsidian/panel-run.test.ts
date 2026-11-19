@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { HostRunIo as RunIo } from "../../src/vendor/kit/panel-host";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SseTransport } from "../../src/vendor/kit-obsidian/chat-client";
 
@@ -20,9 +21,9 @@ vi.mock("../../src/vendor/kit-obsidian/llm-connection", async (orig) => {
 import SvgStudioPlugin from "../../src/main";
 import { answer, failure, fakeLlm, type Responder } from "../helpers/fake-llm";
 import { installObsidianDom } from "../helpers/obsidian-dom";
-import { initStrings, panelStrings } from "../../src/i18n/strings";
+import { initStrings } from "../../src/i18n/strings";
 import { runSvgPrompt } from "../../src/obsidian/panel/run";
-import { buildPanelShell, type PanelDeps, type PanelShell, type RunIo } from "../../src/obsidian/panel/shell";
+import { buildPanelFixture, type PanelFixture } from "../helpers/panel-fixture";
 import { freshSession, svgSlots } from "../../src/obsidian/panel/slots";
 import type { SvgSession } from "../../src/core/session";
 import type { Target } from "../../src/vendor/kit/panel-session";
@@ -38,29 +39,24 @@ const FILE: Target = { kind: "file", path: "logo.svg", label: "logo.svg" };
 
 beforeEach(() => { document.body.replaceChildren(); sent.length = 0; initStrings("en"); });
 
-interface Setup { root: HTMLElement; shell: PanelShell<SvgSession>; complete: ReturnType<typeof fakeLlm>["complete"]; requests: ReturnType<typeof fakeLlm>["requests"]; read: ReturnType<typeof vi.fn> }
+interface Setup { root: HTMLElement; shell: PanelFixture; complete: ReturnType<typeof fakeLlm>["complete"]; requests: ReturnType<typeof fakeLlm>["requests"]; read: ReturnType<typeof vi.fn> }
 
 function setup(responders: Responder[], o: { target?: Target; text?: string | null; model?: string; family?: string | null; thinkingOn?: boolean } = {}): Setup {
   const { llm, complete, requests } = fakeLlm(responders, { model: o.model ?? "qwen/qwen3.8-27b", family: o.family ?? null });
   const root = document.body.createDiv({ cls: "view-content" }).createDiv();
   const read = vi.fn(async () => o.text ?? null);
   const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => o.thinkingOn === true, background: { get: () => ({ on: true, tone: "light", hex: "#ffffff" }), set: () => {} } });
-  const deps: PanelDeps<SvgSession> = {
-    app: {} as never, llm,
-    thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
-    readTargetText: read, accept: () => Promise.resolve({ ok: false, message: "x" }), openSettings: () => {},
-    confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
-  };
-  const shell = buildPanelShell(root, deps, slots, freshSession(o.target ?? { kind: "new" }));
+  const deps = { llm, readTargetText: read };
+  const shell = buildPanelFixture(root, deps, slots, freshSession(o.target ?? { kind: "new" }));
   return { root, shell, complete, requests, read };
 }
 
-const label = (root: HTMLElement): string => root.querySelector(".svg-studio-status .okit-status-label")?.textContent ?? "";
+const label = (root: HTMLElement): string => root.querySelector(".okit-prompt-panel-status .okit-status-label")?.textContent ?? "";
 const tail = (root: HTMLElement): string => root.querySelector(".okit-stream-tail")?.textContent ?? "";
 async function send(s: Setup, text: string): Promise<void> {
-  const input = s.root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!;
+  const input = s.root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!;
   input.value = text;
-  s.root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
+  s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
   await s.shell.settled();
 }
 
@@ -112,12 +108,12 @@ describe("Lauf: Erzeugen mit Rückfrage", () => {
     expect(tail(s.root)).toBe("");
   });
 
-  it("auf Deutsch lautet der Hinweis beim Start 'Das kann bei lokalen Modellen Minuten dauern.'", async () => {
+  it("auf Deutsch lautet der Hinweis beim Start 'Mit lokalen Modellen kann das Minuten dauern.'", async () => {
     initStrings("de");
     let start = "";
     const s = setup([(h, r) => { start = label(s.root); return answer(SVG_OK)(h, r); }]);
     await send(s, "x");
-    expect(start).toBe("Frage qwen/qwen3.8-27b … Das kann bei lokalen Modellen Minuten dauern.");
+    expect(start).toBe("Frage qwen/qwen3.8-27b … Mit lokalen Modellen kann das Minuten dauern.");
   });
 
   it("abgeschnitten UND ungültig: genau eine Anfrage, 'zu groß … abgeschnitten nach n Zeichen', keine Runde, der Rohtext bleibt (Review-Fokus 1)", async () => {
@@ -127,7 +123,7 @@ describe("Lauf: Erzeugen mit Rückfrage", () => {
     expect(s.complete).toHaveBeenCalledTimes(1);
     expect(s.shell.session().rounds.rounds).toHaveLength(0);
     expect(label(s.root)).toBe(`Too big for one round with this model (cut off after ${String(cut.length)} characters). Nothing was added.`);
-    expect(s.root.querySelector(".svg-studio-status")!.classList.contains("is-error")).toBe(true);
+    expect(s.root.querySelector(".okit-prompt-panel-status")!.classList.contains("is-error")).toBe(true);
     expect(tail(s.root)).toBe(cut);
   });
 
@@ -153,11 +149,11 @@ describe("Lauf: Erzeugen mit Rückfrage", () => {
       h.signal?.addEventListener("abort", () => res({ ok: false, kind: "aborted", detail: "aborted", partial: "", reasoning: "", timing: { startedAt: 0, endedAt: 0 }, facts: null, deviations: [], source: { kind: "local" } }));
     });
     const s = setup([answer(WITH_COMMENT), hang]);
-    const input = s.root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!;
+    const input = s.root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!;
     input.value = "x";
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
     await vi.waitFor(() => expect(s.complete).toHaveBeenCalledTimes(2));
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-stop")!.click();
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-stop")!.click();
     await s.shell.settled();
     expect(s.shell.session().rounds.rounds).toHaveLength(0);
     expect(label(s.root)).toBe("Stopped.");
@@ -175,8 +171,8 @@ describe("Lauf: Erzeugen mit Rückfrage", () => {
     const s = setup([() => ({ ok: false, kind: "no-endpoint", detail: "no url", partial: "", reasoning: "", timing: { startedAt: 0, endedAt: 0 }, facts: null, deviations: [], source: { kind: "local" } })]);
     await send(s, "x");
     expect(label(s.root)).toBe("No language model is set up yet.");
-    expect(s.root.querySelector(".svg-studio-empty-endpoint")!.classList.contains("is-hidden")).toBe(false);
-    expect(s.root.querySelector(".svg-studio-empty-detail")!.textContent).toBe("Reason: no url");
+    expect(s.root.querySelector(".okit-prompt-panel-empty-endpoint")!.classList.contains("is-hidden")).toBe(false);
+    expect(s.root.querySelector(".okit-prompt-panel-empty-detail")!.textContent).toBe("Reason: no url");
   });
 });
 
@@ -227,24 +223,24 @@ describe("Lauf: Verfeinern", () => {
 describe("Messzeile", () => {
   it("gemessenes Modell: Zahlen; mit Denken an der Vorbehalt 'gemessen mit Denken aus'", () => {
     const off = setup([answer(SVG_OK)]);
-    expect(off.root.querySelector(".svg-studio-quality .okit-status-label")!.textContent).toMatch(/^Measured: 10 of 10 test descriptions/);
-    expect(off.root.querySelector(".svg-studio-quality .okit-status-label")!.textContent).not.toContain("thinking off");
+    expect(off.root.querySelector(".okit-prompt-panel-quality .okit-status-label")!.textContent).toMatch(/^Measured: 10 of 10 test descriptions/);
+    expect(off.root.querySelector(".okit-prompt-panel-quality .okit-status-label")!.textContent).not.toContain("thinking off");
     const on = setup([answer(SVG_OK)], { thinkingOn: true });
-    expect(on.root.querySelector(".svg-studio-quality .okit-status-label")!.textContent).toContain("Measured with thinking off; with thinking up to 50 times longer");
+    expect(on.root.querySelector(".okit-prompt-panel-quality .okit-status-label")!.textContent).toContain("Measured with thinking off; with thinking up to 50 times longer");
   });
 
   it("deutsch", () => {
     initStrings("de");
     const on = setup([answer(SVG_OK)], { thinkingOn: true });
-    expect(on.root.querySelector(".svg-studio-quality .okit-status-label")!.textContent).toContain("Gemessen mit Denken aus; mit Denken bis 50-mal länger");
+    expect(on.root.querySelector(".okit-prompt-panel-quality .okit-status-label")!.textContent).toContain("Gemessen mit Denken aus; mit Denken bis 50-mal länger");
   });
 
   it("ungemessenes Modell: Hinweis auf nicht gemessen und das kleine Referenzmodell; Cloud-Familie: nur 'nicht gemessen'", () => {
     const other = setup([answer(SVG_OK)], { model: "mistral/xyz" });
-    expect(other.root.querySelector(".svg-studio-quality .okit-status-label")!.textContent).toMatch(/^Not measured for this model; the small model gemma-4-e4b/);
-    expect(other.root.querySelector(".svg-studio-quality")!.classList.contains("is-warning")).toBe(true);
+    expect(other.root.querySelector(".okit-prompt-panel-quality .okit-status-label")!.textContent).toMatch(/^Not measured for this model; the small model gemma-4-e4b/);
+    expect(other.root.querySelector(".okit-prompt-panel-quality")!.classList.contains("is-warning")).toBe(true);
     const cloud = setup([answer(SVG_OK)], { model: "claude-x", family: "claude" });
-    expect(cloud.root.querySelector(".svg-studio-quality .okit-status-label")!.textContent).toBe("Not measured for this model.");
+    expect(cloud.root.querySelector(".okit-prompt-panel-quality .okit-status-label")!.textContent).toBe("Not measured for this model.");
   });
 });
 

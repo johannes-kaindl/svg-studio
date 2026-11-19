@@ -6,11 +6,14 @@ import { DEFAULT_SETTINGS, loadSettings, type SvgStudioSettings } from "../core/
 import { getLang, t } from "../i18n/strings";
 import { githubHelpUrls, HELP_SETTING_TEXTS_DE, HELP_SETTING_TEXTS_EN, helpSettingDefinition } from "../vendor/kit-obsidian/help-setting";
 import type { LlmConnection } from "../vendor/kit-obsidian/llm-connection";
+import { statusBarSettingDefinition } from "../vendor/kit-obsidian/status-bar-item";
 import { renderSettingDefinitions, settingBodyHost } from "../vendor/kit-obsidian/settings_walker";
 
 export interface SettingsHost extends Plugin {
   settings: SvgStudioSettings;
   llm: LlmConnection;
+  /** Der Halter des Fensters: der Schalter „Statusleiste“ legt seinen Eintrag an oder hängt ihn ab. */
+  host: { setStatusBarVisible(on: boolean): void };
   saveSettings(): Promise<void>;
 }
 
@@ -30,9 +33,19 @@ export class SvgStudioSettingTab extends PluginSettingTab {
         control: {
           type: "dropdown",
           key: "acceptAs",
-          options: { file: t("settings.acceptAs.file"), block: t("settings.acceptAs.block"), ask: t("settings.acceptAs.ask") },
+          options: { file: t("settings.acceptAs.file"), block: t("settings.acceptAs.block") },
         },
       },
+      // Der Eintrag erscheint nur, solange ein Lauf ohne Fenster läuft oder sein Ergebnis wartet (Kit `prompt-panel-host`); Standard an.
+      statusBarSettingDefinition({
+        value: this.host.settings.showStatusBar,
+        strings: { lang: getLang() },
+        onChange: async (on) => {
+          this.host.settings.showStatusBar = on;
+          this.host.host.setStatusBarVisible(on);
+          await this.host.saveSettings();
+        },
+      }),
       { name: t("settings.autoShow"), desc: t("settings.autoShow.desc"), control: { type: "toggle", key: "autoShow" } },
       // Die Texte des Abschnitts kommen aus dem Kit (EN/DE nach `lang`), kein eigenes Bündel.
       { name: t("settings.model"), desc: "", render: (setting: Setting) => { this.host.llm.renderSettings(settingBodyHost(setting), { lang: getLang() }); } },

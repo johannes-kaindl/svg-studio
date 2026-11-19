@@ -1,5 +1,5 @@
 // Der Lauf des Panels (Spec § 8 „In der Runde“): Erzeugen und Verfeinern mit Rückfrage bei ungültiger Antwort, dann eine Runde im Rundenmodell.
-// Formatgebunden (SVG); der Kern `shell.ts` ruft ihn über den Slot `run`. Sampling (Modus `transform`, Temperatur 0,2, Denken aus, `max_tokens` 16384) setzt
+// Formatgebunden (SVG); der Halter (Kit `panel-host`, in `main.ts` mit `run` verdrahtet) ruft ihn. Sampling (Modus `transform`, Temperatur 0,2, Denken aus, `max_tokens` 16384) setzt
 // die Verbindung in `main.ts`; hier steht nur, was zum Protokoll gehört.
 import { inputOverflow, OPTIMISTIC_CHARS_PER_TOKEN } from "../../core/context-fit";
 import { describeEntry } from "../../core/diff-labels";
@@ -14,7 +14,7 @@ import { checkSvg } from "../../vendor/kit/svg-guard";
 import { isManagerErrorCode, noEndpointText, resolveLlmConnectionStrings } from "../../vendor/kit-obsidian/llm-connection-strings";
 import type { LlmConnection } from "../../vendor/kit-obsidian/llm-connection";
 import { askFor, LlmAskError } from "../llm-ask";
-import type { RunCall, RunResult } from "./shell";
+import type { HostRunCall as RunCall, HostRunResult as RunResult } from "../../vendor/kit/panel-host";
 
 /** Wie oft gefragt wird: die erste Anfrage plus höchstens zwei Rückfragen (Spec § 8). */
 export const MAX_RETRIES = 2;
@@ -120,9 +120,9 @@ function asking(call: RunCall<SvgSession>, d: SvgRunDeps) {
   };
   const ask = askFor(d.llm, {
     signal: call.signal,
-    onToken: io.onToken,
-    onReasoning: io.onReasoning,
-    onContentReset: io.onContentReset,
+    onToken: (text) => { io.onToken(text); },
+    onReasoning: (text) => { io.onReasoning(text); },
+    onContentReset: () => { io.onContentReset(); },
     onAttempt: (n) => {
       if (n === 1) return;
       io.clearAnswer();

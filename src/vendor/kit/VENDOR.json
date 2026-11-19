@@ -1,10 +1,10 @@
 {
   "source": "code-kit",
-  "version": "0.75.0",
-  "sha": "e6cd8be",
-  "vendored": "svg-guard.ts, safe-markdown.ts, i18n.ts, answer-retry.ts, llm-answer.ts, think-splitter.ts, sha256.ts, data-url.ts, slug.ts, measured-quality.ts, fences.ts, panel-session.ts, rounds.ts, run-slot.ts, rotation.ts, css-color.ts, error-message.ts, word-diff.ts, anthropic-wire.ts, backend-probe.ts, capabilities.ts, embeddings-client.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, model-choice.ts, model-context.ts, model-list-cache.ts, reasoning.ts, redact.ts, text-window.ts, sampling-profiles.ts, secrets.ts, sse.ts, timeout.ts, clipboard.ts",
-  "obsidian_kit_version": "0.95.0",
-  "obsidian_kit_sha": "3853245",
+  "version": "0.78.0",
+  "sha": "84820b7",
+  "vendored": "svg-guard.ts, safe-markdown.ts, i18n.ts, answer-retry.ts, llm-answer.ts, think-splitter.ts, sha256.ts, data-url.ts, slug.ts, measured-quality.ts, fences.ts, panel-session.ts, rounds.ts, run-slot.ts, rotation.ts, css-color.ts, error-message.ts, word-diff.ts, panel-host.ts, anthropic-wire.ts, backend-probe.ts, capabilities.ts, embeddings-client.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, model-choice.ts, model-context.ts, model-list-cache.ts, reasoning.ts, redact.ts, text-window.ts, sampling-profiles.ts, secrets.ts, sse.ts, timeout.ts, clipboard.ts",
+  "obsidian_kit_version": "0.99.2",
+  "obsidian_kit_sha": "f72a43c",
   "obsidian_kit_vendored": "block-writer.ts, plugin-id.ts, endpoint-source.ts, endpoint-secret-hook.ts, override-guard.ts, note-edit.ts",
   "license": "AGPL-3.0-or-later"
 }

@@ -2,9 +2,11 @@ import { getLanguage, MarkdownRenderChild, MarkdownView, Notice, Plugin, type TF
 import { DEFAULT_SETTINGS, loadSettings, type SvgStudioSettings } from "./core/settings";
 import { getLang, initStrings, t } from "./i18n/strings";
 import type { SvgSession } from "./core/session";
-import { acceptBlockReason, acceptSvgSession, buildAcceptEnv, firstPromptLineOf } from "./obsidian/accept";
+import { buildAcceptEnv, svgAcceptWays } from "./obsidian/accept";
 import { installEmbedButtons } from "./obsidian/embed-button";
 import { BLOCK_LANG, fileTarget, registerFileMenu, targetFromContext } from "./obsidian/entry";
+import { runSvgPrompt } from "./obsidian/panel/run";
+import { freshSession } from "./obsidian/panel/slots";
 import { SvgStudioView } from "./obsidian/panel/view";
 import { readTargetText } from "./obsidian/read-target";
 import { renderSvgBlock, VIEW_TYPE_SVG_STUDIO } from "./obsidian/render-block";
@@ -15,19 +17,19 @@ import type { Target } from "./vendor/kit/panel-session";
 import { pickLang } from "./vendor/kit/i18n";
 import { checkSvg } from "./vendor/kit/svg-guard";
 import { onLevelFor, thinkingFor, withThinkingLevel, type ThinkingLevel } from "./vendor/kit/sampling-profiles";
-import { findEndpointManager, onEndpointManagerChanged } from "./vendor/kit-obsidian/endpoint-source";
+import { onEndpointManagerChanged } from "./vendor/kit-obsidian/endpoint-source";
 import { fetchEndpointContext } from "./vendor/kit-obsidian/backend-probe";
 import { effectiveContext } from "./vendor/kit/model-context";
-import { confirmAction } from "./vendor/kit-obsidian/confirm";
 import { createLlmConnection, type LlmConnection } from "./vendor/kit-obsidian/llm-connection";
+import { createPromptPanelHost, type PromptPanelHost } from "./vendor/kit-obsidian/prompt-panel-host";
 import { obsidianWritePorts } from "./vendor/kit-obsidian/write-ports";
 
 export default class SvgStudioPlugin extends Plugin {
   settings: SvgStudioSettings = DEFAULT_SETTINGS;
   /** Die LLM-Anbindung (Endpunkt-Quelle, Modelle, Anfragen, Einstellungs-Abschnitt). */
   llm!: LlmConnection;
-  /** Die Sitzung eines geschlossenen Panels, deren Runden der Nutzer behalten wollte. */
-  private stashed: SvgSession | null = null;
+  /** Der Halter des Fensters (Kit `prompt-panel-host`): Lauf, Sitzung und Auftragstext überstehen das Schließen der Ansicht. */
+  host!: PromptPanelHost<SvgSession>;
 
   /** Kontext je Endpunkt und Modell, nur kurz gemerkt: der Nutzer kann das Modell im Server jederzeit mit anderer Länge neu laden. */
   private contextMemo = new Map<string, { at: number; limit: number | null }>();
@@ -79,15 +81,30 @@ export default class SvgStudioPlugin extends Plugin {
         return this.saveSettings();
       },
     });
+    // Der Halter lebt, solange das Plugin lebt: ein Lauf geht weiter, auch wenn die Ansicht zu ist (Statusleiste und Meldung zeigen ihn dann an).
+    this.host = createPromptPanelHost<SvgSession>({
+      plugin: this,
+      name: t("panel.title"),
+      open: () => { void this.openPanel(); },
+      statusBar: () => this.settings.showStatusBar,
+      lang: getLang(),
+      fresh: freshSession,
+      run: (call) => runSvgPrompt(call, { llm: this.llm, readTargetText: (target) => readTargetText(this.app, target), contextLimit: () => this.modelContextLimit() }),
+      model: () => { const source = this.llm.source(); return source.sentModel || source.model; },
+    });
     // Der Manager kommt, geht oder wechselt den Endpunkt: frisch auflösen, die Modellzeile eines offenen Panels lädt ihre Liste neu.
     this.register(onEndpointManagerChanged(this.app, () => {
       this.llm.invalidate();
       void this.llm.resolve().catch(() => undefined).then(() => { for (const v of this.panels()) v.reloadModels(); });
     }));
 
+    const accept = buildAcceptEnv({ app: this.app, ports: obsidianWritePorts(this.app), lastEditor: () => this.lastEditor() });
     this.registerView(VIEW_TYPE_SVG_STUDIO, (leaf) => new SvgStudioView(leaf, {
       app: this.app,
+      host: this.host,
       llm: this.llm,
+      pluginId: this.manifest.id,
+      accept,
       thinking: {
         family: () => this.llm.source().family,
         backend: () => this.llm.source().backend,
@@ -107,9 +124,8 @@ export default class SvgStudioPlugin extends Plugin {
       renderGuard: this.renderGuard,
       contextLimit: () => this.modelContextLimit(),
       readTargetText: (target) => readTargetText(this.app, target),
-      // Übernehmen: Kit `panel-accept` und `block-writer`, davor ein Schnappschuss der Datei und `checkSvg` auf dem fertigen Text (Spec § 3 Punkt 4, § 7.6).
-      accept: (session) => acceptSvgSession(this.acceptEnv(), session, { guard: checkSvg, firstPromptLine: firstPromptLineOf(session), pluginId: this.manifest.id }),
-      acceptBlockedReason: (session) => acceptBlockReason(session, this.settings.acceptAs, this.lastEditor() !== null),
+      // Übernehmen: Kit `panel-accept` und `block-writer` über den Rahmen, davor ein Schnappschuss (den setzt der Rahmen) und `checkSvg` auf dem fertigen Text (Spec § 3 Punkt 4, § 7.6).
+      acceptWays: (session) => svgAcceptWays(session, { guard: checkSvg, acceptAs: this.settings.acceptAs, hasNote: () => this.lastEditor() !== null }),
       openSettings: () => {
         // Interne API: fehlt sie, sagt eine Notice, wo die Einstellungen stehen, statt zu werfen.
         const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
@@ -120,9 +136,6 @@ export default class SvgStudioPlugin extends Plugin {
         setting.open();
         setting.openTabById(this.manifest.id);
       },
-      confirm: (message, labels) => confirmAction(this.app, { message, confirmLabel: labels.confirm, cancelLabel: labels.cancel }),
-      managerPresent: () => findEndpointManager(this.app) !== null,
-      stash: { take: () => { const s = this.stashed; this.stashed = null; return s; }, put: (s) => { this.stashed = s; } },
     }));
     this.addSettingTab(new SvgStudioSettingTab(this.app, this));
     // Die zuletzt aktive Notiz bestimmt, ob ein Codeblock möglich ist: das Panel wertet die Sperre von Übernehmen neu aus, wenn das Blatt wechselt.
@@ -197,6 +210,8 @@ export default class SvgStudioPlugin extends Plugin {
   markStore!: MarkStore;
 
   override onunload(): void {
+    // Der Halter zuerst: ein Lauf wird abgebrochen, ein spätes Ergebnis erzeugt weder Sitzung noch Statusleiste noch Meldung.
+    this.host.destroy();
     // Laufende Tickets enden mit Lückenprüfung (ein Neuladen des Plugins lässt keine Marke und keinen Zähler zurück), dann die Verbindung schließen.
     this.renderGuard.dispose();
     this.markStore.close();
@@ -215,10 +230,6 @@ export default class SvgStudioPlugin extends Plugin {
     return found !== "" ? found : (this.app.workspace.getActiveFile()?.path ?? "");
   }
 
-  private acceptEnv() {
-    return buildAcceptEnv({ app: this.app, ports: obsidianWritePorts(this.app), settings: () => this.settings, lastEditor: () => this.lastEditor() });
-  }
-
   private panels(): SvgStudioView[] {
     return this.app.workspace.getLeavesOfType(VIEW_TYPE_SVG_STUDIO).flatMap((leaf) => (leaf.view instanceof SvgStudioView ? [leaf.view] : []));
   }
@@ -227,13 +238,14 @@ export default class SvgStudioPlugin extends Plugin {
     for (const v of this.panels()) v.refreshModelBar();
   }
 
-  /** Das Panel öffnen (vorhandenes Blatt oder neues in der rechten Seitenleiste) und auf das Ziel setzen. */
-  async openPanel(target: Target): Promise<void> {
+  /** Das Panel öffnen (vorhandenes Blatt oder neues in der rechten Seitenleiste); mit `target` zuerst das Ziel anbieten. Das Angebot geht direkt an den Halter, auch wenn die Ansicht zu ist:
+   *  ohne offene Runden gilt es sofort, sonst bleibt das alte Ziel festgehalten und das neue wartet auf „Verwerfen“. */
+  async openPanel(target?: Target): Promise<void> {
+    if (target !== undefined) this.host.offer(target);
     const { workspace } = this.app;
     const leaf = workspace.getLeavesOfType(VIEW_TYPE_SVG_STUDIO)[0] ?? workspace.getRightLeaf(false);
     if (leaf === null) return;
     await leaf.setViewState({ type: VIEW_TYPE_SVG_STUDIO, active: true });
     await workspace.revealLeaf(leaf);
-    if (leaf.view instanceof SvgStudioView) leaf.view.setTarget(target);
   }
 }

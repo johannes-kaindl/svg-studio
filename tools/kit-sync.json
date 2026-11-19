@@ -1,10 +1,10 @@
 {
   "sources": {
     "obsidian-kit": {
-      "ref": "0.95.0"
+      "ref": "0.99.2"
     },
     "code-kit": {
-      "ref": "0.75.0"
+      "ref": "0.78.0"
     }
   },
   "targets": [
@@ -43,7 +43,8 @@
         "rotation",
         "css-color",
         "error-message",
-        "word-diff"
+        "word-diff",
+        "panel-host"
       ]
     },
     {
@@ -152,7 +153,11 @@
         "plugin-api",
         "anthropic-transport",
         "chat-client",
-        "chat-transport"
+        "chat-transport",
+        "prompt-panel",
+        "prompt-panel-host",
+        "prompt-panel-strings",
+        "status-bar-item"
       ],
       "rewrite": [
         [

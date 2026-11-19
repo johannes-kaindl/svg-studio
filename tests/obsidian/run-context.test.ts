@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { initStrings } from "../../src/i18n/strings";
 import { runSvgPrompt, runSvgRepair } from "../../src/obsidian/panel/run";
-import type { RunIo } from "../../src/obsidian/panel/shell";
+import type { HostRunIo as RunIo } from "../../src/vendor/kit/panel-host";
 import { freshSession } from "../../src/obsidian/panel/slots";
 import { answer, fakeLlm } from "../helpers/fake-llm";
 

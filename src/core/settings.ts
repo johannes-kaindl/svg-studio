@@ -7,10 +7,13 @@ import { migrateEndpointList, type EndpointConfig } from "../vendor/kit/endpoint
 import { sanitizeChoice, type EndpointChoice } from "../vendor/kit/endpoint-source";
 import { DEFAULT_REQUEST_SETTINGS, sanitizeRequestSettings, type RequestSettings } from "../vendor/kit/sampling-profiles";
 
-export type AcceptAs = "file" | "block" | "ask";
+/** Welcher Weg beim neuen SVG der Hauptknopf ist; beide Wege bleiben als Knöpfe. Ein gespeichertes `"ask"` (bis 0.1.5 „Jedes Mal fragen“) gilt als `"file"`. */
+export type AcceptAs = "file" | "block";
 
 export interface SvgStudioSettings {
   acceptAs: AcceptAs;
+  /** Eintrag in der Statusleiste, solange ein Lauf ohne Fenster läuft oder sein Ergebnis wartet (Kit `prompt-panel-host`). */
+  showStatusBar: boolean;
   /** Notausschalter „SVG in Notizen automatisch anzeigen“: aus, zeigt ein Block erst nach Klick sein Bild (ein SVG, das Obsidian einfriert, lässt sich so lösen). */
   autoShow: boolean;
   background: BackgroundState;
@@ -20,6 +23,7 @@ export interface SvgStudioSettings {
 
 export const DEFAULT_SETTINGS: SvgStudioSettings = {
   acceptAs: "file",
+  showStatusBar: true,
   autoShow: true,
   background: { ...DEFAULT_BACKGROUND },
   llm: { endpoints: [], choice: {}, request: DEFAULT_REQUEST_SETTINGS },
@@ -34,8 +38,12 @@ export function loadSettings(raw: unknown): { settings: SvgStudioSettings; dropp
   const src = isRecord(raw) ? raw : {};
   for (const k of Object.keys(src)) if (!(k in DEFAULT_SETTINGS)) dropped.push(k);
 
-  const acceptAs: AcceptAs = src.acceptAs === "file" || src.acceptAs === "block" || src.acceptAs === "ask" ? src.acceptAs : DEFAULT_SETTINGS.acceptAs;
-  if ("acceptAs" in src && acceptAs !== src.acceptAs) dropped.push("acceptAs");
+  // „ask“ gab es bis 0.1.5; der Rahmen hat dafür zwei Knöpfe, der Wert gilt als der Standard und wird nicht als verworfen gemeldet.
+  const acceptAs: AcceptAs = src.acceptAs === "block" ? "block" : src.acceptAs === "file" || src.acceptAs === "ask" ? "file" : DEFAULT_SETTINGS.acceptAs;
+  if ("acceptAs" in src && src.acceptAs !== "ask" && acceptAs !== src.acceptAs) dropped.push("acceptAs");
+
+  const showStatusBar = typeof src.showStatusBar === "boolean" ? src.showStatusBar : DEFAULT_SETTINGS.showStatusBar;
+  if ("showStatusBar" in src && typeof src.showStatusBar !== "boolean") dropped.push("showStatusBar");
 
   const autoShow = typeof src.autoShow === "boolean" ? src.autoShow : DEFAULT_SETTINGS.autoShow;
   if ("autoShow" in src && typeof src.autoShow !== "boolean") dropped.push("autoShow");
@@ -53,5 +61,5 @@ export function loadSettings(raw: unknown): { settings: SvgStudioSettings; dropp
     choice: sanitizeChoice(l.choice),
     request: request.settings,
   };
-  return { settings: { acceptAs, autoShow, background, llm }, dropped };
+  return { settings: { acceptAs, showStatusBar, autoShow, background, llm }, dropped };
 }

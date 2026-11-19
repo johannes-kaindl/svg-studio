@@ -97,7 +97,10 @@ const PUNKTE = [
   "uebernehmen-lesemodus",
   "c4c-sperre-ohne-notiz",
   "c4d-schnappschuss",
-  "c4e-auswahl-dialog",
+  "k9-zwei-knoepfe",
+  "k9-schnappschuss-block",
+  "k9-lauf-ueberlebt-schliessen",
+  "k9-hinweis-knopf-aus-dem-editor",
   "c4f-editor-angaben-entfernen",
   "c4f-namen-vergeben",
   "c4f-reparieren",
@@ -259,18 +262,18 @@ const SNAP_JS = `
   const txt = (s) => { const e = root.querySelector(s); return e ? (e.textContent || "").trim() : null; };
   const stage = root.querySelector(".svg-studio-stage");
   const svg = stage && stage.shadowRoot ? stage.shadowRoot.querySelector("svg") : null;
-  const accept = root.querySelector(".svg-studio-accept");
-  const send = root.querySelector(".svg-studio-send");
-  const stop = root.querySelector(".svg-studio-stop");
-  const prev = root.querySelector(".svg-studio-preview");
-  const status = root.querySelector(".svg-studio-status");
+  const accept = root.querySelector(".okit-prompt-panel-accept");
+  const send = root.querySelector(".okit-prompt-panel-send");
+  const stop = root.querySelector(".okit-prompt-panel-stop");
+  const prev = root.querySelector(".okit-prompt-panel-preview");
+  const status = root.querySelector(".okit-prompt-panel-status");
   // Die Rundenliste des Kits entsteht erst ab zwei Runden; die Zahl der Runden nennt die Sitzung der Ansicht (Testnaht state()).
   const leaf = app.workspace.getLeavesOfType("svg-studio-panel")[0];
   const sit = leaf && leaf.view && leaf.view.state ? leaf.view.state() : null;
   const rs = sit ? sit.rounds.rounds : [];
   return {
-    target: txt(".svg-studio-target"),
-    status: txt(".svg-studio-status"),
+    target: txt(".okit-prompt-panel-target"),
+    status: txt(".okit-prompt-panel-status"),
     statusClass: status ? status.className : "",
     rounds: rs.length,
     labels: rs.map((r) => r.instruction),
@@ -279,12 +282,12 @@ const SNAP_JS = `
     acceptDisabled: accept ? accept.disabled : null,
     sendDisabled: send ? send.disabled : null,
     running: stop ? !stop.classList.contains("is-hidden") : false,
-    hint: txt(".svg-studio-accept-hint"),
-    measure: txt(".svg-studio-measure"),
-    caption: txt(".svg-studio-preview-caption"),
+    hint: txt(".okit-prompt-panel-accept-hint"),
+    measure: txt(".okit-prompt-panel-quality"),
+    caption: txt(".okit-prompt-panel-preview-caption"),
     previewHidden: prev ? prev.classList.contains("is-hidden") : true,
     svgIds: svg ? Array.from(svg.querySelectorAll("[id]")).map((e) => e.getAttribute("id")) : null,
-    cards: Array.from(root.querySelectorAll(".svg-studio-changes .okit-review-card")).map((c) => ({
+    cards: Array.from(root.querySelectorAll(".okit-prompt-panel-changes .okit-review-card")).map((c) => ({
       id: c.getAttribute("data-id") || "",
       text: ((c.querySelector(".okit-review-main") || {}).innerText || "").replace(/\\s+/g, " ").trim(),
       cls: c.className,
@@ -299,7 +302,7 @@ const SNAP_JS = `
       text: ((n.querySelector(".svg-studio-notice-text") || {}).textContent || "").trim(),
       button: ((n.querySelector("button") || {}).textContent || "").trim(),
     })),
-    changes: Array.from(root.querySelectorAll(".svg-studio-changes .okit-redline")).map((e) => e.textContent),
+    changes: Array.from(root.querySelectorAll(".okit-prompt-panel-changes .okit-redline")).map((e) => e.textContent),
     error: txt(".svg-studio-error"),
   };
 `;
@@ -324,11 +327,11 @@ async function oeffneNeuesPanel(): Promise<Snap> {
 }
 
 async function tippe(text: string): Promise<void> {
-  await cdp.evaluate(`const el = document.querySelector(".svg-studio-input"); el.focus(); el.value = ""; el.dispatchEvent(new Event("input", { bubbles: true })); return true;`);
+  await cdp.evaluate(`const el = document.querySelector(".okit-prompt-panel-input"); el.focus(); el.value = ""; el.dispatchEvent(new Event("input", { bubbles: true })); return true;`);
   await cdp.send("Input.insertText", { text });
-  const wert = await cdp.evaluate<string>(`return document.querySelector(".svg-studio-input").value;`);
+  const wert = await cdp.evaluate<string>(`return document.querySelector(".okit-prompt-panel-input").value;`);
   if (wert !== text) {
-    await cdp.evaluate(`const el = document.querySelector(".svg-studio-input"); el.value = ${q(text)}; el.dispatchEvent(new Event("input", { bubbles: true })); return true;`);
+    await cdp.evaluate(`const el = document.querySelector(".okit-prompt-panel-input"); el.value = ${q(text)}; el.dispatchEvent(new Event("input", { bubbles: true })); return true;`);
   }
 }
 
@@ -341,7 +344,7 @@ async function klick(ausdruck: string): Promise<boolean> {
 }
 
 const klickSenden = async (): Promise<void> => {
-  if (!(await klick(`document.querySelector(".svg-studio-send")`))) throw new Vorbedingung("Senden-Knopf nicht klickbar");
+  if (!(await klick(`document.querySelector(".okit-prompt-panel-send")`))) throw new Vorbedingung("Senden-Knopf nicht klickbar");
 };
 
 /** Prompt tippen, senden und auf die neue Runde (oder einen Fehler) warten. */
@@ -353,18 +356,27 @@ async function frage(text: string, ms = 30000): Promise<Snap> {
   if (s === null) {
     const d = await snap();
     const z = stub.zaehler();
-    const e = await cdp.evaluate<string>(`const i = document.querySelector(".svg-studio-input"); return JSON.stringify({ wert: i ? i.value : null, fokus: document.activeElement ? document.activeElement.className : null });`);
+    const e = await cdp.evaluate<string>(`const i = document.querySelector(".okit-prompt-panel-input"); return JSON.stringify({ wert: i ? i.value : null, fokus: document.activeElement ? document.activeElement.className : null });`);
     throw new Vorbedingung(`Keine neue Runde nach „${text}“ (Status: ${q(d?.status)}, Klasse ${q(d?.statusClass)}, Senden gesperrt ${d?.sendDisabled}, läuft ${d?.running}; Stub: ${q(z)} ${q(stub.alleAnfragen().map((a) => `${a.methode} ${a.pfad}`))}; Eingabe ${e}; Konsole ${q(konsole.slice(-6))})`);
   }
-  if (s.rounds <= vorher) throw new Vorbedingung(`Der Lauf endete mit Fehler: ${s.status ?? "?"}`);
+  if (s.rounds <= vorher) {
+    const letzte = chatAnfragen().at(-1);
+    const msgs = ((letzte?.json as { messages?: { role: string; content: string }[] } | null)?.messages ?? []);
+    throw new Vorbedingung(`Der Lauf endete mit Fehler: ${s.status ?? "?"} · Runden vorher ${vorher}, danach ${s.rounds} · Chat-Anfragen ${chatAnfragen().length}, letzte mit ${msgs.length} Nachrichten, zuletzt ${q((msgs.at(-1)?.content ?? "").slice(0, 160))}`);
+  }
   return s;
 }
 
 /** Übernehmen klicken; wartet, bis die Runden weg sind (Erfolg) oder der Status Fehler meldet. */
 async function uebernimm(ms = 20000): Promise<{ ok: boolean; snap: Snap }> {
-  if (!(await klick(`document.querySelector(".svg-studio-accept")`))) throw new Vorbedingung("Übernehmen-Knopf nicht klickbar");
+  await cdp.evaluate(`window.__acc = []; if (!window.__accL) { window.__accL = true; document.addEventListener("click", (e) => { window.__acc.push((e.target && e.target.className ? String(e.target.className) : String(e.target && e.target.tagName)).slice(0, 80)); }, true); } return true;`);
+  if (!(await klick(`document.querySelector(".okit-prompt-panel-accept")`))) throw new Vorbedingung("Übernehmen-Knopf nicht klickbar");
   const s = await warteSnap((x) => x.rounds === 0 || (x.statusClass.includes("is-error") && !x.running && x.acceptDisabled === false), ms);
-  if (s === null) throw new Vorbedingung(`Übernehmen endete nicht (Status: ${(await snap())?.status ?? "kein Panel"})`);
+  if (s === null) {
+    const d = await snap();
+    const knoepfe = await cdp.evaluate<string>(`return JSON.stringify(Array.from(document.querySelectorAll(".okit-prompt-panel-accept")).map((b) => ({ t: (b.textContent || "").trim(), d: b.disabled })));`);
+    throw new Vorbedingung(`Übernehmen endete nicht (Status: ${d?.status ?? "kein Panel"}; Klasse ${q(d?.statusClass)}, Runden ${d?.rounds}, läuft ${d?.running}, Knöpfe ${knoepfe}, Hinweis ${q(d?.hint)}, Ziel ${q(d?.target)}, Klicks ${await cdp.evaluate<string>("return JSON.stringify(window.__acc || []);")}, Treffer in der Knopfmitte ${await cdp.evaluate<string>(`const b = document.querySelector(".okit-prompt-panel-accept"); if (!b) return "kein Knopf"; const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return JSON.stringify({ rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)], treffer: e ? String(e.className || e.tagName).slice(0, 80) : null, fenster: [innerWidth, innerHeight] });`)})`);
+  }
   return { ok: s.rounds === 0, snap: s };
 }
 
@@ -420,7 +432,7 @@ async function oeffneProbeImPanel(): Promise<void> {
 }
 
 const kartenKnopf = (re: RegExp, knopf: string): string =>
-  `(() => { const c = Array.from(document.querySelectorAll(".svg-studio-changes .okit-review-card")).find((x) => new RegExp(${q(re.source)}, ${q(re.flags)}).test((x.querySelector(".okit-review-main") || {}).innerText || "")); return c ? c.querySelector(${q(knopf)}) : null; })()`;
+  `(() => { const c = Array.from(document.querySelectorAll(".okit-prompt-panel-changes .okit-review-card")).find((x) => new RegExp(${q(re.source)}, ${q(re.flags)}).test((x.querySelector(".okit-review-main") || {}).innerText || "")); return c ? c.querySelector(${q(knopf)}) : null; })()`;
 
 // ── Notizen und Dateien ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -494,6 +506,8 @@ async function raeume(): Promise<void> {
     await dialogKlick(/discard|verwerfen/i);
     await sleep(300);
   }
+  // Die Sitzung gehört dem Halter und überlebt das Schließen der Ansicht: für einen sauberen Ausgang verwerfen (ohne Rückfrage, der Lauf endet vorher).
+  await cdp.evaluate(`const h = app.plugins.plugins[${q(PLUGIN_ID)}].host; if (h.running()) h.abort(); h.startNew(); return true;`);
   await schliesseNotizen();
   await setzeAcceptAs("file");
   await cdp.evaluate(`
@@ -1175,7 +1189,7 @@ async function punktSchattenwurzel(): Promise<void> {
     await oeffneNeuesPanel();
     const FARBEN = `
       const farbe = (s) => { const e = document.querySelector(s); return e ? getComputedStyle(e).color : null; };
-      return { knopf: farbe(".svg-studio-send"), ziel: farbe(".svg-studio-target"), flaeche: farbe(".workspace-split.mod-root"), notiz: farbe(".markdown-preview-view"), body: farbe("body") };
+      return { knopf: farbe(".okit-prompt-panel-send"), ziel: farbe(".okit-prompt-panel-target"), flaeche: farbe(".workspace-split.mod-root"), notiz: farbe(".markdown-preview-view"), body: farbe("body") };
     `;
     type Farben = { knopf: string | null; ziel: string | null; flaeche: string | null; notiz: string | null; body: string | null };
     const vorher = await cdp.evaluate<Farben>(FARBEN);
@@ -1198,9 +1212,9 @@ async function punktSchattenwurzel(): Promise<void> {
 }
 
 const ERREICHBAR = {
-  selektoren: [".svg-studio-input", ".svg-studio-send", ".svg-studio-accept", ".svg-studio-discard", ".svg-studio-new", ".svg-studio-bg-toggle", ".okit-model-bar-select"],
-  erforderlich: [".svg-studio-send", ".svg-studio-accept", ".svg-studio-discard", ".svg-studio-input"],
-  fuelle: { in: ".svg-studio-stream .okit-stream-body", zeilen: 150 },
+  selektoren: [".okit-prompt-panel-input", ".okit-prompt-panel-send", ".okit-prompt-panel-accept", ".okit-prompt-panel-discard", ".okit-prompt-panel-new", ".svg-studio-bg-toggle", ".okit-model-bar-select"],
+  erforderlich: [".okit-prompt-panel-send", ".okit-prompt-panel-accept", ".okit-prompt-panel-discard", ".okit-prompt-panel-input"],
+  fuelle: { in: ".okit-prompt-panel-stream .okit-stream-body", zeilen: 150 },
   ueberlauf: ".svg-studio-panel",
 };
 const KURZ = { element: ".workspace-leaf", enthaelt: ".svg-studio-panel", hoehe: 420 };
@@ -1220,12 +1234,12 @@ async function punktFokusUndErreichbarkeit(): Promise<void> {
   }
   await lauf("fokus-erhalt", async () => {
     if (!laeuft) throw new Vorbedingung("Der Lauf startete nicht (Fokus WÄHREND des Stroms nicht messbar)");
-    const u = await messeFokusErhalt(cdp, { selector: ".svg-studio-input" });
+    const u = await messeFokusErhalt(cdp, { selector: ".okit-prompt-panel-input" });
     urteil("fokus-erhalt", { ...u, detail: `${u.detail} (getippt während des Stroms)` });
   });
   await warteSnap((s) => s.rounds === 1 && !s.running, 30000);
   await lauf("fokus-erhalt-gegenprobe", async () => {
-    urteil("fokus-erhalt-gegenprobe", await gegenprobeFokus(cdp, { selector: ".svg-studio-input" }));
+    urteil("fokus-erhalt-gegenprobe", await gegenprobeFokus(cdp, { selector: ".okit-prompt-panel-input" }));
   });
   await lauf("erreichbarkeit", async () => {
     const s = await snap();
@@ -1468,7 +1482,7 @@ async function punktQuellmodusCrlf(): Promise<void> {
     getippt = (await cdp.evaluate<string>(`
       const l = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === ${q(pfad)} && x.view.getMode() === "source");
       const ed = l.view.editor; const v = ed.getValue(); const i = v.indexOf("</svg>");
-      const knopf = document.querySelector(".svg-studio-accept");
+      const knopf = document.querySelector(".okit-prompt-panel-accept");
       if (i < 0 || !knopf) return "";
       ed.replaceRange("<!-- getippt -->", ed.offsetToPos(i));
       const text = ed.getValue();
@@ -1505,7 +1519,7 @@ async function punktLesemodus(): Promise<void> {
     const nachB = (await notizText("_smoke-lesen.md")) ?? "";
     const blockOk = b.ok && nachB.trimEnd().endsWith("```") && nachB.includes("```svg-studio") && /end of the note/.test(b.snap.status ?? "");
     await setzeAcceptAs("file");
-    if (!(await klick(`document.querySelector(".svg-studio-new")`))) throw new Vorbedingung("„New“ nicht klickbar");
+    if (!(await klick(`document.querySelector(".okit-prompt-panel-new")`))) throw new Vorbedingung("„New“ nicht klickbar");
     await warteSnap((s) => s.rounds === 0);
     await frage("Grundriss zweiter Versuch");
     const vor = await anhaenge();
@@ -1536,32 +1550,147 @@ async function punktSperre(): Promise<void> {
   });
 }
 
-async function punktAuswahl(): Promise<void> {
-  await lauf("c4e-auswahl-dialog", async () => {
+/** K9 (Auftrags-Fenster-Rahmen): ein neues SVG hat zwei Knöpfe statt des Dialogs; der gespeicherte Wert „ask“ gilt als „file“ und fragt nicht mehr. */
+async function punktZweiKnoepfe(): Promise<void> {
+  const knoepfe = (): Promise<{ text: string; disabled: boolean; cta: boolean; beschrieben: boolean }[]> =>
+    cdp.evaluate(`return Array.from(document.querySelectorAll(".okit-prompt-panel-accept")).map((b) => ({ text: (b.textContent || "").trim(), disabled: b.disabled, cta: b.classList.contains("mod-cta"), beschrieben: b.hasAttribute("aria-describedby") }));`);
+  await lauf("k9-zwei-knoepfe", async () => {
     await raeume();
-    await setzeAcceptAs("ask");
+    await setzeAcceptAs("ask"); // Altwert aus 0.1.5 und früher
     await oeffneNeuesPanel();
     stub.antworten([ANTWORT_ERZEUGEN]);
     await frage(PROMPT_ERZEUGEN);
-    if (!(await klick(`document.querySelector(".svg-studio-accept")`))) throw new Vorbedingung("Übernehmen nicht klickbar");
-    const ohne = await warteDialog(5000);
-    if (ohne !== null) {
-      await dialogKlick(/cancel|abbrechen/i);
-      await sleep(400);
-    }
-    const abg = await snap();
-    await oeffneNotiz("_smoke-wahl.md", "Eine Notiz.\n", "source");
-    await setzeCursor("_smoke-wahl.md", 0);
-    await klick(`document.querySelector(".svg-studio-accept")`);
-    const mit = await warteDialog(5000);
-    if (mit !== null) {
-      await dialogKlick(/cancel|abbrechen/i);
-      await sleep(400);
-    }
-    const ok = ohne !== null && mit !== null
-      && ohne.buttons.length === 2 && ohne.buttons.some((b) => /attachment folder/i.test(b)) && !ohne.buttons.some((b) => /code block/i.test(b)) && ohne.paras.some((p) => /No note is open/.test(p))
-      && mit.buttons.some((b) => /attachment folder/i.test(b)) && mit.buttons.some((b) => /code block/i.test(b));
-    record("c4e-auswahl-dialog", ok && /Cancelled/.test(abg?.status ?? ""), `ohne Notiz: Knöpfe ${q(ohne?.buttons)}, Text ${q(ohne?.paras)} · mit Notiz: Knöpfe ${q(mit?.buttons)} · Status nach Abbrechen ${q(abg?.status)}`);
+    const ohne = await knoepfe();
+    // Der Grund steht beim gesperrten zweiten Knopf: den ganzen Hinweisbereich lesen, nicht nur den ersten Hinweis.
+    const hint = await cdp.evaluate<string>(`return (document.querySelector(".okit-prompt-panel-accept-hints") || {}).textContent || "";`);
+    await oeffneNotiz("_smoke-knoepfe.md", "Eine Notiz.\n", "source");
+    await setzeCursor("_smoke-knoepfe.md", 0);
+    const mit = await warteSnap((s) => s.acceptDisabled === false && (s.hint ?? "") === "", 5000);
+    const beide = await knoepfe();
+    const zweiOhne = ohne.length === 2 && /file/i.test(ohne[0]!.text) && ohne[0]!.cta && !ohne[0]!.disabled && /block/i.test(ohne[1]!.text) && ohne[1]!.disabled && ohne[1]!.beschrieben && /needs an open note/.test(hint);
+    const zweiMit = beide.length === 2 && beide.every((k) => !k.disabled);
+    // „Als Block“ schreibt ohne jeden Dialog.
+    const klickBlock = await klick(`Array.from(document.querySelectorAll(".okit-prompt-panel-accept")).find((b) => /block/i.test(b.textContent || ""))`);
+    const nach = await warteSnap((x) => x.rounds === 0, 15000);
+    const dialog = await warteDialog(400);
+    const notiz = (await notizText("_smoke-knoepfe.md")) ?? "";
+    const blockGeschrieben = klickBlock && nach !== null && notiz.includes("```svg-studio") && dialog === null;
+    // Einstellung „block“: der Hauptknopf wechselt.
+    await setzeAcceptAs("block");
+    await oeffneNeuesPanel();
+    stub.antworten([ANTWORT_ERZEUGEN]);
+    await frage("Grundriss für den Hauptknopf");
+    const haupt = await knoepfe();
+    const hauptBlock = haupt.length === 2 && /block/i.test(haupt[0]!.text) && haupt[0]!.cta && /file/i.test(haupt[1]!.text);
+    await setzeAcceptAs("file");
+    record("k9-zwei-knoepfe", zweiOhne && zweiMit && blockGeschrieben && hauptBlock && mit !== null,
+      `ohne Notiz: ${q(ohne)} · Grund ${q(hint)} · mit Notiz: ${q(beide)} · „Als Block“ ohne Dialog geschrieben: ${blockGeschrieben} (Dialog ${q(dialog?.title)}) · Einstellung block, Hauptknopf: ${q(haupt.map((k) => k.text))}`);
+  });
+}
+
+/** K9: Block in einer Notiz ersetzen legt VOR dem Schreiben einen Schnappschuss der ganzen Notiz an (früher nur beim Dateiweg). */
+async function punktSchnappschussBlock(): Promise<void> {
+  await lauf("k9-schnappschuss-block", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    await loescheSchnappschuesse();
+    const pfad = "_smoke-blocksnap.md";
+    const svg = fixtur("unbenannt.svg").trimEnd();
+    const alt = `Kopf\n\n\`\`\`svg-studio\n${svg}\n\`\`\`\n\nEnde\n`;
+    await oeffneNotiz(pfad, alt, "preview", "tab");
+    const knopf = `Array.from(document.querySelectorAll(".markdown-preview-view .svg-studio-block > .svg-studio-edit")).find((b) => b.getBoundingClientRect().width > 0)`;
+    await pollUntil(cdp, `return (${knopf}) ? true : null;`, 8000, 250);
+    if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Blockknopf nicht klickbar");
+    if ((await warteSnap((x) => (x.target ?? "").includes("_smoke-blocksnap"), 8000)) === null) throw new Vorbedingung("Das Panel öffnete nicht auf dem Block");
+    if ((await warteSnap((x) => x.notices.some((n) => /no name/i.test(n.text)), 8000)) === null) throw new Vorbedingung("Keine Karte „ohne Namen“ am Block");
+    if (!(await klickText(".svg-studio-notice", /Assign names/))) throw new Vorbedingung("Knopf „Assign names“ nicht klickbar");
+    if ((await warteSnap((x) => x.rounds === 1, 8000)) === null) throw new Vorbedingung("Keine Runde");
+    const r = await uebernimm();
+    const neu = (await liesDatei(pfad)) ?? "";
+    const wurzel = await schnappschussWurzel();
+    const liste = await cdp.evaluate<string[]>(`
+      const d = ${q(`${wurzel}/by-file/${pfad}`)};
+      if (!(await app.vault.adapter.exists(d))) return [];
+      return (await app.vault.adapter.list(d)).files.map((f) => f.split("/").pop());
+    `);
+    const kopie = liste.length === 0 ? null : await cdp.evaluate<string | null>(`const p = ${q(`${wurzel}/by-file/${pfad}/`)} + ${q([...liste].sort().at(-1) ?? "")}; return (await app.vault.adapter.exists(p)) ? await app.vault.adapter.read(p) : null;`);
+    const geschrieben = r.ok && (neu.match(/ id="[^"]*"/g) ?? []).length === 3;
+    record("k9-schnappschuss-block", geschrieben && liste.length === 1 && kopie === alt,
+      `Übernehmen ${r.ok ? "ok" : `Fehler ${q(r.snap.status)}`} · Block geschrieben (3 ids): ${geschrieben} · Schnappschüsse ${q(liste)} · trägt die ganze alte Notiz: ${kopie === alt}`);
+    await loescheSchnappschuesse();
+  });
+}
+
+/** K9, Gegenprobe zu Befund 3 für `slots.notices`: der Editor ist das aktive Blatt, der Klick auf den Hinweis-Knopf („Namen vergeben“) im Panel aktiviert das Panel-Blatt. Zeichnet der Rahmen die Hinweise dabei neu, geht der Klick verloren. */
+async function punktHinweisKnopfAusDemEditor(): Promise<void> {
+  await lauf("k9-hinweis-knopf-aus-dem-editor", async () => {
+    await raeume();
+    await stelleFixturenHer();
+    const pfad = "_smoke-hinweis.md";
+    const svg = fixtur("unbenannt.svg").trimEnd();
+    await oeffneNotiz(pfad, `Kopf\n\n\`\`\`svg-studio\n${svg}\n\`\`\`\n\nEnde\n`, "preview", "tab");
+    const knopf = `Array.from(document.querySelectorAll(".markdown-preview-view .svg-studio-block > .svg-studio-edit")).find((b) => b.getBoundingClientRect().width > 0)`;
+    await pollUntil(cdp, `return (${knopf}) ? true : null;`, 8000, 250);
+    if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Blockknopf nicht klickbar");
+    if ((await warteSnap((x) => x.notices.some((n) => /no name/i.test(n.text)), 8000)) === null) throw new Vorbedingung("Keine Karte „ohne Namen“ am Block");
+    // Den Editor (die Notiz) zum aktiven Blatt machen, dann erst auf den Hinweis-Knopf im Panel klicken.
+    await cdp.evaluate(`const l = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === ${q(pfad)}); app.workspace.setActiveLeaf(l, { focus: true }); return true;`);
+    await sleep(400);
+    const aktivVorher = await cdp.evaluate<string>(`return app.workspace.activeLeaf ? app.workspace.activeLeaf.view.getViewType() : "";`);
+    await cdp.evaluate(`window.__acc = []; if (!window.__accL) { window.__accL = true; document.addEventListener("click", (e) => { window.__acc.push((e.target && e.target.className ? String(e.target.className) : String(e.target && e.target.tagName)).slice(0, 80)); }, true); } return true;`);
+    // Die Falle: Obsidian aktiviert das Blatt beim `mousedown`, das Plugin (active-leaf-change) und der Halter bieten dasselbe Ziel erneut an. Bei einem Rahmen, der die Hinweise dabei
+    // neu zeichnet, ersetzt das den Knopf zwischen `mousedown` und `mouseup`, und der Klick geht verloren. Der Hörer stellt genau diese Lage her (einmalig, im Fang, vor dem Knopf).
+    const vorOffer = await cdp.evaluate<number>(`
+      const pl = app.plugins.plugins[${q(PLUGIN_ID)}];
+      window.__offers = 0;
+      const ziel = pl.host.session().target;
+      pl.host.offer(ziel); window.__offers++;   // zwischen Aktivierung und Klick: dasselbe Ziel noch einmal
+      const h = (e) => {
+        if (!e.target || !e.target.closest || !e.target.closest(".svg-studio-notice")) return;
+        document.removeEventListener("mousedown", h, true);
+        const leaf = app.workspace.getLeavesOfType("markdown").find((x) => x.view.file && x.view.file.path === ${q(pfad)});
+        pl.host.offer(pl.host.session().target); window.__offers++;
+        app.workspace.trigger("active-leaf-change", leaf);
+        window.__offers++;
+      };
+      document.addEventListener("mousedown", h, true);
+      return window.__offers;`);
+    // Erst den (neu gezeichneten) Knopf abwarten, dann merken: nach dem Klick zeigt `isConnected`, ob der Rahmen ihn zwischen mousedown und mouseup ersetzt hat.
+    const vorKnopf = (await pollUntil(cdp, `const b = document.querySelector(".svg-studio-notice button"); if (!b) return null; window.__knopf = b; return "da";`, 5000, 100)) ?? "fehlt";
+    const geklickt = await klickText(".svg-studio-notice", /Assign names/);
+    const runde = await warteSnap((x) => x.rounds === 1, 8000);
+    const klicks = await cdp.evaluate<string>(`return JSON.stringify(window.__acc || []);`);
+    const offers = await cdp.evaluate<number>(`return window.__offers || 0;`);
+    const knopfBlieb = await cdp.evaluate<boolean>(`return window.__knopf ? window.__knopf.isConnected : false;`);
+    record("k9-hinweis-knopf-aus-dem-editor", geklickt && runde !== null && aktivVorher === "markdown" && vorOffer === 1 && offers === 3,
+      `aktives Blatt vor dem Klick: ${q(aktivVorher)} · Angebote ausgelöst (vor ${vorOffer}, gesamt ${offers}, Soll 3) · Knopf vor dem Klick ${vorKnopf}, nach dem Klick noch im Dokument: ${knopfBlieb} · Klick abgesetzt: ${geklickt} · Runde entstand: ${runde !== null} (${q(runde?.labels)}) · Klick-Ereignisse im Dokument: ${klicks}`);
+  });
+}
+
+/** K9: der Lauf gehört dem Halter. Ansicht schließen im Lauf bricht nichts ab; der Eintrag der Statusleiste steht; das Wiederöffnen zeigt das Ergebnis. */
+async function punktLaufUeberlebtSchliessen(): Promise<void> {
+  await lauf("k9-lauf-ueberlebt-schliessen", async () => {
+    await raeume();
+    await setzeAcceptAs("file");
+    await oeffneNeuesPanel();
+    stub.antworten([{ text: ANTWORT_ERZEUGEN, takt: 150, teile: 30 }]);
+    const geschlossen0 = stub.zaehler().clientGeschlossen;
+    await tippe(PROMPT_ERZEUGEN);
+    await klickSenden();
+    if ((await warteSnap((s) => s.running, 5000)) === null) throw new Vorbedingung("Der Lauf startete nicht");
+    const leisten = (): Promise<string[]> => cdp.evaluate(`return Array.from(document.querySelectorAll(".status-bar .status-bar-item")).map((e) => (e.textContent || "").trim()).filter((t) => /SVG Studio/.test(t));`);
+    await cdp.evaluate(`app.workspace.detachLeavesOfType("svg-studio-panel"); return true;`);
+    await sleep(500);
+    const imLauf = await cdp.evaluate<boolean>(`return app.plugins.plugins[${q(PLUGIN_ID)}].host.running();`);
+    const leisteLauf = await leisten();
+    const fertig = await pollUntil(cdp, `return app.plugins.plugins[${q(PLUGIN_ID)}].host.running() ? null : true;`, 25000, 250);
+    const leisteFertig = await leisten();
+    const abgebrochen = stub.zaehler().clientGeschlossen - geschlossen0;
+    await cdp.evaluate(`await app.plugins.plugins[${q(PLUGIN_ID)}].openPanel(); return true;`);
+    const da = await warteSnap((s) => s.rounds === 1, 8000);
+    const leisteWeg = await leisten();
+    record("k9-lauf-ueberlebt-schliessen", imLauf && /running/i.test(leisteLauf.join("|")) && fertig !== null && abgebrochen === 0 && da !== null && /result waiting/i.test(leisteFertig.join("|")) && leisteWeg.length === 0,
+      `nach dem Schließen läuft der Lauf: ${imLauf} · Statusleiste im Lauf ${q(leisteLauf)} · Lauf endete ohne Ansicht: ${fertig !== null} · vom Client abgebrochen: ${abgebrochen} · Statusleiste danach ${q(leisteFertig)} · Wiederöffnen zeigt die Runde: ${da !== null} · Eintrag danach weg: ${leisteWeg.length === 0}`);
   });
 }
 
@@ -1692,7 +1821,7 @@ async function punktRandfaelle(): Promise<void> {
     await cdp.evaluate(VERZOEGERE(2500));
     let dialogGekommen = false;
     try {
-      await klick(`document.querySelector(".svg-studio-accept")`);
+      await klick(`document.querySelector(".okit-prompt-panel-accept")`);
       await sleep(500);
       await cdp.evaluate(`for (const l of app.workspace.getLeavesOfType(${q(VIEW_TYPE)})) l.detach(); return true;`);
       // Zulässig sind zwei Ausgänge: der Dialog kommt (alte Runden noch da) und „Behalten“ wird gewählt, oder Schließen wartet das Schreiben ab und fragt nicht mehr
@@ -1736,7 +1865,7 @@ async function punktRandfaelle(): Promise<void> {
     await cdp.evaluate(VERZOEGERE(3000));
     let nach: Snap | null = null;
     try {
-      await klick(`document.querySelector(".svg-studio-accept")`);
+      await klick(`document.querySelector(".okit-prompt-panel-accept")`);
       await sleep(500);
       if (!(await klick(`(${knopf})`))) throw new Vorbedingung("Einbettungsknopf nicht klickbar");
       await sleep(500);
@@ -1808,7 +1937,7 @@ async function punktPruefliste(): Promise<void> {
   await lauf("pruefliste-annehmen", async () => {
     const s = await dreiKarten();
     await nimmBilder("pruefliste").catch((e) => console.log(`    ! Bilder: ${fehlerText(e)}`));
-    if (!(await klick(`document.querySelector(".svg-studio-changes .okit-review-accept-all")`))) throw new Vorbedingung("„Accept all“ nicht klickbar");
+    if (!(await klick(`document.querySelector(".okit-prompt-panel-changes .okit-review-accept-all")`))) throw new Vorbedingung("„Accept all“ nicht klickbar");
     const alle = await warteSnap((x) => x.cards.length === 3 && x.cards.every((c) => c.cls.includes("is-accepted")), 5000);
     const tuer = await vorschauAttr("tuer", "x");
     const r = await uebernimm();
@@ -2047,7 +2176,7 @@ async function punktMobil(): Promise<void> {
         // Wie weit lässt sich das Panel scrollen, und wo endet „Übernehmen“ dann? Der scrollende Vorfahr ist je nach Obsidian-Version das Panel oder sein Blatt.
         let s = p; while (s && s.scrollHeight <= s.clientHeight + 1 && s.parentElement) s = s.parentElement;
         if (s) s.scrollTop = s.scrollHeight;
-        const k = document.querySelector(".svg-studio-accept");
+        const k = document.querySelector(".okit-prompt-panel-accept");
         const r = k ? k.getBoundingClientRect() : null;
         const out = { ohne, mit, tastatur, knopf: k !== null, unterKante: r ? Math.round(r.bottom) : null, kante: window.innerHeight - tastatur };
         document.body.style.removeProperty("--keyboard-height");
@@ -2074,13 +2203,13 @@ async function punktMobil(): Promise<void> {
       (globalThis as { __review?: unknown }).__review = await cdp.evaluate(`
         const sel = { annehmen: ".okit-review-accept", ablehnen: ".okit-review-reject", kommentar: ".okit-review-comment", alleAnnehmen: ".okit-review-accept-all", alleAblehnen: ".okit-review-reject-all" };
         const out = {};
-        for (const [k, v] of Object.entries(sel)) { const e = document.querySelector(".svg-studio-changes " + v); const r = e ? e.getBoundingClientRect() : null; out[k] = r ? { w: Math.round(r.width), h: Math.round(r.height) } : null; }
+        for (const [k, v] of Object.entries(sel)) { const e = document.querySelector(".okit-prompt-panel-changes " + v); const r = e ? e.getBoundingClientRect() : null; out[k] = r ? { w: Math.round(r.width), h: Math.round(r.height) } : null; }
         return out;
       `);
       const m = await cdp.evaluate<{ mobil: boolean; breite: number; hoehe: number; docUeber: boolean; panelUeber: boolean; ausserhalb: string[]; stage: { w: number; h: number } | null; messzeile: string }>(`
         const p = document.querySelector(".svg-studio-panel");
         const aus = [];
-        for (const sel of [".svg-studio-send", ".svg-studio-accept", ".svg-studio-discard", ".svg-studio-new", ".svg-studio-input"]) {
+        for (const sel of [".okit-prompt-panel-send", ".okit-prompt-panel-accept", ".okit-prompt-panel-discard", ".okit-prompt-panel-new", ".okit-prompt-panel-input"]) {
           const e = document.querySelector(sel);
           if (!e) { aus.push(sel + " fehlt"); continue; }
           const r = e.getBoundingClientRect();
@@ -2090,7 +2219,7 @@ async function punktMobil(): Promise<void> {
         const sr = st ? st.getBoundingClientRect() : null;
         return { mobil: document.body.classList.contains("is-mobile"), breite: window.innerWidth, hoehe: window.innerHeight,
           docUeber: document.documentElement.scrollWidth > window.innerWidth + 1, panelUeber: p ? p.scrollWidth > p.clientWidth + 1 : true,
-          ausserhalb: aus, stage: sr ? { w: Math.round(sr.width), h: Math.round(sr.height) } : null, messzeile: (document.querySelector(".svg-studio-measure") || {}).textContent || "" };
+          ausserhalb: aus, stage: sr ? { w: Math.round(sr.width), h: Math.round(sr.height) } : null, messzeile: (document.querySelector(".okit-prompt-panel-quality") || {}).textContent || "" };
       `);
       record("mobil-emulation", m.mobil && m.breite === BREITE && !m.docUeber && !m.panelUeber && m.ausserhalb.length === 0 && m.stage !== null && m.stage.w > 0 && m.stage.h > 0 && m.messzeile !== "" && s.rounds === 1,
         `Emulation ${m.breite} × ${m.hoehe} (is-mobile ${m.mobil}) · Seitenüberlauf Dokument ${m.docUeber}, Panel ${m.panelUeber} · Knöpfe außerhalb: ${q(m.ausserhalb)} · Vorschau ${q(m.stage)} · Maßzeile ${q(m.messzeile)}`);
@@ -2184,7 +2313,10 @@ async function main(): Promise<void> {
     await punktQuellmodusCrlf();
     await punktLesemodus();
     await punktSperre();
-    await punktAuswahl();
+    await punktZweiKnoepfe();
+    await punktSchnappschussBlock();
+    await punktLaufUeberlebtSchliessen();
+    await punktHinweisKnopfAusDemEditor();
     await punktBestand();
     await punktNichtzeichen();
     await punktSchliessen();

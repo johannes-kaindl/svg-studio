@@ -31,8 +31,9 @@ describe("eigene Regeln", () => {
     expect(own).toMatch(/\.is-mobile \.svg-studio-block > \.svg-studio-edit[\s\S]*?opacity:\s*1/);
   });
   it("das Panel gibt am Handy unten Platz in Höhe der offenen Tastatur (Zahlentastatur ohne Fertig-Taste, Messung iPhone 2026-11-05)", () => {
-    const rule = own.replace(/\/\*[\s\S]*?\*\//g, "").match(/([^{}]*\.svg-studio-panel[^{}]*)\{([^}]*padding-bottom[^}]*)\}/g)?.find((r) => /\.is-mobile/.test(r));
-    expect(rule, "Regel .is-mobile … .svg-studio-panel mit padding-bottom").toBeDefined();
+    // Seit dem Umzug auf den Kit-Rahmen (K9, Welle 36) trägt die Regel `PROMPT_PANEL_CSS` (Kit-Block, wortgleich geprüft), nicht mehr ein eigener Block.
+    const rule = css.replace(/\/\*[\s\S]*?\*\//g, "").match(/([^{}]*\.okit-prompt-panel-host[^{}]*)\{([^}]*padding-bottom[^}]*)\}/g)?.find((r) => /\.is-mobile/.test(r));
+    expect(rule, "Regel .is-mobile … .okit-prompt-panel-host mit padding-bottom").toBeDefined();
     expect(rule).toMatch(/padding-bottom:\s*max\(var\(--size-4-8\),\s*var\(--keyboard-height,\s*0px\)\)/);
     // Obsidians eigene Regel (.workspace-leaf-content .view-content) trägt zwei Klassen, die Panel-Regel braucht mehr, sonst entscheidet die Reihenfolge der Stylesheets.
     const selector = rule!.slice(0, rule!.indexOf("{")).trim();

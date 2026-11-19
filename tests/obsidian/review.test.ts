@@ -1,14 +1,16 @@
 // @vitest-environment happy-dom
+import type { ChangesCtx } from "../../src/vendor/kit-obsidian/prompt-panel";
+import type { HostRunIo as RunIo } from "../../src/vendor/kit/panel-host";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { diffSvg } from "../../src/core/diff";
 import type { Problem } from "../../src/core/problem";
 import { addRound, decide, type SvgRound, type SvgSession } from "../../src/core/session";
-import { initStrings, panelStrings } from "../../src/i18n/strings";
+import { initStrings } from "../../src/i18n/strings";
 import type { RenderGuard } from "../../src/obsidian/render-guard";
 import { renderReview } from "../../src/obsidian/panel/review";
 import { MID_COST_SVG } from "../helpers/costly-svg";
 import { runSvgPrompt } from "../../src/obsidian/panel/run";
-import { buildPanelShell, type ChangesCtx, type PanelDeps, type PanelShell, type RunIo } from "../../src/obsidian/panel/shell";
+import { buildPanelFixture, type PanelFixture } from "../helpers/panel-fixture";
 import { freshSession, svgSlots } from "../../src/obsidian/panel/slots";
 import type { Target } from "../../src/vendor/kit/panel-session";
 import { activeRound, EMPTY_ROUNDS, selectRound } from "../../src/vendor/kit/rounds";
@@ -355,35 +357,30 @@ describe("Prüfliste: Regelrunde", () => {
 });
 
 // ---- Mit Shell: Ablehnen im Panel, Vorschau und nächste Anfrage ---------------------------------------------------------------------
-interface Setup { root: HTMLElement; shell: PanelShell<SvgSession>; requests: ReturnType<typeof fakeLlm>["requests"] }
+interface Setup { root: HTMLElement; shell: PanelFixture; requests: ReturnType<typeof fakeLlm>["requests"] }
 
 function setup(responders: Responder[], comment?: (initial: string) => Promise<string | null>): Setup {
   const { llm, requests } = fakeLlm(responders);
   const root = document.body.createDiv({ cls: "view-content" }).createDiv();
   const read = vi.fn(async () => BASE);
   const slots = svgSlots({ llm, readTargetText: read, thinkingOn: () => false, background: BG, ...(comment === undefined ? {} : { comment }) });
-  const deps: PanelDeps<SvgSession> = {
-    app: {} as never, llm,
-    thinking: { family: () => null, backend: () => "unknown", current: () => "off", onLevel: () => "low", setLevel: () => Promise.resolve(), levelPicker: () => false },
-    readTargetText: read, accept: () => Promise.resolve({ ok: false, message: "x" }), openSettings: () => undefined,
-    confirm: () => Promise.resolve(true), managerPresent: () => false, strings: panelStrings(),
-  };
-  return { root, shell: buildPanelShell(root, deps, slots, freshSession(FILE)), requests };
+  const deps = { llm, readTargetText: read };
+  return { root, shell: buildPanelFixture(root, deps, slots, freshSession(FILE)), requests };
 }
 
 async function send(s: Setup, text: string): Promise<void> {
-  s.root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!.value = text;
-  s.root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
+  s.root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!.value = text;
+  s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
   await s.shell.settled();
 }
-const card = (s: Setup, i: number): HTMLElement => s.root.querySelectorAll<HTMLElement>(".svg-studio-changes .okit-review-card")[i]!;
-const previewSvg = (s: Setup): Element => s.root.querySelector<HTMLElement>(".svg-studio-preview-host .svg-studio-stage")!.shadowRoot!.querySelector("svg")!;
+const card = (s: Setup, i: number): HTMLElement => s.root.querySelectorAll<HTMLElement>(".okit-prompt-panel-changes .okit-review-card")[i]!;
+const previewSvg = (s: Setup): Element => s.root.querySelector<HTMLElement>(".okit-prompt-panel-preview-host .svg-studio-stage")!.shadowRoot!.querySelector("svg")!;
 
 describe("Prüfliste im Panel", () => {
   it("nach dem Verfeinern stehen die Karten unter der Vorschau; Ablehnen zeichnet die Vorschau ohne den Eintrag", async () => {
     const s = setup([answer(ANSWER)]);
     await send(s, "größer");
-    expect(s.root.querySelectorAll(".svg-studio-changes .okit-review-card")).toHaveLength(2);
+    expect(s.root.querySelectorAll(".okit-prompt-panel-changes .okit-review-card")).toHaveLength(2);
     expect(previewSvg(s).querySelector("#mond")!.getAttribute("r")).toBe("60");
     card(s, 0).querySelector<HTMLButtonElement>("button.okit-review-reject")!.click();
     expect(card(s, 0).classList.contains("is-rejected")).toBe(true);
@@ -396,7 +393,7 @@ describe("Prüfliste im Panel", () => {
     const s = setup([answer(ANSWER)]);
     await send(s, "größer");
     card(s, 1).querySelector<HTMLElement>(".okit-review-main")!.click();
-    const shadow = s.root.querySelector<HTMLElement>(".svg-studio-preview-host .svg-studio-stage")!.shadowRoot!;
+    const shadow = s.root.querySelector<HTMLElement>(".okit-prompt-panel-preview-host .svg-studio-stage")!.shadowRoot!;
     const mark = /\[(data-m[a-z0-9]+)\]/.exec(shadow.querySelector("style")!.textContent ?? "")![1]!;
     expect(shadow.querySelector(`[${mark}]`)?.id).toBe("tuer");
     expect(s.shell.session().rounds.rounds[0]!.result).not.toContain("data-m");
@@ -407,17 +404,17 @@ describe("Prüfliste im Panel", () => {
     const hang: Responder = () => new Promise((res) => { release = res; });
     const s = setup([answer(ANSWER), hang]);
     await send(s, "größer");
-    const input = s.root.querySelector<HTMLTextAreaElement>("textarea.svg-studio-input")!;
+    const input = s.root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!;
     input.value = "mehr";
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-send")!.click();
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
     await vi.waitFor(() => { expect(s.shell.running()).toBe(true); });
-    const buttons = [...s.root.querySelectorAll<HTMLButtonElement>(".svg-studio-changes button")];
+    const buttons = [...s.root.querySelectorAll<HTMLButtonElement>(".okit-prompt-panel-changes button")];
     expect(buttons.length).toBeGreaterThan(0);
     expect(buttons.every((b) => b.disabled)).toBe(true);
-    s.root.querySelector<HTMLButtonElement>("button.svg-studio-stop")!.click();
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-stop")!.click();
     release({ ok: false, kind: "aborted", detail: "aborted", partial: "", reasoning: "", timing: { startedAt: 0, endedAt: 0 }, facts: null, deviations: [], source: { kind: "local" } });
     await s.shell.settled();
-    expect(s.root.querySelector<HTMLButtonElement>(".svg-studio-changes button.okit-review-reject")!.disabled).toBe(false);
+    expect(s.root.querySelector<HTMLButtonElement>(".okit-prompt-panel-changes button.okit-review-reject")!.disabled).toBe(false);
   });
 
   it("die nächste Verfeinern-Anfrage trägt die Ablehnung unter „Rückmeldung zur letzten Runde“ mit dem Titel der Karte; ohne Ablehnung bleibt die gemessene Vorlage", async () => {

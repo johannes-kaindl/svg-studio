@@ -1,4 +1,5 @@
-// Die SVG-gebundenen Teile des Panels (Slots für `buildPanelShell`): Sitzung, Beschriftung der Runden, Messzeile, Lauf, Vorschau.
+// Die SVG-gebundenen Teile des Panels (Slots für den Rahmen `buildPromptPanel`): Beschriftung der Runden, Messzeile, Vorschau, Felder, Prüfliste, Hinweise, Schreibwege.
+// Sitzung (`freshSession`) und Lauf (`runSvgPrompt`) stehen am Halter, nicht hier: der Lauf überlebt das Fenster.
 // Die Vorschau (Shadow Root, Hintergrund-Regler, Maßzeile, Auswahl) steht in `preview-view.ts`, der Bestand beim Öffnen (Reparieren, Namen vergeben, Editor-Angaben
 // entfernen) in `bestand.ts`, die Prüfliste mit den Einzelentscheidungen in `review.ts`.
 import { svgQualityLine } from "../../core/quality";
@@ -12,8 +13,8 @@ import { renderPreviewView, type PreviewView, type PreviewViewDeps, type Selecti
 import { bestandProblems, renderBestandNotice, repairProblem } from "./bestand";
 import { renderFields } from "./fields-view";
 import { renderReview, type ReviewDeps } from "./review";
-import { runSvgPrompt, runSvgRepair } from "./run";
-import type { NoticeCtx, PanelSlots } from "./shell";
+import { runSvgRepair } from "./run";
+import type { NoticeCtx, PromptPanelSlots, PromptPanelWay } from "../../vendor/kit-obsidian/prompt-panel";
 
 export interface SvgSlotDeps {
   llm: Pick<LlmConnection, "complete" | "source">;
@@ -26,6 +27,8 @@ export interface SvgSlotDeps {
   renderGuard?: PreviewViewDeps["renderGuard"];
   /** Der Kontext des Modells am Endpunkt (Token) für die Prüfung der Eingabe im Lauf; `null`: der Endpunkt nennt ihn nicht. */
   contextLimit?: () => Promise<number | null>;
+  /** Die Schreibwege zur Sitzung (`svgAcceptWays` mit Bereiniger, Einstellung und der Frage, ob eine Notiz offen ist). */
+  acceptWays?: (s: SvgSession) => PromptPanelWay<SvgSession>[];
   /** Der Kommentar-Dialog der Prüfliste (`promptText` des Kits, vom Panel mit der App verdrahtet); ohne ihn gibt es keine Kommentar-Taste. */
   comment?: ReviewDeps["comment"];
 }
@@ -44,7 +47,7 @@ export function roundMeta(r: SvgRound): string {
   return t("panel.roundChanges", b.entries.length);
 }
 
-export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
+export function svgSlots(d: SvgSlotDeps): PromptPanelSlots<SvgRound, SvgSession> {
   let view: PreviewView | null = null;
   const selection: Selection = { id: null, text: null };
   /** Das Feld, in dem Enter kam: nach dem Neuzeichnen bekommt es den Fokus zurück. */
@@ -54,12 +57,11 @@ export function svgSlots(d: SvgSlotDeps): PanelSlots<SvgRound, SvgSession> {
   /** Abbau-Funktionen der kleinen Vorschauen (Vergleich Vorher/Nachher) der letzten Zeichnung der Prüfliste. */
   const comparePreviews: Array<() => void> = [];
   return {
-    fresh: freshSession,
     roundLabel: (r) => r.instruction,
     roundMeta,
     roundText: (r) => r.result,
     quality: (model, task) => svgQualityLine(model, task, { family: d.llm.source().family, thinking: d.thinkingOn(), texts: qualityTexts() }),
-    run: (call) => runSvgPrompt(call, { llm: d.llm, readTargetText: d.readTargetText, ...(d.contextLimit === undefined ? {} : { contextLimit: d.contextLimit }) }),
+    acceptWays: d.acceptWays ?? (() => []),
     renderPreview(host, _round, text) {
       view?.dispose();
       view = null;
