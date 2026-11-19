@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-19
+
 ### Changed
 
 - The panel now runs on the kit's shared prompt panel frame. A running request, the rounds and the half-typed text survive closing the view; reopening it shows where you left off.
