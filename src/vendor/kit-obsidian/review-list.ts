@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.105.0, src/obsidian/review-list.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.108.0, src/obsidian/review-list.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 /**
  * Prüfliste: Karten für Änderungen und Kommentare mit Annehmen, Ablehnen, Kommentar, Antworten und Erledigt — der Prüfen-Tab von
  * Diachronic, aber ohne Wissen über CriticMarkup, Notizen oder Editor. Der Baustein bekommt fertige Einträge und meldet Aktionen.
@@ -44,6 +44,7 @@
  *   erschöpfendem `switch` über `ReviewAction` bleibt unberührt), keine Sperre der Liste (ein Wechsel hält nicht den Fokus fest). Läuft aber gerade eine asynchrone Aktion, sind Wege und Auswahl
  *   gesperrt. Der Kartenrumpf springt nicht (kein `jump`, keine Rolle `button`): im Prüffenster gibt es keine Stelle, zu der man springt, und ein Schalter im Rumpf risse sonst Enter und
  *   Leertaste an sich. Die Kopfzeile (`openCount`, Alle annehmen/ablehnen) entfällt, wenn die Liste nur Kandidaten trägt; der Aufrufer schreibt seine eigene Zeile („3 neue Fundstellen“).
+ *   Die Anführungszeichen um die Kontextzeile sind `opts.quotes` (Vorgabe `„` und `“`; ein englischer Aufrufer reicht `“` und `”` herein). Der Treffer setzt Hintergrund und Schrift ausdrücklich (`--highlight-background` mit dem älteren `--text-highlight-bg` als Rückfall, `--text-normal`) statt des Standard-Gelbs von `mark`.
  *   `strings.candidate` ist Pflicht, sobald ein Kandidat in der Liste steht (sonst wirft der Bau; ein stilles Weglassen der Beschriftung wäre der teurere Fehler). Bestehende Kartenarten
  *   antworten wortgleich (Goldstand `tests/fixtures/review-list-bestand.json`, Test `tests/review-list-bestand.test.ts`). `REVIEW_LIST_CSS` und `SEGMENTED_CONTROL_CSS` gehören beide in die
  *   `styles.css`; Tippflächen der Wege, des Umschalters und der Auswahl sind mindestens 44 px hoch.
@@ -176,13 +177,18 @@ export interface ReviewListOptions {
   onOwner?(id: string, ownerId: string): void | Promise<void>;
   /** Ein Handler hat abgelehnt oder geworfen. Ohne diese Funktion wird der Fehler erneut geworfen. */
   onError?(err: unknown): void;
+  /** Kandidatenkarte: die Anführungszeichen um die Kontextzeile. Das Kit ist i18n-frei, der Aufrufer reicht sie je Sprache herein (englisch `{ open: "“", close: "”" }`). Vorgabe: `„` und `“`, wie vor 0.107.0. */
+  quotes?: { open: string; close: string };
 }
+
+const DEFAULT_QUOTES = { open: "„", close: "“" } as const;
 
 const AUTHOR_SLOTS = 6;
 
 /** Baut die Liste in `parent` und gibt ihre Wurzel zurück. */
 export function buildReviewList(parent: HTMLElement, opts: ReviewListOptions): HTMLElement {
   const { items, strings } = opts;
+  const quotes = opts.quotes ?? DEFAULT_QUOTES;
   const root = parent.createDiv({ cls: "okit-review" });
   if (items.length === 0) {
     root.createDiv({ cls: "okit-review-empty", text: strings.empty });
@@ -288,9 +294,9 @@ export function buildReviewList(parent: HTMLElement, opts: ReviewListOptions): H
       meta.createSpan({ cls: "okit-review-places", text: t.places(item.placeCount ?? item.places.length) });
       const context = (host: HTMLElement, place: ReviewCandidatePlace): void => {
         const line = host.createDiv({ cls: "okit-review-context" });
-        line.createSpan({ cls: "okit-review-before", text: `„${place.before}` });
+        line.createSpan({ cls: "okit-review-before", text: `${quotes.open}${place.before}` });
         line.createEl("mark", { cls: "okit-review-hit", text: place.hit });
-        line.createSpan({ cls: "okit-review-after", text: `${place.after}“` });
+        line.createSpan({ cls: "okit-review-after", text: `${place.after}${quotes.close}` });
       };
       const [first, ...rest] = item.places;
       if (first) context(body, first);
@@ -548,6 +554,7 @@ export const REVIEW_LIST_CSS = `
 }
 
 .okit-review-hit {
+  background-color: var(--highlight-background, var(--text-highlight-bg));
   font-weight: var(--font-semibold);
   color: var(--text-normal);
   border-bottom: 1px solid currentcolor;

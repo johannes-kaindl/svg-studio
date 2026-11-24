@@ -1,5 +1,6 @@
-// vendored from code-kit@0.78.0, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.89.0, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 import { CSS_RISKY, CSS_RISKY_PLAIN, isLocalRef, normalizeUrlRef, trimUrlLikeBrowser } from "./safe-markdown";
+import { cssFragmentIds, decodeFragmentId, parseCssDeclarations, parseCssRules, type CssRule } from "./css-rules";
 import { errorMessage } from "./error-message";
 
 /** Checks SVG text written by a model (or any untrusted source) BEFORE it is shown or stored. The guard REJECTS: it
@@ -291,7 +292,14 @@ function isFragmentUrl(body: string): boolean {
 
 /** THE `url(` scan, for attributes and for CSS: `loose` is true when some call is not a closed `url(#fragment)`;
  *  `rest` is the text with the allowed calls taken out, for the other lists. A call is delimited by the next `)`
- *  or `(`, so one call cannot swallow the next. */
+ *  or `(`, so one call cannot swallow the next.
+ *
+ *  **This is not `readCssUrls` of `pure/css-rules`, on purpose (measured Welle 37, `tests/svg-guard-url-readers.test.ts`).** The two read the same syntax and differ in six forms
+ *  (no backslash; a backslash is refused before this scan decides anything). Here a quoted body is cut at the first `)` or `(`, and a call needs its `)`; `readCssUrls` ends a quoted body at its
+ *  closing quote. (1) A string that is not closed: allowed here (up to the first `)`), refused there. (2) `(` inside a closed string, and (3) no `)` after a closed string: refused here,
+ *  allowed there. (4) `)` inside a closed string, and (5) text between the closing quote and `)`: both allow, and the `rest` differs. (6) `readCssUrls` skips what JavaScript calls white
+ *  space in front of the body (U+00A0, U+FEFF, U+2028 …), CSS and the URL parser do not: `url(NBSP#a)` is no fragment to a browser, it is refused here and allowed there **(fixed in 0.89.0: `readCssUrls` refuses it now too, both readers agree; the case stays in the test as its regression test)**. So the guard
+ *  does not switch to `readCssUrls`: that would loosen the verdict in (2) and (3) (and did in (6), before the fix). Case (6) was a defect of `readCssUrls`, not of this scan. */
 function scanUrlCalls(text: string): { loose: boolean; rest: string } {
   let loose = false;
   let rest = "";
@@ -339,14 +347,10 @@ function referenceTargets(el: Element, byId: ReadonlyMap<string, Element>): Elem
     if (!isReferenceName(attr)) continue;
     const t = trimUrlLikeBrowser(attr.value);
     if (!t.startsWith("#")) continue;
-    const target = byId.get(decodeId(t.slice(1)));
+    const target = byId.get(decodeFragmentId(t.slice(1)));
     if (target !== undefined) out.push(target);
   }
   return out;
-}
-
-function decodeId(id: string): string {
-  try { return decodeURIComponent(id); } catch { return id; }
 }
 
 function isReferenceName(attr: Attr): boolean {
@@ -479,80 +483,32 @@ function isRelevant(name: string, value: string, always = false): boolean {
   return true;
 }
 
-function stripImportant(value: string): string {
-  const v = value.trimEnd();
-  const bang = v.lastIndexOf("!");
-  return bang >= 0 && v.slice(bang + 1).trim().toLowerCase() === "important" ? v.slice(0, bang).trimEnd() : v;
-}
-
-/** Declarations of a CSS block (`style=`) as [name, value], names lower-cased. Splits on `;` outside parentheses and
- *  strings, so `url(data:…;base64,…)` and quoted semicolons stay whole. Linear. */
+/** Declarations of a CSS block (`style=`) as [name, value], names lower-cased. The splitter is `pure/css-rules` (lifted from here, Welle 36, h1d). */
 function parseDeclarations(block: string): Array<[string, string]> {
-  const out: Array<[string, string]> = [];
-  let start = 0;
-  let depth = 0;
-  let quote = "";
-  const add = (end: number): void => {
-    const part = block.slice(start, end);
-    const colon = part.indexOf(":");
-    if (colon > 0) { const name = part.slice(0, colon).trim().toLowerCase(); if (name !== "") out.push([name, stripImportant(part.slice(colon + 1).trim())]); }
-  };
-  for (let i = 0; i < block.length; i++) {
-    const ch = block[i] ?? "";
-    if (quote !== "") { if (ch === quote || ch === "\n") quote = ""; continue; } // an unescaped line break ends a CSS string
-    if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === "(") depth++;
-    else if (ch === ")" && depth > 0) depth--;
-    else if (ch === ";" && depth === 0) { add(i); start = i + 1; }
-  }
-  add(block.length);
-  return out;
+  return parseCssDeclarations(block).map((d) => [d.name, d.value]);
 }
 
 interface Rule { selector: string; decls: Array<[string, string]>; shape: "style" | "keyframe" }
 
-/** The rules of a style sheet, as a real tokenizer would see them: strings, parentheses and nesting are tracked, so a brace in a
- *  string or a rule inside a rule neither ends nor hides the outer one. Linear in the text. At-rules that only group
- *  (`@media`, `@supports`, `@layer`, `@container`, `@scope`) are looked through; the steps of `@keyframes` are `keyframe`; the
- *  declarations of other at-rules (`@font-face`, `@page`) are dropped. */
+/** The rules of a style sheet that carry declarations to read: `style` rules and the steps of `@keyframes`, at any depth, in the order in which
+ *  they CLOSE (a rule inside a rule before the rule around it), which is the order the cost walk below has always seen. Grouping at-rules are looked
+ *  through, the declarations of other at-rules (`@font-face`, `@page`) are dropped. The splitter is `pure/css-rules`. */
 function parseRules(text: string): Rule[] {
-  const rules: Rule[] = [];
-  interface Frame { prelude: string; decls: Array<[string, string]> }
-  const stack: Frame[] = [];
-  let buf = "";
-  let depth = 0;
-  let quote = "";
-  const declaration = (): void => {
-    const part = buf;
-    buf = "";
-    const top = stack.at(-1);
-    const colon = part.indexOf(":");
-    if (top === undefined || colon <= 0) return;
-    const name = part.slice(0, colon).trim().toLowerCase();
-    if (name !== "") top.decls.push([name, stripImportant(part.slice(colon + 1).trim())]);
-  };
-  const close = (): void => {
-    declaration();
-    const f = stack.pop();
-    if (f === undefined || f.prelude.startsWith("@")) return;
-    const parent = stack.at(-1)?.prelude;
-    // A rule inside a rule is a rule of its own with the outer selector implied: read on its own it matches a superset, which is the safe side.
-    rules.push({ selector: f.prelude, decls: f.decls, shape: parent !== undefined && /^@(?:-\w+-)?keyframes/i.test(parent) ? "keyframe" : "style" });
-  };
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i] ?? "";
-    if (quote !== "") { buf += ch; if (ch === quote || ch === "\n") quote = ""; continue; }
-    if (ch === '"' || ch === "'") { quote = ch; buf += ch; continue; }
-    if (ch === "(") depth++;
-    else if (ch === ")" && depth > 0) depth--;
-    if (depth > 0) { buf += ch; continue; }
-    if (ch === ";") declaration();
-    else if (ch === "{") { stack.push({ prelude: buf.trim(), decls: [] }); buf = ""; }
-    else if (ch === "}") close();
-    else buf += ch;
+  const out: Rule[] = [];
+  const todo: Array<{ rule: CssRule; visited: boolean }> = parseCssRules(text).rules.map((rule) => ({ rule, visited: false })).reverse();
+  while (todo.length > 0) {
+    const top = todo[todo.length - 1];
+    if (top === undefined) break;
+    if (!top.visited) {
+      top.visited = true;
+      for (const child of top.rule.rules.slice().reverse()) todo.push({ rule: child, visited: false });
+      continue;
+    }
+    todo.pop();
+    const r = top.rule;
+    if (r.kind === "style" || r.kind === "keyframe") out.push({ selector: r.prelude, decls: r.declarations.map((d) => [d.name, d.value]), shape: r.kind });
   }
-  while (stack.length > 0) close();
-  return rules;
+  return out;
 }
 
 /** The deepest nesting of `{` and `(` inside the `<style>` elements of a text, found before the text is parsed: Chromium's `DOMParser` crashes the renderer on a
@@ -584,30 +540,6 @@ function findCI(text: string, needle: string, from = 0): number {
     if (j === n) return i;
   }
   return -1;
-}
-
-/** The ids `url(#id)` calls in `text` name. Linear: the call is delimited by the next `)` or `(` and trimmed by hand. */
-function fragmentIds(text: string): string[] {
-  const ids: string[] = [];
-  for (let at = findCI(text, "url("); at >= 0; at = findCI(text, "url(", at + 4)) {
-    let from = at + 4;
-    while (from < text.length && /\s/.test(text[from] ?? "")) from++;
-    const q = text[from];
-    if (q === '"' || q === "'") {
-      // a quoted url ends at the closing quote, whatever stands inside: `url("#a)b")` names the id `a)b`; with no closing quote the string runs to the end
-      // of the value, and anything after the closing quote is ignored, as a browser does
-      const close = text.indexOf(q, from + 1);
-      const b = trimUrlLikeBrowser(text.slice(from + 1, close < 0 ? text.length : close));
-      if (b.startsWith("#")) ids.push(decodeId(b.slice(1)));
-      continue;
-    }
-    let end = from;
-    while (end < text.length && text[end] !== ")" && text[end] !== "(") end++;
-    if (text[end] !== ")") continue;
-    const b = trimUrlLikeBrowser(text.slice(from, end));
-    if (b.startsWith("#")) ids.push(decodeId(b.slice(1).trimEnd()));
-  }
-  return ids;
 }
 
 /** Top-level function calls of a CSS value as [name, arguments], in one pass with a stack: `blur(5px) drop-shadow(1px 1px
@@ -1074,7 +1006,7 @@ function effectOf(decls: ReadonlyArray<readonly [string, string]>, reader: Reade
     const f = (fx ??= newEffect());
     const idsOf = (): string[] => {
       if (rd.ids === undefined) {
-        rd.ids = fragmentIds(rd.value);
+        rd.ids = cssFragmentIds(rd.value);
         if (rd.ids.length > C.maxIdsPerValue) {
           problems.push({ code: "too-costly", kind: "limit", element, detail: `${name} names ${String(rd.ids.length)} references, the limit is ${String(C.maxIdsPerValue)}` });
           rd.ids = rd.ids.slice(0, C.maxIdsPerValue);

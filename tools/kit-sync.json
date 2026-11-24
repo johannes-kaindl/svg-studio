@@ -1,10 +1,10 @@
 {
   "sources": {
     "obsidian-kit": {
-      "ref": "0.105.0"
+      "ref": "0.108.0"
     },
     "code-kit": {
-      "ref": "0.78.0"
+      "ref": "0.89.0"
     }
   },
   "targets": [
@@ -28,6 +28,7 @@
       "from": "src/ts/pure",
       "modules": [
         "safe-markdown",
+        "css-rules",
         "i18n",
         "answer-retry",
         "llm-answer",
@@ -64,10 +65,7 @@
         "model-context",
         "model-list-cache",
         "reasoning",
-        {
-          "name": "redact",
-          "ref": "0.87.0"
-        },
+        "redact",
         "text-window",
         "sampling-profiles",
         "secrets",

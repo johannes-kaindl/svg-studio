@@ -205,6 +205,7 @@
 }
 
 .okit-review-hit {
+  background-color: var(--highlight-background, var(--text-highlight-bg));
   font-weight: var(--font-semibold);
   color: var(--text-normal);
   border-bottom: 1px solid currentcolor;

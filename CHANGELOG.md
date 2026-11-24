@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **The SVG guard now reads a reference the way the browser does, so the cost limit can no longer be bypassed with a non-breaking space** (shared library code-kit 0.89.0): `filter="url(#f<NBSP>)"` names the element whose id ends in the non-breaking space; the guard used to follow the cheap `f` instead and drew an SVG that is far too costly. Such a block now shows the "too costly" error box. `url(<NBSP>data:…)` stays rejected as before.
+
 ## [0.2.2] — 2026-11-24
 
 ### Security
