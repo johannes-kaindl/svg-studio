@@ -64,7 +64,10 @@
         "model-context",
         "model-list-cache",
         "reasoning",
-        "redact",
+        {
+          "name": "redact",
+          "ref": "0.87.0"
+        },
         "text-window",
         "sampling-profiles",
         "secrets",
