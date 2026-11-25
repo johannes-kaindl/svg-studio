@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Text you type into the instruction field while a run is going stays there after the result** (shared libraries code-kit 0.91.1 and obsidian-kit 0.111.0): the panel used to clear the whole field when a round came in, so a follow-up instruction typed during a long run was lost. Only the instruction that was sent is cleared now.
+- **Inserting at the cursor respects fenced code under a list item** (obsidian-kit 0.109.0): a cursor inside an unclosed code fence below a list item is now refused instead of writing the SVG block into the code.
+
 ## [0.2.3] — 2026-11-24
 
 ### Security

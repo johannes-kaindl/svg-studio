@@ -1,10 +1,10 @@
 {
   "sources": {
     "obsidian-kit": {
-      "ref": "0.108.0"
+      "ref": "0.111.0"
     },
     "code-kit": {
-      "ref": "0.89.0"
+      "ref": "0.91.1"
     }
   },
   "targets": [
@@ -45,7 +45,14 @@
         "css-color",
         "error-message",
         "word-diff",
-        "panel-host"
+        "panel-host",
+        "bytes-equal",
+        "editor-span",
+        "ensure-dir",
+        "filename-policy",
+        "html-escape",
+        "settings_schema",
+        "num"
       ]
     },
     {
@@ -91,7 +98,8 @@
         "endpoint-source",
         "endpoint-secret-hook",
         "override-guard",
-        "note-edit"
+        "note-edit",
+        "filename-sanitizer-source"
       ],
       "rewrite": [
         [
@@ -159,7 +167,10 @@
         "prompt-panel",
         "prompt-panel-host",
         "prompt-panel-strings",
-        "status-bar-item"
+        "status-bar-item",
+        "create-note",
+        "panel-accept-strings",
+        "safe-file-name"
       ],
       "rewrite": [
         [

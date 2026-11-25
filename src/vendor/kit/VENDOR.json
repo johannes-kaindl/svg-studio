@@ -1,10 +1,10 @@
 {
   "source": "code-kit",
-  "version": "0.89.0",
-  "sha": "4576daa",
-  "vendored": "svg-guard.ts, safe-markdown.ts, css-rules.ts, i18n.ts, answer-retry.ts, llm-answer.ts, think-splitter.ts, sha256.ts, data-url.ts, slug.ts, measured-quality.ts, fences.ts, panel-session.ts, rounds.ts, run-slot.ts, rotation.ts, css-color.ts, error-message.ts, word-diff.ts, panel-host.ts, anthropic-wire.ts, backend-probe.ts, capabilities.ts, embeddings-client.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, model-choice.ts, model-context.ts, model-list-cache.ts, reasoning.ts, redact.ts, text-window.ts, sampling-profiles.ts, secrets.ts, sse.ts, timeout.ts, clipboard.ts",
-  "obsidian_kit_version": "0.108.0",
-  "obsidian_kit_sha": "0fa2b5a",
-  "obsidian_kit_vendored": "block-writer.ts, plugin-id.ts, endpoint-source.ts, endpoint-secret-hook.ts, override-guard.ts, note-edit.ts",
+  "version": "0.91.1",
+  "sha": "512aa5c",
+  "vendored": "svg-guard.ts, safe-markdown.ts, css-rules.ts, i18n.ts, answer-retry.ts, llm-answer.ts, think-splitter.ts, sha256.ts, data-url.ts, slug.ts, measured-quality.ts, fences.ts, panel-session.ts, rounds.ts, run-slot.ts, rotation.ts, css-color.ts, error-message.ts, word-diff.ts, panel-host.ts, bytes-equal.ts, editor-span.ts, ensure-dir.ts, filename-policy.ts, html-escape.ts, settings_schema.ts, num.ts, anthropic-wire.ts, backend-probe.ts, capabilities.ts, embeddings-client.ts, endpoint.ts, endpoint_config.ts, endpoint_diagnostics.ts, error_body.ts, model-choice.ts, model-context.ts, model-list-cache.ts, reasoning.ts, redact.ts, text-window.ts, sampling-profiles.ts, secrets.ts, sse.ts, timeout.ts, clipboard.ts",
+  "obsidian_kit_version": "0.111.0",
+  "obsidian_kit_sha": "3ba6442",
+  "obsidian_kit_vendored": "block-writer.ts, plugin-id.ts, endpoint-source.ts, endpoint-secret-hook.ts, override-guard.ts, note-edit.ts, filename-sanitizer-source.ts",
   "license": "AGPL-3.0-or-later"
 }

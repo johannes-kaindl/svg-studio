@@ -1,4 +1,4 @@
-// vendored from code-kit@0.89.0, src/ts/pure/css-color.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.91.1, src/ts/pure/css-color.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Origin: obsidian-plugins `3d-codeblocks/src/core/shapes/parse.ts` (`HEX`, `normalizeColor`), 2026-11; the same pattern stood character for
 // character in `obsidian-letterhead/src/core/model.ts` (`HEX_COLOR`) and, as a transitional copy, in `svg-studio/src/core/background.ts`.
 // `hexToRgb` and `rgbToHex` (0.66.0) replace six hand-written variants in timescape, kuro-screensaver, perlin-studio (two files), svg-studio and

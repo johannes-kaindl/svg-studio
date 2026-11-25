@@ -176,6 +176,31 @@ describe("Lauf: Erzeugen mit Rückfrage", () => {
   });
 });
 
+describe("Auftragsfeld im Lauf (B11, code-kit panel-host 0.91.0)", () => {
+  const input = (s: Setup): HTMLTextAreaElement => s.root.querySelector<HTMLTextAreaElement>("textarea.okit-prompt-panel-input")!;
+  const type = (s: Setup, text: string): void => { const el = input(s); el.value = text; el.dispatchEvent(new Event("input")); };
+
+  it("ein während des Laufs getippter Auftrag steht nach der Runde noch im Feld", async () => {
+    const s = setup([(h, r) => { type(s, "danach rot färben"); return answer(SVG_OK)(h, r); }]);
+    type(s, "ein Mond");
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
+    await s.shell.settled();
+    expect(s.shell.session().rounds.rounds).toHaveLength(1);
+    expect(input(s).value).toBe("danach rot färben");
+    expect(s.shell.host.live().draft).toBe("danach rot färben");
+  });
+
+  it("Gegenprobe: ohne Tippen im Lauf wird der gesendete Auftrag nach der Runde geleert", async () => {
+    const s = setup([answer(SVG_OK)]);
+    type(s, "ein Mond");
+    s.root.querySelector<HTMLButtonElement>("button.okit-prompt-panel-send")!.click();
+    await s.shell.settled();
+    expect(s.shell.session().rounds.rounds).toHaveLength(1);
+    expect(input(s).value).toBe("");
+    expect(s.shell.host.live().draft).toBe("");
+  });
+});
+
 describe("Lauf: Verfeinern", () => {
   it("liest den Text JETZT, schickt die gemessene Vorlage und legt eine Runde mit Einträgen an", async () => {
     const s = setup([answer(BASE_CHANGED)], { target: FILE, text: BASE });

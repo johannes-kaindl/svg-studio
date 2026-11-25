@@ -1,4 +1,4 @@
-// vendored from code-kit@0.89.0, src/ts/pure/css-rules.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.91.1, src/ts/pure/css-rules.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 import { trimUrlLikeBrowser } from "./safe-markdown";
 
 /** One CSS splitter for the workspace: the rules of a style sheet, the declarations of a block (`style=`), the selector list of a rule and the

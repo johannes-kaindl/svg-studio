@@ -1,4 +1,4 @@
-// vendored from code-kit@0.89.0, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from code-kit@0.91.1, src/ts/web/svg-guard.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 import { CSS_RISKY, CSS_RISKY_PLAIN, isLocalRef, normalizeUrlRef, trimUrlLikeBrowser } from "./safe-markdown";
 import { cssFragmentIds, decodeFragmentId, parseCssDeclarations, parseCssRules, type CssRule } from "./css-rules";
 import { errorMessage } from "./error-message";

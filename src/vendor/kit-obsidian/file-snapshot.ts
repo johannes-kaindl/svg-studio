@@ -1,4 +1,4 @@
-// vendored from obsidian-kit@0.108.0, src/obsidian/file-snapshot.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
+// vendored from obsidian-kit@0.111.0, src/obsidian/file-snapshot.ts — do not hand-edit; re-vendor via tools/sync-kit.sh
 // Herkunft: obsidian-transmute `src/obsidian/snapshot-io.ts` (`snapshotRoot`, `ensureDir`, `writeSnapshot`, `rotateSnapshots`) und `src/core/vault/snapshot.ts`
 // (`snapshotDirName`), auf eine Einzeldatei zugeschnitten; REGISTRY „Rückholbarkeit für Schreibvorgänge“ führte transmute als Kit-Kandidaten, svg-studio ist
 // der zweite Träger (K15, bedingt durch die Messung A4 vom 2026-11-04: Obsidians Dateiwiederherstellung erfasst nur Markdown, `.svg` und andere Dateien nicht).
@@ -57,6 +57,8 @@ import type { App, DataAdapter } from "obsidian";
 import { isValidPluginId } from "../kit/plugin-id";
 import { errorMessage } from "../kit/error-message";
 import { type GfsCalendar, type GfsPolicy, selectGfsRetention, stampedName, timeFromStampedName } from "../kit/rotation";
+import { ensureDir } from "../kit/ensure-dir";
+import { bytesEqual } from "../kit/bytes-equal";
 
 export interface SnapshotLimits {
   /** Höchstens so viele Stände je Datei (nach der Staffelung). Vorgabe 50; `Infinity` ohne Grenze. */
@@ -115,13 +117,8 @@ function extOf(path: string): string {
   return dot > 0 ? name.slice(dot) : "";
 }
 
-/** Legt `path` samt aller fehlenden Elternordner an (wiederverwendet von `device-files`). */
-export async function ensureDir(adapter: Pick<DataAdapter, "exists" | "mkdir">, path: string): Promise<void> {
-  if (await adapter.exists(path)) return;
-  const slash = path.lastIndexOf("/");
-  if (slash > 0) await ensureDir(adapter, path.slice(0, slash));
-  await adapter.mkdir(path);
-}
+/** Legt `path` samt aller fehlenden Elternordner an. Seit Welle 37 (kw37c, Teil B) die code-kit-Fassung (`pure/ensure-dir`, aus dieser Datei gehoben), hier weiter ausgeliefert, weil `device-files` sie unter diesem Namen holt; `DataAdapter` erfüllt `DirStore`. */
+export { ensureDir };
 
 /** Alle Dateien unter `dir` (rekursiv), als volle Pfade. */
 async function listFilesDeep(adapter: DataAdapter, dir: string): Promise<string[]> {
@@ -131,12 +128,9 @@ async function listFilesDeep(adapter: DataAdapter, dir: string): Promise<string[
   return out;
 }
 
-function sameBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
-  if (a.byteLength !== b.byteLength) return false;
-  const x = new Uint8Array(a);
-  const y = new Uint8Array(b);
-  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
-  return true;
+/** Zwei Puffer tragen dieselben Bytes (code-kit `bytesEqual` über Sichten, keine Kopie). */
+function sameBuffers(a: ArrayBuffer, b: ArrayBuffer): boolean {
+  return bytesEqual(new Uint8Array(a), new Uint8Array(b));
 }
 
 interface MigrationReport { migrated: number; conflicts: string[]; unreadable: number; error?: string }
@@ -168,13 +162,13 @@ async function migrateLegacy(adapter: DataAdapter, root: string, tree: string): 
         try {
           const target = `${tree}/${rel}/${stamp}${extOf(rel)}`;
           if (await adapter.exists(target)) {
-            if (sameBytes(await adapter.readBinary(source), await adapter.readBinary(target))) await adapter.remove(source);
+            if (sameBuffers(await adapter.readBinary(source), await adapter.readBinary(target))) await adapter.remove(source);
             else report.conflicts.push(source);
             continue;
           }
           await ensureDir(adapter, target.slice(0, target.lastIndexOf("/")));
           await adapter.writeBinary(target, await adapter.readBinary(source));
-          if (!sameBytes(await adapter.readBinary(source), await adapter.readBinary(target))) {
+          if (!sameBuffers(await adapter.readBinary(source), await adapter.readBinary(target))) {
             await adapter.remove(target).catch(() => undefined);
             report.error ??= `copy of ${source} did not read back identically`;
             continue;
