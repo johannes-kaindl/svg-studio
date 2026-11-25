@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyChanges, roundTripProblems, type SvgChange } from "../../src/core/changes";
 import { buildCanonTree, canonNode } from "../../src/core/canon";
 import { scanElements } from "../../src/core/elements";
-import { pruefeLinear } from "../vendor/kit/linear-probe";
+import { lastGeschuetzt, type LinearProbeSkipKontext } from "../vendor/kit/linear-probe";
 
 // Ein Grundriss mit Kommentar, Leerzeile und Einrückung: alles, was nicht angefasst wird, muss byte-gleich bleiben.
 const PLAN = [
@@ -519,8 +519,8 @@ describe("applyChanges: remove mit expect", () => {
 });
 
 describe("applyChanges: Laufzeit", () => {
-  it("bleibt linear (n Kreise in einer Zeile, je ein change)", () => {
-    const r = pruefeLinear(
+  it("bleibt linear (n Kreise in einer Zeile, je ein change)", (ctx) => {
+    const r = lastGeschuetzt(ctx).pruefeLinear(
       (x: { text: string; changes: SvgChange[] }) => {
         const res = applyChanges(x.text, x.changes);
         if (!res.ok) throw new Error(res.problems.join("; "));
@@ -647,8 +647,8 @@ describe("applyChanges: Zyklen und feste Schlüssel (Review B2)", () => {
 
 describe("applyChanges: lange Zeilen (Review B2, Befund 3 und 7)", () => {
   const line = (n: number): string => `<svg xmlns="http://www.w3.org/2000/svg">${Array.from({ length: n }, (_, i) => `<circle id="c${i}" r="1"/>`).join("")}</svg>`;
-  const linear = (make: (n: number) => SvgChange[]): void => {
-    const r = pruefeLinear(
+  const linear = (ctx: LinearProbeSkipKontext, make: (n: number) => SvgChange[]): void => {
+    const r = lastGeschuetzt(ctx).pruefeLinear(
       (x: { text: string; changes: SvgChange[] }) => {
         const res = applyChanges(x.text, x.changes);
         if (!res.ok) throw new Error(res.problems.join("; "));
@@ -657,9 +657,9 @@ describe("applyChanges: lange Zeilen (Review B2, Befund 3 und 7)", () => {
     );
     expect(r.linear, r.message).toBe(true);
   };
-  it("remove bleibt linear (alles in einer Zeile)", () => linear((n) => Array.from({ length: n }, (_, i) => ({ op: "remove", id: `c${i}` }) as SvgChange)));
-  it("move bleibt linear", () => linear((n) => Array.from({ length: n }, (_, i) => ({ op: "move", id: `c${i}`, parent: null, after: null }) as SvgChange).slice(0, Math.min(n, 400))));
-  it("add bleibt linear", () => linear((n) => Array.from({ length: n }, (_, i) => ({ op: "add", parent: null, after: `c${i}`, markup: `<rect id="n${i}"/>` }) as SvgChange)));
+  it("remove bleibt linear (alles in einer Zeile)", (ctx) => linear(ctx, (n) => Array.from({ length: n }, (_, i) => ({ op: "remove", id: `c${i}` }) as SvgChange)));
+  it("move bleibt linear", (ctx) => linear(ctx, (n) => Array.from({ length: n }, (_, i) => ({ op: "move", id: `c${i}`, parent: null, after: null }) as SvgChange).slice(0, Math.min(n, 400))));
+  it("add bleibt linear", (ctx) => linear(ctx, (n) => Array.from({ length: n }, (_, i) => ({ op: "add", parent: null, after: `c${i}`, markup: `<rect id="n${i}"/>` }) as SvgChange)));
 
   it("5000 verschachtelte Verschiebungen werfen nicht, sondern liefern ein Ergebnis oder ein Problem", () => {
     const n = 5000;
