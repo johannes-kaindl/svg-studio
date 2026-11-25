@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-25
+
 ### Fixed
 
 - **Text you type into the instruction field while a run is going stays there after the result** (shared libraries code-kit 0.91.1 and obsidian-kit 0.111.0): the panel used to clear the whole field when a round came in, so a follow-up instruction typed during a long run was lost. Only the instruction that was sent is cleared now.
