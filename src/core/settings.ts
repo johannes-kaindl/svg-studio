@@ -6,6 +6,7 @@ import { DEFAULT_BACKGROUND, sanitizeBackground, type BackgroundState } from "./
 import { migrateEndpointList, type EndpointConfig } from "../vendor/kit/endpoint_config";
 import { sanitizeChoice, type EndpointChoice } from "../vendor/kit/endpoint-source";
 import { DEFAULT_REQUEST_SETTINGS, sanitizeRequestSettings, type RequestSettings } from "../vendor/kit/sampling-profiles";
+import { isPlainObject as isRecord } from "../vendor/kit/settings_schema";
 
 /** Welcher Weg beim neuen SVG der Hauptknopf ist; beide Wege bleiben als Knöpfe. Ein gespeichertes `"ask"` (bis 0.1.5 „Jedes Mal fragen“) gilt als `"file"`. */
 export type AcceptAs = "file" | "block";
@@ -29,7 +30,6 @@ export const DEFAULT_SETTINGS: SvgStudioSettings = {
   llm: { endpoints: [], choice: {}, request: DEFAULT_REQUEST_SETTINGS },
 };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 /** Vor der Kit-Migration: nur Texte und Objekte mit Text-`url` gehen durch, alles andere fällt weg; ein Objekt mit einem Nicht-Text in `url`, `model`, `id` oder `secretId` verwirft die Kit-Migration selbst, ohne zu werfen. */
 const isEndpointEntry = (v: unknown): v is string | EndpointConfig => typeof v === "string" || (isRecord(v) && typeof v.url === "string");
 

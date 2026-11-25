@@ -9,6 +9,8 @@
 // LAUFENDEN Sitzung ohne `slow` ist nur ein Bild, das gerade gezeichnet wird: ein zweiter Block mit demselben Text darf nicht wegen ihr ausbleiben.
 // Pure: die Liste der Marken ist ein Wert; der Wächter liegt in `src/obsidian/render-guard.ts`, der dauerhafte Speicher in `src/obsidian/mark-store.ts`.
 
+import { isPlainObject as isRecord } from "../vendor/kit/settings_schema";
+
 export interface Mark {
   /** Fingerabdruck des SVG-Textes (SHA-256, hex). */
   fp: string;
@@ -52,8 +54,6 @@ export const SLOW_LOAD_FROM_MS = 1000;
 export const CALM_MS = 2000;
 /** Länger wird nicht gewartet: danach fällt die Marke auch ohne Ruhe (Obsidian war nur beschäftigt). */
 export const MAX_WATCH_MS = 15000;
-
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Hält die Liste auf `MAX_MARKS`: erst fallen eigene laufende Marken heraus (die älteste zuerst), dann die ältesten überhaupt. */
 function rotate(marks: Mark[], session: string): Mark[] {

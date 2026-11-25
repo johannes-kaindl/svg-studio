@@ -4,6 +4,7 @@
 // der Grund eines schreibgeschützten Felds ist ein Code (`ReadonlyReason`); nur das Wort für den Rundentitel („Von Hand“) steht hier, weil der Vertrag es mit `lang` verlangt.
 import { buildCanonTree, canonNode } from "./canon";
 import type { SvgChange } from "./changes";
+import { escapeHtmlText } from "../vendor/kit/html-escape";
 import { attr, decodeEntities, isUnnamedKey, scanElements, type SvgElement } from "./elements";
 import type { Problem } from "./problem";
 
@@ -291,7 +292,6 @@ export function fieldChange(el: SvgElement, text: string, field: string, input: 
   return current !== null && current.trim() === written ? done([]) : setAttr("transform", written);
 }
 
-const escapeText = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Der Text eines `<text>` ohne Unterelemente: das Element wird mit neuem Inhalt ersetzt (`remove` mit `expect`, dann `add` am selben Ort). */
 function textChange(el: SvgElement, text: string, spec: FieldSpec, input: string, done: (c: SvgChange[]) => FieldResult): FieldResult {
@@ -306,6 +306,6 @@ function textChange(el: SvgElement, text: string, spec: FieldSpec, input: string
   const name = /^<([^\s/>]+)/.exec(open)![1];
   return done([
     { op: "remove", id: el.key, expect: canonNode(tree, index) },
-    { op: "add", parent: place.parent, after: place.after, markup: `${open}${escapeText(input)}</${name}>` },
+    { op: "add", parent: place.parent, after: place.after, markup: `${open}${escapeHtmlText(input)}</${name}>` },
   ]);
 }
