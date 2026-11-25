@@ -56,7 +56,7 @@ import { startLlmStub, type LlmStub, type StubAnfrage } from "../../tools/obsidi
 import { gegenprobeErreichbarkeit, gegenprobeFokus, messeErreichbarkeit, messeFokusErhalt, mitHoehe, zeichnePflicht, type PflichtTeilurteil } from "../../tools/obsidian-cdp/pflichtpunkte.js";
 import { boxOf, capture, setWindowSize } from "../../tools/obsidian-cdp/shot.js";
 import { buildVault, stagingVaultDir } from "../../tools/obsidian-cdp/vault.js";
-import { baueZweitinstanzHome, zweitinstanzUmgebung } from "../../tools/obsidian-cdp/zweitinstanz.js";
+import { baueZweitinstanzHome, lebendeImProfil, profilMuster, zweitinstanzUmgebung } from "../../tools/obsidian-cdp/zweitinstanz.js";
 
 const REPO_NAME = "svg-studio";
 const PLUGIN_ID = "svg-studio";
@@ -870,7 +870,8 @@ const PLUGIN_MARKEN = `app.plugins.plugins[${q(PLUGIN_ID)}].markStore`;
 
 /** Die eigene Zweitinstanz hart beenden (`kill -9` über den vollen Profilpfad, nie die reguläre Instanz) und neu starten; liefert die neue Verbindung. */
 async function hartNeustart(ud: string, signal: "-9" | "-TERM" | "browser-close" = "-9"): Promise<Cdp> {
-  const beende = (sig: string): void => { try { execFileSync("pkill", [sig, "-f", `user-data-dir=${ud}`]); } catch { /* nichts mehr da */ } };
+  // Muster der Brücke (`profilMuster`): fängt Hauptprozess und Helfer, auch die Helfer mit `/private/tmp/…` (Welle 37, wz-cdp); ein eigenes `user-data-dir=<ud>` sah sie nicht.
+  const beende = (sig: string): void => { try { execFileSync("pkill", [sig, "-f", profilMuster(ud)]); } catch { /* nichts mehr da */ } };
   if (signal === "browser-close") {
     // Geordnetes Beenden über das DevTools-Protokoll des Browser-Ziels (wie ein „Beenden“ aus dem Programm, nicht wie ein Signal).
     try {
@@ -880,7 +881,7 @@ async function hartNeustart(ud: string, signal: "-9" | "-TERM" | "browser-close"
       ws.send(JSON.stringify({ id: 1, method: "Browser.close" }));
     } catch { /* der Aufrufer sieht, ob der Prozess lebt */ }
   }
-  const lebt = (): boolean => { try { execFileSync("pgrep", ["-f", `user-data-dir=${ud}`]); return true; } catch { return false; } };
+  const lebt = (): boolean => lebendeImProfil(ud) !== "";
   if (signal !== "browser-close") beende(signal);
   // Geordnetes Beenden (SIGTERM) darf dauern; ein Prozess, der nach 15 s noch lebt, wird dann doch hart beendet (der Aufrufer kennt das über `geordnet`).
   for (let i = 0; i < 30; i++) {
@@ -2344,7 +2345,7 @@ async function main(): Promise<void> {
   cdp.close();
   // Die neu gestartete Instanz gehört nicht mehr dem Aufrufer (messlauf.sh kennt nur die erste PID): hier beenden, nur über den vollen Profilpfad.
   if (neuGestartet) {
-    try { execFileSync("pkill", ["-f", `user-data-dir=${process.env.UD ?? "/nonexistent"}`]); } catch { /* schon weg */ }
+    if (process.env.UD !== undefined && process.env.UD !== "") { try { execFileSync("pkill", ["-f", profilMuster(process.env.UD)]); } catch { /* schon weg */ } }
   }
   bilanz.abschluss();
 }
