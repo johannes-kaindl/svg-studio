@@ -9,6 +9,7 @@ import { distinctGuardProblems, type AnswerFault, type GuardProblem } from "../c
 import type { Problem } from "../core/problem";
 import type { PromptPanelStrings } from "../vendor/kit-obsidian/prompt-panel-strings";
 import type { AcceptStrings } from "../vendor/kit-obsidian/panel-accept";
+import { resolveAcceptStrings } from "../vendor/kit-obsidian/panel-accept-strings";
 
 export type T = (key: string, ...args: (string | number)[]) => string;
 export { getLang, setLang, t, type Lang };
@@ -62,7 +63,6 @@ const EN: Record<string, string> = {
   "panel.roundChanges": "{0} change(s)",
   "panel.roundHand": "by hand",
   "panel.roundRule": "rule",
-  "panel.unsupported": "{0} can't be changed here.",
   "run.attempt": "Attempt {0} of {1}: answer invalid ({2})",
   "run.doneCreate": "Done — check the preview, then apply or change further, or press New to start another image.",
   "run.doneRefine": "Done — check the result, then apply or change further.",
@@ -77,35 +77,18 @@ const EN: Record<string, string> = {
   "accept.asBlock": "As block",
   "accept.blockNeedsNote": "A code block needs an open note. Open a note, or apply as a file.",
   "accept.invalid": "The result is not a valid SVG: {0}",
-  "accept.notApplied": "{0}; nothing was written.",
   "accept.unchanged": "Nothing to apply: the target already has this content.",
   "accept.cannotReplace": "A new image can't replace an existing target; nothing was written.",
   "accept.blockMoved": "Block changed: it moved or was deleted since the panel opened; nothing was written.",
-  "accept.blockChanged": "Block changed: its content differs from what the panel opened; nothing was written.",
-  "accept.noteChanged": "The target changed while applying; nothing was written. Try again.",
-  "accept.closesFence": "A line of the result would close the code block; nothing was written.",
-  "accept.blockInList": "This block sits in a list item; the panel only writes into blocks that start at the beginning of a line. Nothing was written.",
-  "accept.cancelled": "Cancelled; nothing was written.",
-  "accept.noNoteOpen": "No note is open to put a code block in; nothing was written.",
-  "accept.readingView": "The note is in reading view; nothing was written. Switch it to editing.",
   "accept.applied": "Applied to {0}.",
   "accept.asBlock.cursor": "Code block inserted at the cursor.",
   "accept.asBlock.afterBlock": "Code block inserted after the code block at the cursor.",
   "accept.asBlock.afterSelection": "Code block inserted after the selection.",
   "accept.asBlock.afterFrontmatter": "Code block inserted after the front matter.",
-  "accept.appended": "The note is in reading view, so the code block was added at the end of the note.",
-  "accept.fileGone": "{0} no longer exists; nothing was written.",
-  "accept.fileExists": "{0} already exists; nothing was written.",
-  "accept.couldNotCreate": "Could not create {0}: {1}",
-  "accept.savedRef": "Saved {0} and inserted its link at the cursor.",
   "accept.savedNoNote": "Saved {0}. No note is open, so no link was inserted.",
   "accept.savedReading": "Saved {0}. The note is in reading view; no link was inserted.",
   "accept.savedNoteChanged": "Saved {0}. The active note changed meanwhile; no link was inserted.",
-  "accept.savedAppended": "Saved {0}. The note is in reading view, so its link was added at the end of the note.",
-  "accept.savedRefFailed": "Saved {0}, but the link could not be inserted: {1}",
   "accept.unclosed": "A code block in the note is never closed, so the SVG would land inside it; nothing was inserted.",
-  "accept.unclosedSel": "The selection ends in a code block that is never closed; nothing was inserted.",
-  "accept.couldNotApply": "Could not apply: {0}",
   "round.repair": "Repair",
   "round.names": "Assign names",
   "round.cleanup": "Remove editor data",
@@ -323,7 +306,6 @@ const DE: Record<string, string> = {
   "panel.roundChanges": "{0} Änderung(en)",
   "panel.roundHand": "von Hand",
   "panel.roundRule": "Regel",
-  "panel.unsupported": "{0} lässt sich hier nicht ändern.",
   "run.attempt": "Versuch {0} von {1}: Antwort ungültig ({2})",
   "run.doneCreate": "Fertig — prüfe die Vorschau, dann übernehmen oder weiter ändern, oder „Neu“ für ein anderes Bild.",
   "run.doneRefine": "Fertig — prüfe das Ergebnis, dann übernehmen oder weiter ändern.",
@@ -338,35 +320,18 @@ const DE: Record<string, string> = {
   "accept.asBlock": "Als Block",
   "accept.blockNeedsNote": "Ein Codeblock braucht eine offene Notiz. Öffne eine Notiz, oder übernimm als Datei.",
   "accept.invalid": "Das Ergebnis ist kein gültiges SVG: {0}",
-  "accept.notApplied": "{0}; nichts geschrieben.",
   "accept.unchanged": "Nichts zu übernehmen: Das Ziel hat schon diesen Inhalt.",
   "accept.cannotReplace": "Ein neues Bild ersetzt kein bestehendes Ziel; nichts geschrieben.",
   "accept.blockMoved": "Block geändert: Er wurde seit dem Öffnen des Panels verschoben oder gelöscht; nichts geschrieben.",
-  "accept.blockChanged": "Block geändert: Sein Inhalt weicht von dem ab, den das Panel geöffnet hat; nichts geschrieben.",
-  "accept.noteChanged": "Das Ziel hat sich beim Übernehmen geändert; nichts geschrieben. Versuche es noch einmal.",
-  "accept.closesFence": "Eine Zeile des Ergebnisses würde den Codeblock schließen; nichts geschrieben.",
-  "accept.blockInList": "Dieser Block steht in einer Liste; das Panel schreibt nur in Blöcke, die am Zeilenanfang stehen. Es wurde nichts geschrieben.",
-  "accept.cancelled": "Abgebrochen; nichts geschrieben.",
-  "accept.noNoteOpen": "Keine Notiz offen, in die ein Codeblock käme; nichts geschrieben.",
-  "accept.readingView": "Die Notiz steht im Lesemodus; nichts geschrieben. Stelle sie auf Bearbeiten.",
   "accept.applied": "Übernommen in {0}.",
   "accept.asBlock.cursor": "Codeblock am Cursor eingefügt.",
   "accept.asBlock.afterBlock": "Codeblock hinter dem Codeblock am Cursor eingefügt.",
   "accept.asBlock.afterSelection": "Codeblock hinter der Auswahl eingefügt.",
   "accept.asBlock.afterFrontmatter": "Codeblock hinter den Eigenschaften der Notiz eingefügt.",
-  "accept.appended": "Die Notiz steht im Lesemodus, deshalb steht der Codeblock am Ende der Notiz.",
-  "accept.fileGone": "{0} gibt es nicht mehr; nichts geschrieben.",
-  "accept.fileExists": "{0} gibt es schon; nichts geschrieben.",
-  "accept.couldNotCreate": "{0} ließ sich nicht anlegen: {1}",
-  "accept.savedRef": "{0} gespeichert, der Link steht am Cursor.",
   "accept.savedNoNote": "{0} gespeichert. Keine Notiz offen, deshalb kein Link.",
   "accept.savedReading": "{0} gespeichert. Die Notiz steht im Lesemodus; kein Link eingefügt.",
   "accept.savedNoteChanged": "{0} gespeichert. Die aktive Notiz hat inzwischen gewechselt; kein Link eingefügt.",
-  "accept.savedAppended": "{0} gespeichert. Die Notiz steht im Lesemodus, deshalb steht der Link am Ende der Notiz.",
-  "accept.savedRefFailed": "{0} gespeichert, aber der Link ließ sich nicht einfügen: {1}",
   "accept.unclosed": "Ein Codeblock in der Notiz wird nie geschlossen, das SVG käme in ihn hinein; nichts eingefügt.",
-  "accept.unclosedSel": "Die Auswahl endet in einem Codeblock, der nie geschlossen wird; nichts eingefügt.",
-  "accept.couldNotApply": "Übernehmen nicht möglich: {0}",
   "round.repair": "Reparatur",
   "round.names": "Namen vergeben",
   "round.cleanup": "Editor-Angaben entfernen",
@@ -589,33 +554,22 @@ export function measureTexts(): MeasureTexts {
 
 /** Die Meldungen von Übernehmen (Kit `panel-accept`). `notApplied` setzt den Schluss „nichts geschrieben“ hinter ein Problem; ein Satzpunkt am Ende wird vorher abgenommen. */
 export function acceptStrings(): AcceptStrings {
-  return {
-    unsupported: (label) => t("panel.unsupported", label),
-    notApplied: (problem) => t("accept.notApplied", problem.replace(/[.\s]+$/, "")),
+  // Standardtexte des Kits (obsidian-kit 0.111.0, `resolveAcceptStrings`); überlagert werden nur die Sätze, die fachlich SVG Studio gehören
+  // (MIGRATION § 0.111.0 Punkt 4): „ein neues Bild“ statt „ein neues Ergebnis“, und die Einfügestellen und Dateimeldungen in der Wortwahl des Plugins.
+  // `unclosedFence(false)` bleibt eigen: die Meldung kommt auch beim Anhängen ans Notizende im Lesemodus, wo kein Cursor im Spiel ist; der Satz des Kits
+  // nennt dann den Cursor (Test „Lesemodus, die Notiz endet in einem offenen Zaun“, Review C4). Mit Auswahl gilt der Satz des Kits.
+  const base = resolveAcceptStrings({ lang: getLang() });
+  return resolveAcceptStrings({
+    lang: getLang(),
+    unclosedFence: (selected) => (selected ? base.unclosedFence(true) : t("accept.unclosed")),
     unchanged: t("accept.unchanged"),
     cannotReplace: t("accept.cannotReplace"),
     blockMoved: t("accept.blockMoved"),
-    blockChanged: t("accept.blockChanged"),
-    noteChanged: t("accept.noteChanged"),
-    closesFence: t("accept.closesFence"),
-    blockInList: t("accept.blockInList"),
-    cancelled: t("accept.cancelled"),
-    noNoteOpen: t("accept.noNoteOpen"),
-    noteInReadingView: t("accept.readingView"),
     appliedTo: (label) => t("accept.applied", label),
     appliedAsBlock: (where) =>
       t(where === "at-cursor" ? "accept.asBlock.cursor" : where === "after-selection" ? "accept.asBlock.afterSelection" : where === "after-frontmatter" ? "accept.asBlock.afterFrontmatter" : "accept.asBlock.afterBlock"),
-    appendedToNote: t("accept.appended"),
-    fileGone: (path) => t("accept.fileGone", path),
-    fileExists: (path) => t("accept.fileExists", path),
-    couldNotCreate: (path, reason) => t("accept.couldNotCreate", path, reason),
-    savedFileWithReference: (path) => t("accept.savedRef", path),
     savedFileNoReference: (path, why) => t(why === "no-note" ? "accept.savedNoNote" : why === "reading" ? "accept.savedReading" : "accept.savedNoteChanged", path),
-    savedFileAppended: (path) => t("accept.savedAppended", path),
-    savedFileReferenceFailed: (path, reason) => t("accept.savedRefFailed", path, reason),
-    unclosedFence: (selected) => t(selected ? "accept.unclosedSel" : "accept.unclosed"),
-    couldNotApply: (reason) => t("accept.couldNotApply", reason),
-  };
+  });
 }
 
 /** Ein Problem des Kerns als Satz in der Sprache des Plugins; eine Rundennummer stellt „Runde n:“ voran. `null`-Parameter heißen „nicht gesetzt“. */
